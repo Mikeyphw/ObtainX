@@ -64,6 +64,12 @@ jobs:
           set -euo pipefail
           flutter pub get
           flutter analyze integration_test lib test
+      - name: Compile and validate disposable APK fixtures before emulator boot
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B scripts/ci/r02_rt02_fixture.py --out "$RUNNER_TEMP/obtainx-rt02/fixtures"
+          test -s "$RUNNER_TEMP/obtainx-rt02/fixtures/fixture_inventory.json"
       - name: Real Android standalone and split install sessions
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # pinned
         with:
@@ -76,7 +82,7 @@ jobs:
           disk-size: 3072M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: bash -c 'set -euo pipefail; python3 -B scripts/ci/r02_rt02_fixture.py --out "$RUNNER_TEMP/obtainx-rt02/fixtures"; python3 -B scripts/ci/r02_rt02_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02"'
+          script: bash -c 'set -euo pipefail; python3 -B scripts/ci/r02_rt02_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02"'
       - name: Independently verify exact source-bound RT02 receipts
         shell: bash
         run: |

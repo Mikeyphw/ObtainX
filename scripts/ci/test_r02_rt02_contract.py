@@ -115,4 +115,52 @@ class ReceiptAndPackageProof(unittest.TestCase):
         self.assertEqual(F.PKG,H.FIXTURE)
         self.assertEqual(set(F.NAMES),{'base_v1.apk','base_v2.apk','config.x86_64.apk'})
 
+
+class RT02FixtureManifestRegression(unittest.TestCase):
+    def test_config_split_targets_base_without_invalid_attribute(self):
+        manifest=F.fixture_manifest(2, True)
+        self.assertIn('split="config.x86_64"',manifest)
+        self.assertIn('android:versionCode="2"',manifest)
+        self.assertNotIn('configForSplit',manifest)
+        self.assertNotIn('android:isFeatureSplit',manifest)
+
+    def test_standalone_manifest_has_no_split_identity(self):
+        for version in (1,2):
+            manifest=F.fixture_manifest(version, False)
+            self.assertNotIn('split="', manifest)
+            self.assertNotIn('configForSplit', manifest)
+            self.assertIn(f'android:versionCode="{version}"', manifest)
+        with self.assertRaises(RuntimeError):
+            F.fixture_manifest(1, True)
+        with self.assertRaises(RuntimeError):
+            F.fixture_manifest(3, False)
+
+    def test_namespaced_config_for_split_is_refused(self):
+        import inspect
+        # Mutation must be injected into generator source, not documentation.
+        with tempfile.TemporaryDirectory(prefix='ox-rt02-fixture-mut-') as td:
+            root=Path(td)
+            for rel in C.PATHS:
+                dst=root/rel;dst.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(ROOT/rel,dst)
+            f=root/C.FIXTURE
+            old="'split=\"config.x86_64\" ' if split else ''"
+            new="'split=\"config.x86_64\" android:configForSplit=\"base\" ' if split else ''"
+            self.assertIn(old,f.read_text())
+            f.write_text(f.read_text().replace(old,new,1))
+            self.assertTrue(any('invalid configForSplit' in e for e in C.inspect(root)))
+
+    def test_fixture_preflight_is_mandatory(self):
+        with tempfile.TemporaryDirectory(prefix='ox-rt02-fixture-ci-mut-') as td:
+            root=Path(td)
+            for rel in C.PATHS:
+                dst=root/rel;dst.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(ROOT/rel,dst)
+            f=root/C.WORKFLOW
+            anchor='- name: Compile and validate disposable APK fixtures before emulator boot'
+            self.assertIn(anchor,f.read_text())
+            f.write_text(f.read_text().replace(anchor,'- name: Skip fixture preflight',1))
+            self.assertTrue(any('pre-emulator hard gate' in e for e in C.inspect(root)))
+
+
 if __name__=='__main__':unittest.main()

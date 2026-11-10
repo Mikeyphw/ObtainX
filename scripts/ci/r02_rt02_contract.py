@@ -104,6 +104,26 @@ def inspect(root:Path=ROOT)->list[str]:
         errors.append('independent receipt verification lacks exact two-session proof')
     if "'status':'NOT_RUN'" not in host or "v['status']='FAILED'" not in host:
         errors.append('no fail-closed RT02 status lifecycle')
+    # AAPT2 cannot resolve android:configForSplit; for a base-targeting
+    # config split omit configForSplit entirely and keep only split identity.
+    if 'android:configForSplit="' in fixture or 'configForSplit="base"' in fixture:
+        errors.append('fixture declares an invalid configForSplit attribute')
+    if ('def fixture_manifest(version: int, split: bool) -> str:' not in fixture
+            or "'split=\"config.x86_64\" ' if split else ''" not in fixture
+            or "manifest.write_text(fixture_manifest(version, split), encoding='utf-8')" not in fixture):
+        errors.append('fixture manifest must use checked base-targeting split generator')
+    for name in ('test_config_split_targets_base_without_invalid_attribute',
+                 'test_standalone_manifest_has_no_split_identity',
+                 'test_namespaced_config_for_split_is_refused',
+                 'test_fixture_preflight_is_mandatory'):
+        if name not in files[TEST]:
+            errors.append('stale RT02 fixture regression missing: ' + name)
+    if ('- name: Compile and validate disposable APK fixtures before emulator boot' not in w
+            or 'test -s "$RUNNER_TEMP/obtainx-rt02/fixtures/fixture_inventory.json"' not in w):
+        errors.append('RT02 fixture build must be a separate pre-emulator hard gate')
+    if (w.count('python3 -B scripts/ci/r02_rt02_fixture.py --out') != 1
+            or "script: bash -c 'set -euo pipefail; python3 -B scripts/ci/r02_rt02_hosted.py run" not in w):
+        errors.append('fixture generation must occur exactly once before the emulator')
     if 'setMockMethodCallHandler' in dart or 'mockito' in dart:
         errors.append('platform installer must never be mocked in real acceptance')
     if re.search(r'(?i)gh\s+release\s+create|flutter\s+build\s+apk.*--release',w):

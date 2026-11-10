@@ -30,6 +30,25 @@ def command(*args: str) -> str:
     return p.stdout
 
 
+
+def fixture_manifest(version: int, split: bool) -> str:
+    """Generate Android's native split identity; target the base implicitly.
+
+    configForSplit is an *un-namespaced* manifest attribute for a named feature
+    split. It is not android:configForSplit and is not needed when targeting
+    the base package: Android's split dependency parser defaults to base.
+    """
+    need(version in (1, 2) and (not split or version == 2),
+         'Unsupported disposable fixture identity')
+    attributes = (f'package="{PKG}" android:versionCode="{version}" '
+                  + ('split="config.x86_64" ' if split else ''))
+    return ('<?xml version="1.0" encoding="utf-8"?>\n'
+            '<manifest xmlns:android="http://schemas.android.com/apk/res/android" '
+            + attributes + '>\n'
+            '<uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/>\n'
+            '<application android:hasCode="false" android:label="ObtainX RT02 Fixture"/>\n'
+            '</manifest>\n')
+
 def signed_fixture(out: Path) -> dict:
     need(out.is_absolute() and out.exists() and out.is_dir(), 'fixture output path must exist and be absolute')
     need(os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('RUNNER_OS') == 'Linux',
@@ -54,14 +73,7 @@ def signed_fixture(out: Path) -> dict:
         for version, split, name in ((1,False,'base_v1.apk'), (2,False,'base_v2.apk'),
                                      (2,True,'config.x86_64.apk')):
             manifest = out/(name+'.xml')
-            attributes = (f'package="{PKG}" android:versionCode="{version}" '
-                          + ('split="config.x86_64" android:configForSplit="base" ' if split else ''))
-            manifest.write_text('<?xml version="1.0" encoding="utf-8"?>\n'
-                '<manifest xmlns:android="http://schemas.android.com/apk/res/android" '
-                + attributes + '>\n'
-                '<uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/>\n'
-                '<application android:hasCode="false" android:label="ObtainX RT02 Fixture"/>\n'
-                '</manifest>\n', encoding='utf-8')
+            manifest.write_text(fixture_manifest(version, split), encoding='utf-8')
             unsigned = out/(name+'.unsigned.apk')
             aligned = out/(name+'.aligned.apk')
             dest = out/name

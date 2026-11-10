@@ -23,6 +23,8 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Run bootstrap regression tests
-        run: python3 -m unittest discover -s scripts/ci -p 'test_r00_*.py' -v
+        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
       - name: Enforce R00 source/security contracts
         run: python3 scripts/ci/r00_source_contract.py --check
+      - name: Enforce R01 archive/signing source contracts
+        run: python3 scripts/ci/r01_security_contract.py --check

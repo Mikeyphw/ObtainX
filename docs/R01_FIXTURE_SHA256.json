@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "files": {
+    "absolute.zip": "8f2199d5c2a03930d75dc64760fceba797691e8cc57ca8b53a9e1133a495a891",
+    "backslashes.zip": "dd1efd43966e1afaec7e5daf87880294e645b06ec876ba970c0a3d071c349b14",
+    "bad.zip": "a90877b716582c036052f8b70ed0e9a60464ad21daa00ed4c77d2f478ca16239",
+    "collision.zip": "b946f4c1afea5d729f7ae9d90c1eae359a9d893510e7bfcf59c8f5c4a40d2659",
+    "combined_size.zip": "f5d8948686914c01cbde1399f560704784795924e268c2d1f60c9991da40a11a",
+    "crc_mismatch.zip": "f243e5615ac5741ba99bdae826c4b7cae21bf8636aae4404785f130dab7e38c5",
+    "duplicate.zip": "64e682273fe2c729820ff64ecc3af8d0368cc7df264d7a23f3b500fef4c8edd4",
+    "large.tar.gz": "c2ae65b5ebf266f46e09b8b7a752e3be716cbdb1ff5638201fbd50c3ecc83900",
+    "large.zip": "3cb4040608c50530f1ee19cd1e8a0c46d722ecc22b5c4703819f2a24c486f6e3",
+    "nested.zip": "2952728085092bd561a315064db96dc21460dc655e477ab47ae469ce453c2aff",
+    "symlink.tar.gz": "7f943f21734c9b63374f2a7236e573ab4ba450375bd88d5973208ec2a3d67ec5",
+    "symlink.zip": "45f511b9fd78107b0c3b62359e1cf6ea85876babb8e663fa0e184c0fe1f80e5e",
+    "too_many.zip": "a9ccc88efe5db56905e421134489c7529bd8b25c042bdb87483c71a7abf28d1b",
+    "traversal.tar.gz": "a24c5b0e1806a72fc23437fd32ff1c8ea6001deb2a45f2c26087dbbb3d8e78fe",
+    "traversal.zip": "849209ce15296762a95e61e0f49f8ee4a228d62c58db898abea48b2aef52fdd4",
+    "valid.tar.bz2": "0a39fe0c49d2ade25657291f722c787190b050d3a2286727f3067a60c72098dd",
+    "valid.tar.gz": "54c421c790f674f7ff79852ff3fa252d03a19676d6b71ad0c7a1292aecca91f6",
+    "valid.tar.raw": "9fe10932d7da7100989ccaa164f7002b3699128cfdb1c26c6cf1761dd2fc80a2",
+    "valid.tar.xz": "a99da00ff68b36b18b82ecf6dc26dafb46d4ba4960bb299c7c1f4d1ed7c233b5",
+    "valid.zip": "b1d2b04e58586e53e04e8fb97ade15444c21842223d6e9d4abcff761b3e616eb",
+    "windows_drive.zip": "eccd141b786fd70a4f7a45dcb0d3cb828c804bdc5a40de28a4f32cd16c55884e"
+  }
+}

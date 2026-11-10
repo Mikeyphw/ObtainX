@@ -206,7 +206,7 @@ InstallBundlePlan resolveInstallBundlePlan({
       throw const FormatException('No compatible ABI configuration split');
     }
   }
-  final selectedConfig = [...nonAbi, if (abiMember != null) abiMember]
+  final selectedConfig = [...nonAbi, ?abiMember]
     ..sort((a, b) => a.path.compareTo(b.path));
   return InstallBundlePlan(
     packageName: packageName,

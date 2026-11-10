@@ -864,8 +864,7 @@ extension AppsProviderInstall on AppsProvider {
       }
       // Deduced icons are only ever read for apps that aren't installed yet, so
       // skip the extraction cost entirely on ordinary updates to installed apps.
-      if (parsedArchivePath != null &&
-          apps[resolvedAppId]?.installedInfo == null) {
+      if (apps[resolvedAppId]?.installedInfo == null) {
         await storeIconFromApkArchive(resolvedAppId, parsedArchivePath);
       }
       // Delete older versions of the file if any (keyed to the resolved id,

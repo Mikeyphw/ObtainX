@@ -14,7 +14,7 @@ const kZipExt = 'zip';
 
 /// Multi-part tarball suffixes. Matched against the full path because
 /// `split('.').last` cannot capture e.g. `.tar.gz`.
-const kTarballSuffixes = ['.tar.gz', '.tgz', '.tar.bz2', '.tar.xz'];
+const kTarballSuffixes = ['.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tar.xz'];
 
 bool _ends(String path, String ext) => path.toLowerCase().endsWith('.$ext');
 

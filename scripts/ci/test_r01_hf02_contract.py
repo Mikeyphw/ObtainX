@@ -37,7 +37,17 @@ class HF02(unittest.TestCase):
         self.mutate(C.WORKFLOW,'flutter test --no-pub --reporter expanded','echo skipped')
         self.assertTrue(C.inspect(self.root))
     def test_unconditional_golden_updates_refused(self):
-        self.mutate(C.WORKFLOW,'if: ${{ failure() }}','if: ${{ always() }}')
+        self.mutate(C.WORKFLOW,
+                    "if: ${{ failure() && steps.full_flutter_tests.outcome == 'failure' }}",
+                    'if: ${{ always() }}')
+        self.assertTrue(C.inspect(self.root))
+    def test_golden_triage_after_analyzer_failure_refused(self):
+        self.mutate(C.WORKFLOW,
+                    "steps.full_flutter_tests.outcome == 'failure'",
+                    "steps.analyze.outcome == 'failure'")
+        self.assertTrue(C.inspect(self.root))
+    def test_full_suite_step_id_removal_refused(self):
+        self.mutate(C.WORKFLOW, 'id: full_flutter_tests', 'id: unrelated_stage')
         self.assertTrue(C.inspect(self.root))
     def test_golden_matchers_must_remain(self):
         self.mutate('test/apps_scroll_work_test.dart','matchesGoldenFile(','neverMatch(',)

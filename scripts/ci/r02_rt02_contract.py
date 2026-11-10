@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""RT02 A fail-closed source/stale-test contract; NOT a runtime pass."""
+from __future__ import annotations
+import argparse
+import ast
+from pathlib import Path
+import re
+
+ROOT=Path(__file__).resolve().parents[2]
+WORKFLOW='.github/workflows/obtainx-r02-rt02.yml'
+R00='scripts/ci/r00_source_contract.py'
+R00_TEST='scripts/ci/test_r00_source_contract.py'
+SOURCE_GATE='.github/workflows/obtainx-r00-contracts.yml'
+DART='integration_test/r02_real_installer_test.dart'
+HOST='scripts/ci/r02_rt02_hosted.py'
+FIXTURE='scripts/ci/r02_rt02_fixture.py'
+TEST='scripts/ci/test_r02_rt02_contract.py'
+DOC='docs/R02_RT02_REAL_INSTALL_GATE.md'
+PUBSPEC='pubspec.yaml'
+PATHS=(WORKFLOW,R00,R00_TEST,SOURCE_GATE,DART,HOST,FIXTURE,TEST,DOC,PUBSPEC)
+
+
+def _functions(source:str)->dict[str,str]:
+    tree=ast.parse(source)
+    lines=source.splitlines()
+    return {node.name:'\n'.join(lines[node.lineno-1:node.end_lineno])
+            for node in tree.body if isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef))}
+
+
+def inspect(root:Path=ROOT)->list[str]:
+    errors=[];files={}
+    for path in PATHS:
+        p=root/path
+        if not p.is_file():
+            errors.append('missing required file: '+path);files[path]=''
+        else:
+            files[path]=p.read_text('utf-8')
+    w=files[WORKFLOW];r00=files[R00];r00test=files[R00_TEST]
+    host=files[HOST];fixture=files[FIXTURE];dart=files[DART];docs=files[DOC]
+    requirements={
+        R00:("'obtainx-r02-rt02.yml'",'unexpected = names - EXPECTED_WORKFLOWS',
+             'missing = EXPECTED_WORKFLOWS - names','errors.extend(check_workflows(workflows))'),
+        R00_TEST:('test_reviewed_rt02_required_and_release_is_still_prohibited',
+                  "del omitted['obtainx-r02-rt02.yml']",'rogue-release.yml'),
+        SOURCE_GATE:('run: python3 scripts/ci/r02_rt02_contract.py --check',),
+        PUBSPEC:('integration_test:', 'sdk: flutter'),
+        WORKFLOW:('permissions:\n  contents: read','persist-credentials: false',
+                  'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
+                  "python3 -B scripts/ci/r02_rt02_fixture.py --out",
+                  'python3 -B scripts/ci/r02_rt02_hosted.py run --out',
+                  'python3 -B scripts/ci/r02_rt02_hosted.py verify --out',
+                  'flutter analyze integration_test lib test',
+                  'test -c /dev/kvm', "'system-images;android-36;google_apis;x86_64'",
+                  'ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d',
+                  'api-level: 36','target: google_apis','arch: x86_64',
+                  'if: always()', 'rt02-receipt.json','fixture_inventory.json',
+                  'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'),
+        DART:("IntegrationTestWidgetsFlutterBinding.ensureInitialized()",
+              'StockInstaller(SettingsProvider()).installApk(',
+              'resolveInstallBundlePlan(',"expectedPackageName:packageName",
+              "sha256.convert(data).toString() != expected",
+              "scenario == 'split' ? 2 : 1", "result.isSuccess, isTrue",
+              "format:scenario == 'standalone' ? InstallArtifactFormat.apk : InstallArtifactFormat.apks"),
+        FIXTURE:("PKG = 'dev.bikram.obtainx.rt02.fixture'",'secrets.token_hex',
+                 "'keytool', '-genkeypair'", "str(aapt2), 'link'",
+                 "str(zipalign), '-f'", "str(signer), 'sign'",
+                 "str(signer), 'verify'", "key.unlink(missing_ok=True)",
+                 "('base_v1.apk', 'base_v2.apk', 'config.x86_64.apk')",
+                 "'signed_with_ephemeral_ci_key':True"),
+        HOST:("APP='dev.bikram.obtainx.debug'", "FIXTURE='dev.bikram.obtainx.rt02.fixture'",
+              "SERIAL='emulator-5554'",'identity_check()',
+              "adb('shell','getprop','ro.kernel.qemu')=='1'",
+              "adb('shell','getprop','ro.build.version.sdk')=='36'",
+              "'flutter','test'", "'--flavor','normal'",
+              "scenario in ('standalone','split')",
+              "_tap_confirmed_install_dialog()",
+              'APPROVERS=', 'NAME=',
+              "label in ('Install','Update','Install app','Update app')",
+              "tap_count==1", "'All tests passed!' in text",
+              "installed_state(1 if scenario=='standalone' else 2",
+              "'shell','sha256sum'", "'shell','pm','path'",
+              "'status']='PASS_TWO_ANDROID_SYSTEM_SESSIONS'",
+              "'full_r02_matrix_qualified':False",
+              "'physical_device_qualified':False",
+              "'release_qualified':False", "'publication_allowed':False",
+              "'action',choices=['run','verify']"),
+        DOC:('NOT full R02 runtime-matrix acceptance','No releases','No merges',
+             'Cinderbox-Companion','eee62aa6d0b6eadec5543d6ed0ee67e3fc57e373'),
+    }
+    for path,needles in requirements.items():
+        for needle in needles:
+            if needle not in files[path]:errors.append(path+': required contract missing: '+needle)
+    if not re.search(r'(?m)^  integration_test:\s*\n    sdk: flutter\s*$', files[PUBSPEC]):
+        errors.append('pubspec Flutter integration_test SDK dependency not configured')
+    for label in ("'full_r02_matrix_qualified':False", "'release_qualified':False",
+                  "'physical_device_qualified':False", "'publication_allowed':False"):
+        if host.count(label) != 2:
+            errors.append('runtime gate false admission flag missing in initial receipt: '+label)
+    # The verification must be source-bound and require both distinct scenarios.
+    if "for scenario in ('standalone','split')" not in host:
+        errors.append('real installer host must execute both actual Android sessions')
+    if "need(v.get('scenarios')==[" not in host:
+        errors.append('independent receipt verification lacks exact two-session proof')
+    if "'status':'NOT_RUN'" not in host or "v['status']='FAILED'" not in host:
+        errors.append('no fail-closed RT02 status lifecycle')
+    if 'setMockMethodCallHandler' in dart or 'mockito' in dart:
+        errors.append('platform installer must never be mocked in real acceptance')
+    if re.search(r'(?i)gh\s+release\s+create|flutter\s+build\s+apk.*--release',w):
+        errors.append('CI must not publish or build release')
+    if re.search(r'(?m)^\s+(?:contents|pull-requests|actions|issues|id-token):\s*write\s*$',w):
+        errors.append('CI write permission forbidden')
+    try:
+        hf=_functions(host);ff=_functions(fixture)
+        for name,needles in {
+            'installed_state': ('sha_file(fixture_dir/', "'shell','sha256sum'", "digest[0]==expected[name]", "str(expected_version) in matches", "'shell','dumpsys','package'"),
+            'one_scenario': ('flutter', "tap_count==1", "'All tests passed!' in text"),
+            '_tap_confirmed_install_dialog': ('APPROVERS',"NAME in", "label in ('Install','Update'"),
+            'execute': ("for scenario in ('standalone','split')", "'status']='PASS_TWO_ANDROID_SYSTEM_SESSIONS'"),
+            'verify': ("'status':'PASS_TWO_ANDROID_SYSTEM_SESSIONS'", "'scenarios')==["),
+        }.items():
+            body=hf.get(name,'')
+            for needle in needles:
+                if needle not in body:errors.append('host proof bypassed: '+name+' / '+needle)
+        if 'key.unlink(missing_ok=True)' not in ff.get('signed_fixture',''):
+            errors.append('ephemeral signing key deletion bypassed')
+    except SyntaxError:
+        errors.append('host or fixture Python syntax invalid')
+    return errors
+
+
+def main():
+    ap=argparse.ArgumentParser();ap.add_argument('--check',action='store_true');ap.parse_args()
+    errors=inspect()
+    for e in errors:print('OX_R02_RT02_CONTRACT_REFUSED: '+e)
+    if errors:return 1
+    print('OX_R02_RT02_SOURCE_CONTRACT_PASS: real installer scoped; runtime not performed')
+    return 0
+if __name__=='__main__':raise SystemExit(main())

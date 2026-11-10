@@ -89,3 +89,29 @@ non-top activity records, missing/stale PID and bypass mutations.
 **No test is weakened.** This is still emulator bootstrap only; actual
 ObtainX-driven split installation (RT02), physical-device acceptance, release
 and publication remain unqualified.
+
+## RT01 HF04 — API 36 startup stabilization and failure evidence
+
+On 2026-11-10, run `42888027381` at commit
+`f87f14a78c53d6ad3002e132b3770e5c91b46796` passed source, Flutter,
+KVM, SDK, APK installation and exact installed-byte verification. It failed
+*after* `am start -W` reported `Status: timeout` and the first foreground
+observation was lost five seconds later. That observation alone cannot prove
+whether a first-run system dialog, an app crash, or a transient task transition
+was responsible.
+
+HF04 follows Cinderbox-Companion's hosted real-activity-evidence approach:
+launch without Android's `-W` cold-start ten-second status timeout, require
+repeated exact real resumed/focused `MainActivity` observations tied to a stable
+PID, and allow **at most one** explicit task re-foregrounding while the same
+process is still alive. A perpetual permission dialog, unrelated foreground,
+process restart, ambiguous ADB reply or missing device proof still fails.
+Screenshot capture requires a final app-foreground observation before **and
+after** capture, with exact installed APK SHA-256. A failing run records only
+an allowlisted source-bound failure category, never raw device/account logs,
+and never uploads an `app_launch.png` labelled success. Existing production,
+split-install and release denials remain mandatory.
+
+Hosted emulator execution remains pending until the new source commit is
+pushed and GitHub Actions completes successfully. RT01 is **NOT** RT02
+ObtainX-driven split-install E2E qualification.

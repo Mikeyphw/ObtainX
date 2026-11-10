@@ -80,7 +80,7 @@ class R02Api36SafetyContracts(unittest.TestCase):
     def test_stdout_errors_must_be_visible(self):
         self.mutate(audit.SMOKE, "or result.stdout.decode(errors='replace').strip()", "or ''")
     def test_foreground_activity_proof_not_skippable(self):
-        self.mutate(audit.SMOKE, "activity_proof in ('resumed', 'focused')", 'True')
+        self.mutate(audit.SMOKE, "proof in ('resumed', 'focused')", 'True')
     def test_foreground_activity_state_must_be_queried(self):
         self.mutate(audit.SMOKE, "adb('shell', 'dumpsys', 'activity', 'activities'", "adb('shell', 'getprop', 'ro.product.brand'")
     def test_foreground_window_state_must_be_queried(self):
@@ -91,6 +91,25 @@ class R02Api36SafetyContracts(unittest.TestCase):
         self.mutate(audit.SMOKE, "observe_main_activity() in ('resumed', 'focused')", 'True')
     def test_receipt_foreground_proof_mandatory(self):
         self.mutate(audit.SMOKE, "data.get('activity_proof') in ('resumed', 'focused')", 'True')
+
+    def test_no_wait_start_requires_actual_device_proof(self):
+        self.mutate(audit.SMOKE, "adb('shell', 'am', 'start', '-n', COMPONENT", "adb('shell', 'am', 'start', '-W', '-n', COMPONENT")
+    def test_stable_foreground_cannot_be_one_sample(self):
+        self.mutate(audit.SMOKE, 'stable_observations >= 4', 'stable_observations >= 1')
+    def test_second_foreground_check_mandatory(self):
+        self.mutate(audit.SMOKE, "if observe_main_activity() not in ('resumed', 'focused'):", 'if False:')
+    def test_bounded_recovery_cannot_be_unlimited(self):
+        self.mutate(audit.SMOKE, 'index == 11 and pid and not refocus_attempted', 'index >= 11 and pid')
+    def test_process_restart_during_stabilization_refused(self):
+        self.mutate(audit.SMOKE, 'if pid and pid != current:', 'if False:')
+    def test_invalid_foreground_receipt_denied(self):
+        self.mutate(audit.SMOKE, "'stable_foreground_observations': 4,", "'stable_foreground_observations': 1,")
+    def test_failure_receipt_must_remain_nonqualifying(self):
+        self.mutate(audit.SMOKE, "receipt.update(status='FAILED', failure_category=category,", "receipt.update(status='PASS', failure_category=category,")
+    def test_failure_cannot_keep_success_screenshot(self):
+        self.mutate(audit.SMOKE, "(out / 'app_launch.png').unlink(missing_ok=True)", "pass  # ignored bad screenshot")
+    def test_missing_failure_evidence_refused(self):
+        self.mutate(audit.SMOKE, "write_failed_evidence(args.out, str(exc))", "pass # no failed receipt")
 
 class R02Api36FreshPackageProof(unittest.TestCase):
     """Reproduce API36 pm path's absent-package exit and verify fail-closed proof."""
@@ -222,7 +241,9 @@ class R02Api36ActivityProof(unittest.TestCase):
                 if args==('shell','pm','path',smoke.PACKAGE):return 'package:/data/app/fixture/base.apk'
                 if args==('shell','sha256sum','/data/app/fixture/base.apk'):
                     return sha+'  /data/app/fixture/base.apk'
-                if args==('shell','am','start','-W','-n',smoke.COMPONENT):return start
+                if args==('shell','am','start','-n',smoke.COMPONENT):return start
+                if args==('shell','dumpsys','activity','activities'):return ''
+                if args==('shell','dumpsys','window','windows'):return ''
                 if args==('exec-out','screencap','-p'):return png
                 raise AssertionError('unexpected device command '+str(args))
             def fake_call(*args,**kwargs):
@@ -249,6 +270,90 @@ class R02Api36ActivityProof(unittest.TestCase):
         self.emulate_launch('', 'Status: ok\nComplete')
 
 
+
+
+class R02Api36StartupStability(unittest.TestCase):
+    def test_first_run_foreground_transition_regains_stable_app(self):
+        # Real-world: first activity resumes, Android system UI temporarily
+        # takes focus, then Flutter returns and remains in foreground.
+        observations = iter(['resumed', '', 'focused', 'focused', 'focused', 'focused', 'focused', 'focused'])
+        with patch.object(smoke,'query_main_pid',return_value='4231'), \
+             patch.object(smoke,'observe_main_activity',side_effect=lambda: next(observations)), \
+             patch.object(smoke.time,'sleep',return_value=None):
+            pid, state, retried = smoke.wait_for_stable_main_activity('Starting: Intent')
+        self.assertEqual(pid,'4231')
+        self.assertEqual(state,'focused')
+        self.assertFalse(retried)
+
+    def test_one_bounded_relaunch_for_stuck_first_run(self):
+        seen = {'relaunch':0,'samples':0}
+        def proof():
+            seen['samples'] += 1
+            return 'resumed' if seen['relaunch'] else ''
+        def relaunch(*,recovery=False):
+            self.assertTrue(recovery)
+            seen['relaunch'] += 1
+            return 'Starting: Intent'
+        with patch.object(smoke,'query_main_pid',return_value='4231'), \
+             patch.object(smoke,'observe_main_activity',side_effect=proof), \
+             patch.object(smoke,'start_main_activity',side_effect=relaunch), \
+             patch.object(smoke.time,'sleep',return_value=None):
+            pid, state, retried = smoke.wait_for_stable_main_activity('Starting: Intent')
+        self.assertEqual(pid,'4231')
+        self.assertEqual(state,'resumed')
+        self.assertTrue(retried)
+        self.assertEqual(seen['relaunch'],1)
+
+    def test_permanent_other_foreground_refused_even_if_pid_lives(self):
+        with patch.object(smoke,'query_main_pid',return_value='4231'), \
+             patch.object(smoke,'observe_main_activity',return_value=''), \
+             patch.object(smoke,'last_foreground_category',return_value='permission_controller'), \
+             patch.object(smoke,'start_main_activity',return_value='Starting'), \
+             patch.object(smoke.time,'sleep',return_value=None):
+            with self.assertRaisesRegex(smoke.Refused,'last_focus=permission_controller'):
+                smoke.wait_for_stable_main_activity('Starting: Intent')
+
+    def test_process_restart_after_initial_foreground_refused(self):
+        with patch.object(smoke,'query_main_pid',side_effect=['4231','4232']), \
+             patch.object(smoke,'observe_main_activity',return_value='resumed'), \
+             patch.object(smoke.time,'sleep',return_value=None):
+            with self.assertRaisesRegex(smoke.Refused,'restarted'):
+                smoke.wait_for_stable_main_activity('Starting: Intent')
+
+    def test_perpetually_missing_pid_refused(self):
+        with patch.object(smoke,'query_main_pid',return_value=''), \
+             patch.object(smoke.time,'sleep',return_value=None):
+            with self.assertRaisesRegex(smoke.Refused,'never started'):
+                smoke.wait_for_stable_main_activity('Starting: Intent')
+
+    def test_permission_controller_classification_is_not_main_proof(self):
+        foreground='mCurrentFocus=Window{a u0 com.android.permissioncontroller/.GrantPermissionsActivity}'
+        self.assertEqual(smoke.classify_main_window('', foreground),'permission_controller')
+        self.assertEqual(smoke.main_activity_proof('', foreground),'')
+
+    def test_cinderbox_style_failure_receipt_does_not_claim_pass(self):
+        with tempfile.TemporaryDirectory() as td:
+            out=Path(td)
+            receipt={'schema':1,'status':'NOT_RUN','source_sha':'a'*40,'run_id':'123',
+                     'split_install_e2e_qualified':False,'release_qualified':False}
+            (out/'receipt.json').write_text(json.dumps(receipt))
+            (out/'app_launch.png').write_bytes(b'not a success image')
+            smoke.write_failed_evidence(out,'MainActivity lost foreground')
+            failed=json.loads((out/'receipt.json').read_text())
+            self.assertEqual(failed['status'],'FAILED')
+            self.assertEqual(failed['failure_category'],'RUNTIME_REFUSED')
+            self.assertFalse(failed['release_qualified'])
+            self.assertFalse(failed['split_install_e2e_qualified'])
+            self.assertFalse((out/'app_launch.png').exists())
+
+    def test_nonwait_launch_alone_is_not_runtime_acceptance(self):
+        with patch.object(smoke,'adb',return_value='Starting: Intent') as fake:
+            self.assertEqual(smoke.start_main_activity(),'Starting: Intent')
+            fake.assert_called_once_with('shell','am','start','-n',smoke.COMPONENT,timeout=45)
+        with patch.object(smoke,'adb',return_value='Error: Activity class does not exist'):
+            with self.assertRaises(smoke.Refused):
+                smoke.start_main_activity()
+
 class R02Api36ReceiptProof(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(prefix='ox-api36-receipt-')
@@ -267,6 +372,7 @@ class R02Api36ReceiptProof(unittest.TestCase):
             'emulator_abi':'x86_64','emulator_serial':smoke.SERIAL,
             'package':smoke.PACKAGE,'activity':smoke.COMPONENT,
             'activity_proof':'resumed','foreground_activity_verified':True,
+            'stable_foreground_observations':4,'refocus_attempted':False,
             'app_apk_sha256':self.app_sha,'installed_apk_sha256':self.app_sha,
             'debug_certificate_sha256':self.cert,
             'app_launch_png_sha256':hashlib.sha256(self.png).hexdigest(),

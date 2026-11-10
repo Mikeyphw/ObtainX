@@ -138,6 +138,131 @@ def stage(label: str) -> None:
     print('OX_R02_API36_STAGE='+label, flush=True)
 
 
+def classify_main_window(activities: str, windows: str) -> str:
+    """Return only an allowlisted category, never private window content."""
+    if main_activity_proof(activities, windows):
+        return 'obtainx_main'
+    labels = '\n'.join(line for line in (activities + '\n' + windows).splitlines()
+                       if re.search(r'\b(?:topResumedActivity|mResumedActivity|ResumedActivity|mCurrentFocus|mFocusedApp|mFocusedWindow)\s*[:=]', line))
+    if re.search(r'com\.android\.permissioncontroller', labels):
+        return 'permission_controller'
+    if re.search(r'com\.android\.(?:launcher|quickstep)', labels):
+        return 'launcher'
+    if re.search(r'com\.android\.(?:systemui|settings)', labels):
+        return 'android_system'
+    if labels.strip():
+        return 'unrelated_foreground'
+    return 'no_foreground_record'
+
+
+def last_foreground_category() -> str:
+    activities = adb('shell', 'dumpsys', 'activity', 'activities', timeout=45)
+    windows = adb('shell', 'dumpsys', 'window', 'windows', timeout=45)
+    return classify_main_window(activities, windows)
+
+
+def start_main_activity(*, recovery: bool = False) -> str:
+    """Avoid am start -W's ten-second cold-start timeout on API 36.
+
+    This is only a launch *request*. Never accept its return as boot proof.
+    Cinderbox's hosted tests also depend on device-side execution evidence.
+    """
+    response = adb('shell', 'am', 'start', '-n', COMPONENT, timeout=45)
+    detail = launch_report(response)
+    label = 'OX_R02_API36_AM_REFOCUS_OUTPUT=' if recovery else 'OX_R02_API36_AM_START_OUTPUT='
+    print(label + (detail or '<empty>'), flush=True)
+    need(not re.search(r'(?im)^\s*(?:Error:|Exception|SecurityException|Failure \[)', response),
+         'Android activity manager rejected launch: ' + detail)
+    return detail
+
+
+def wait_for_stable_main_activity(start_detail: str) -> tuple[str, str, bool]:
+    """Require repeated real foreground observations with one bounded recovery.
+
+    A first-run permission UI or splash transition may temporarily replace the
+    activity as the system finishes launching Flutter. Never convert that
+    transition, a process restart, or a perpetual system dialog into success.
+    """
+    stage('VERIFY_MAIN_ACTIVITY_RESUMED')
+    pid = ''
+    stable_observations = 0
+    proof = ''
+    refocus_attempted = False
+    lost_after_proof = False
+    seen_positive = False
+    for index in range(24):
+        current = query_main_pid()
+        if current:
+            if pid and pid != current:
+                raise Refused('ObtainX process restarted during runtime qualification')
+            pid = current
+            state = observe_main_activity()
+            if state in ('resumed', 'focused'):
+                seen_positive = True
+                if lost_after_proof:
+                    # Starting a new continuous window after a UI transition.
+                    lost_after_proof = False
+                stable_observations += 1
+                proof = state
+                if stable_observations >= 4:
+                    break
+            else:
+                if stable_observations:
+                    lost_after_proof = True
+                stable_observations = 0
+                proof = ''
+        else:
+            if stable_observations:
+                lost_after_proof = True
+            stable_observations = 0
+            proof = ''
+        # Reassert focus just once, only when the verified original process is
+        # still alive. A restart cannot be hidden by restarting the app.
+        if index == 11 and pid and not refocus_attempted and stable_observations == 0:
+            stage('REASSERT_MAIN_ACTIVITY_ONCE')
+            need(query_main_pid() == pid, 'ObtainX process disappeared before re-focus')
+            start_main_activity(recovery=True)
+            refocus_attempted = True
+        if index < 23:
+            time.sleep(2)
+    need(bool(re.fullmatch(r'[0-9]+', pid)),
+         'ObtainX process never started; am start=' + start_detail)
+    if not (stable_observations >= 4 and proof in ('resumed', 'focused')):
+        raise Refused('MainActivity did not stabilize in foreground after bounded probes; '
+                      'last_focus=' + last_foreground_category() +
+                      '; seen_once=' + str(seen_positive))
+    # This is the final device-state check. An unrelated window, died process,
+    # or a screenshot of another app may never satisfy the bootstrap receipt.
+    need(query_main_pid() == pid, 'ObtainX process exited or restarted before capture')
+    if observe_main_activity() not in ('resumed', 'focused'):
+        raise Refused('MainActivity lost foreground before capture; last_focus=' + last_foreground_category())
+    return pid, proof, refocus_attempted
+
+
+def write_failed_evidence(out: Path, reason: str) -> None:
+    """Cinderbox-style fail-closed receipt: categorical, no raw device logs."""
+    path = receipt_path(out)
+    if not path.is_file():
+        return
+    try:
+        receipt = json.loads(path.read_text())
+        if receipt.get('status') != 'NOT_RUN':
+            return
+        # A failing run never emits a success screenshot or success receipt.
+        (out / 'app_launch.png').unlink(missing_ok=True)
+        permitted = ('MainActivity', 'process', 'ADB', 'Android', 'APK', 'launch',
+                     'emulator', 'device', 'package', 'activity', 'permission')
+        category = 'RUNTIME_REFUSED' if any(x.lower() in reason.lower() for x in permitted) else 'HOST_REFUSED'
+        receipt.update(status='FAILED', failure_category=category,
+                       hosted_emulator_only=True, physical_device_qualified=False,
+                       split_install_e2e_qualified=False,
+                       obtainx_installer_e2e_qualified=False,
+                       release_qualified=False, publication_allowed=False)
+        path.write_text(json.dumps(receipt, sort_keys=True, indent=2) + '\n')
+    except (OSError, ValueError):
+        pass
+
+
 def host_identity() -> tuple[str, str]:
     need(os.environ.get('GITHUB_ACTIONS') == 'true' and
          os.environ.get('RUNNER_OS') == 'Linux' and
@@ -206,45 +331,24 @@ def run_emulator(out: Path) -> None:
     need(len(installed_sha_text) == 2 and installed_sha_text[0] == apk_sha,
          'on-emulator installed bytes do not match CI-built artifact')
     stage('START_OBTAINX_MAIN_ACTIVITY')
-    start = adb('shell', 'am', 'start', '-W', '-n', COMPONENT, timeout=90)
-    start_detail = launch_report(start)
-    print('OX_R02_API36_AM_START_OUTPUT=' + (start_detail or '<empty>'), flush=True)
-    # adb/am has returned zero, but Android 16 sometimes reports a task-reuse
-    # warning or different Status/Complete syntax. Do not trust any banner:
-    # validate the running process AND current resumed/focused activity.
-    need(not re.search(r'(?im)^\s*(?:Error:|Exception|SecurityException|Failure \[)', start),
-         'Android activity manager rejected launch: ' + start_detail)
-    stage('VERIFY_MAIN_ACTIVITY_RESUMED')
-    pid = ''
-    activity_proof = ''
-    for _ in range(15):
-        current = query_main_pid()
-        if current:
-            if pid and pid != current:
-                raise Refused('ObtainX process restarted before foreground verification')
-            pid = current
-            activity_proof = observe_main_activity()
-            if activity_proof:
-                break
-        time.sleep(2)
-    need(bool(re.fullmatch(r'[0-9]+', pid)),
-         'ObtainX process never started; am start=' + start_detail)
-    need(activity_proof in ('resumed', 'focused'),
-         'No resumed/focused MainActivity observed; am start=' + start_detail)
-    time.sleep(5)
-    need(query_main_pid() == pid, 'ObtainX process exited or restarted unexpectedly')
-    need(observe_main_activity() in ('resumed', 'focused'),
-         'MainActivity did not remain foreground after process stability check')
+    start_detail = start_main_activity()
+    pid, activity_proof, refocus_attempted = wait_for_stable_main_activity(start_detail)
     print('OX_R02_API36_MAIN_ACTIVITY_DEVICE_PROOF=' + activity_proof, flush=True)
     stage('CAPTURE_EMULATOR_SCREENSHOT')
     image_bytes = adb('exec-out', 'screencap', '-p', binary=True, timeout=40)
     need(image_bytes.startswith(b'\x89PNG\r\n\x1a\n') and len(image_bytes) > 2000,
          'emulator screenshot invalid')
+    # Cinderbox's evidence pattern: the captured image must be bound to the
+    # same verified, living foreground task, not a subsequent system overlay.
+    need(query_main_pid() == pid, 'ObtainX process disappeared after screenshot')
+    need(observe_main_activity() in ('resumed', 'focused'),
+         'ObtainX lost foreground after screenshot')
     image_path = out / 'app_launch.png'
     image_path.write_bytes(image_bytes)
     receipt = {**prior, 'status':'PASS', 'api_level':36, 'emulator_abi':'x86_64',
                'emulator_serial':SERIAL, 'package':PACKAGE, 'activity':COMPONENT,
                'activity_proof':activity_proof, 'foreground_activity_verified':True,
+               'stable_foreground_observations':4, 'refocus_attempted':refocus_attempted,
                'app_apk_sha256':apk_sha, 'installed_apk_sha256':installed_sha_text[0],
                'debug_certificate_sha256':cert_sha,
                'app_launch_png_sha256':hashlib.sha256(image_bytes).hexdigest(),
@@ -268,8 +372,11 @@ def verify(out: Path) -> None:
         'api_level': 36, 'emulator_abi': 'x86_64', 'emulator_serial': SERIAL,
         'package': PACKAGE, 'activity': COMPONENT,
         'foreground_activity_verified': True,
+        'stable_foreground_observations': 4,
     }.items():
         need(data.get(key) == expected, f'receipt field invalid: {key}')
+    need(type(data.get('refocus_attempted')) is bool,
+         'invalid foreground recovery evidence')
     need(data.get('activity_proof') in ('resumed', 'focused'),
          'missing device-state MainActivity foreground proof')
     for key in ('app_apk_sha256', 'installed_apk_sha256',
@@ -296,6 +403,8 @@ def main() -> int:
         {'init':init,'run':run_emulator,'verify':verify}[args.command](args.out)
         return 0
     except (Refused, OSError, ValueError, json.JSONDecodeError) as exc:
+        if args.command == 'run':
+            write_failed_evidence(args.out, str(exc))
         print('OX_R02_API36_REFUSED: '+str(exc), file=sys.stderr)
         return 1
 

@@ -2,6 +2,7 @@
 """R02 RT01 API36 hosted emulator safety/staleness source contract."""
 from __future__ import annotations
 import argparse
+import ast
 from pathlib import Path
 import re
 
@@ -95,12 +96,24 @@ def inspect(root: Path = ROOT) -> list[str]:
         "adb('install', '-t', str(APK)",
         "adb('shell', 'sha256sum', remote_path)",
         "installed_sha_text[0] == apk_sha",
-        "adb('shell', 'am', 'start', '-W', '-n', COMPONENT",
+        "adb('shell', 'am', 'start', '-n', COMPONENT",
+        'stable_observations >= 4',
+        'for index in range(24):',
+        'index == 11 and pid and not refocus_attempted',
+        'MainActivity did not stabilize in foreground after bounded probes',
+        'if pid and pid != current:',
+        "'stable_foreground_observations':4",
+        "'stable_foreground_observations': 4",
+        "'refocus_attempted':refocus_attempted",
+        'write_failed_evidence(args.out, str(exc))',
+        "receipt.update(status='FAILED', failure_category=category,",
+        "(out / 'app_launch.png').unlink(missing_ok=True)",
+        "if observe_main_activity() not in ('resumed', 'focused'):",
         'main_activity_proof(activities: str, windows: str)',
         "adb('shell', 'dumpsys', 'activity', 'activities'",
         "adb('shell', 'dumpsys', 'window', 'windows'",
         'query_main_pid() == pid',
-        "activity_proof in ('resumed', 'focused')",
+        "proof in ('resumed', 'focused')",
         "observe_main_activity() in ('resumed', 'focused')",
         "'foreground_activity_verified':True",
         "'foreground_activity_verified': True",
@@ -120,6 +133,58 @@ def inspect(root: Path = ROOT) -> list[str]:
     for needle in required_smoke:
         if needle not in s:
             p.append('emulator safety/proof code missing: ' + needle)
+    # HF04 source-scoped checks: a duplicate string in a diagnostic/helper
+    # must not mask deletion of the actual mandatory runtime probe.
+    try:
+        tree = ast.parse(s)
+        lines = s.splitlines()
+        functions = {node.name: '\n'.join(lines[node.lineno-1:node.end_lineno])
+                     for node in tree.body if isinstance(node, ast.FunctionDef)}
+    except SyntaxError:
+        functions = {}
+        p.append('invalid API36 smoke Python syntax')
+    scoped_requirements = {
+        'observe_main_activity': (
+            "adb('shell', 'dumpsys', 'activity', 'activities'",
+            "adb('shell', 'dumpsys', 'window', 'windows'",
+            'main_activity_proof(activities, windows)',
+        ),
+        'wait_for_stable_main_activity': (
+            'for index in range(24):', 'if pid and pid != current:',
+            'stable_observations >= 4', "proof in ('resumed', 'focused')",
+            'index == 11 and pid and not refocus_attempted',
+            'query_main_pid() == pid',
+            "if observe_main_activity() not in ('resumed', 'focused'):",
+        ),
+        'start_main_activity': ("adb('shell', 'am', 'start', '-n', COMPONENT",),
+        'run_emulator': (
+            'wait_for_stable_main_activity(start_detail)',
+            "need(query_main_pid() == pid, 'ObtainX process disappeared after screenshot')",
+            "need(observe_main_activity() in ('resumed', 'focused'),",
+            "'stable_foreground_observations':4", "'refocus_attempted':refocus_attempted",
+        ),
+        'verify': (
+            "'stable_foreground_observations': 4,",
+            "type(data.get('refocus_attempted')) is bool",
+        ),
+        'write_failed_evidence': (
+            "(out / 'app_launch.png').unlink(missing_ok=True)",
+            "receipt.update(status='FAILED', failure_category=category,",
+        ),
+        'main': ('write_failed_evidence(args.out, str(exc))',),
+    }
+    for name, needles in scoped_requirements.items():
+        body = functions.get(name, '')
+        if not body:
+            p.append('required API36 proof function missing: ' + name)
+        for fragment in needles:
+            if fragment not in body:
+                p.append('runtime proof contract was bypassed: ' + name + ' / ' + fragment)
+    stability = functions.get('wait_for_stable_main_activity', '')
+    if stability.count('stable_observations >= 4') != 2:
+        p.append('both foreground-settle and terminal strict threshold are mandatory')
+    if stability.count('query_main_pid() == pid') != 2:
+        p.append('both recovery and final process-identity probes are mandatory')
     for proof_test in (
         'test_absent_pm_path_rc1_with_independent_listing',
         'test_absent_pm_path_rc0_with_independent_listing',
@@ -133,6 +198,15 @@ def inspect(root: Path = ROOT) -> list[str]:
     ):
         if proof_test not in files[TEST]:
             p.append('missing exact-package probe mutation regression: '+proof_test)
+    for proof_test in (
+        'test_first_run_foreground_transition_regains_stable_app',
+        'test_one_bounded_relaunch_for_stuck_first_run',
+        'test_permanent_other_foreground_refused_even_if_pid_lives',
+        'test_process_restart_after_initial_foreground_refused',
+        'test_cinderbox_style_failure_receipt_does_not_claim_pass',
+    ):
+        if proof_test not in files[TEST]:
+            p.append('missing HF04 recovery regression: '+proof_test)
     for proof_test in (
         'test_am_start_different_output_requires_real_activity',
         'test_resumed_activity_exact_package',

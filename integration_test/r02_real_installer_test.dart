@@ -44,7 +44,7 @@ void main() {
     }
     final temporary = await Directory.systemTemp.createTemp('obtainx-rt02-');
     try {
-      final version = scenario == 'standalone' ? 1 : 2;
+      const version = scenario == 'standalone' ? 1 : 2;
       final base = await fetchFixture('base_v$version.apk', baseSha, temporary);
       final members = <InstallApkMember>[
         InstallApkMember(path:base.path, packageName:packageName, versionCode:version,

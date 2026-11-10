@@ -56,6 +56,7 @@ def inspect(root:Path=ROOT)->list[str]:
                   'if: always()', 'rt02-receipt.json','fixture_inventory.json',
                   'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'),
         DART:("IntegrationTestWidgetsFlutterBinding.ensureInitialized()",
+              "const version = scenario == 'standalone' ? 1 : 2;",
               'StockInstaller(SettingsProvider()).installApk(',
               'resolveInstallBundlePlan(',"expectedPackageName:packageName",
               "sha256.convert(data).toString() != expected",

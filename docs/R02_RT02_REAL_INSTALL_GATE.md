@@ -41,3 +41,7 @@ remain red until resolved with source-pinned evidence and mutation tests.
 - The executable ZIP now checks whitespace for **all** payload files immediately after digest validation.
 - The pre-commit audit stages all exact touched paths and runs `git diff --cached --check` before declaring the host contracts green.
 - The self-test repeats this test inside a disposable Git repository, including newly added files. Installer code and security admission criteria are unchanged.
+
+## HF02 hosted analyzer recovery (10 November 2026)
+
+Run 42908393885 failed before emulator invocation: `flutter analyze integration_test lib test` rejected `r02_real_installer_test.dart:47` (`prefer_const_declarations`). The fixture selector is now `const version`, and RT02's strict source contract and mutation regression require that declaration. This is source-only recovery, **not** evidence of an Android install. The hosted RT02 workflow must rerun and pass both system-install sessions before RT02A can be qualified.

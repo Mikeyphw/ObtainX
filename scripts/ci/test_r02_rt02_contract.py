@@ -53,6 +53,12 @@ class SourceMutations(unittest.TestCase):
     def test_signer_must_delete_temp_key(self):self.mutation(C.FIXTURE,'key.unlink(missing_ok=True)','pass  # omitted')
     def test_real_fixture_signing(self):self.mutation(C.FIXTURE,"str(signer), 'sign'", "'echo', 'sign'")
     def test_dart_sha(self):self.mutation(C.DART,"sha256.convert(data).toString() != expected",'false')
+    def test_dart_const_version_required(self):
+        # Flutter 3.47.6 flutter analyze treats prefer_const_declarations as a
+        # failing diagnostic. Do not let this exact known regression return.
+        self.mutation(C.DART,
+            "const version = scenario == 'standalone' ? 1 : 2;",
+            "final version = scenario == 'standalone' ? 1 : 2;")
     def test_dart_plan(self):self.mutation(C.DART,'resolveInstallBundlePlan(','fakePlan(')
     def test_r00_test_must_be_updated(self):self.mutation(C.R00_TEST,'test_reviewed_rt02_required_and_release_is_still_prohibited','test_fake')
     def test_ci_source_gate(self):self.mutation(C.SOURCE_GATE,'run: python3 scripts/ci/r02_rt02_contract.py --check','run: true')

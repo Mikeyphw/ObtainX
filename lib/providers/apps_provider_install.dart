@@ -9,7 +9,6 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, visibleForTesting;
 import 'package:flutter/material.dart';
-import 'package:flutter_archive/flutter_archive.dart';
 import 'package:flutter_fgbg/flutter_fgbg.dart';
 import 'package:obtainium/app_sources/fdroid.dart';
 import 'package:obtainium/app_sources/fdroidrepo.dart';
@@ -988,11 +987,9 @@ extension AppsProviderInstall on AppsProvider {
       settingsProvider.enableDowngradeModules &&
       await isDowngradeModuleInstalled();
 
+  // R01: both ZIP and TAR use the same bounded, atomic archive extractor.
   Future<void> unzipFile(String filePath, String destinationPath) async {
-    await ZipFile.extractToDirectory(
-      zipFile: File(filePath),
-      destinationDir: Directory(destinationPath),
-    );
+    await extractZipOffIsolate(filePath, destinationPath);
   }
 
   Future<void> extractTarballFile(

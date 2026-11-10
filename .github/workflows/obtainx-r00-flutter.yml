@@ -34,6 +34,8 @@ jobs:
         run: flutter pub get
       - name: Analyze current source and tests
         run: flutter analyze lib test
+      - name: Execute R01 adversarial archive fixtures first
+        run: flutter test --no-pub test/archive_extraction_security_test.dart
       - name: Execute full Flutter test suite
         run: flutter test --no-pub
       - name: Compile unsigned debug Android APK

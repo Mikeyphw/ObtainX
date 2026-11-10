@@ -30,6 +30,7 @@ import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/providers/virustotal_provider.dart';
 import 'package:obtainium/services/artifact_file_work.dart';
+import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/theme/app_dialog_theme.dart';
 import 'package:obtainium/widgets/app_toast.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -765,13 +766,16 @@ extension AppsProviderInstall on AppsProvider {
       String? parsedArchivePath;
       final originalAssetName = app.apkUrls[app.preferredApkIndex].key
           .toLowerCase();
-      final isAPK = downloadedFile.path.toLowerCase().endsWith('.apk');
-      final isXAPK = downloadedFile.path.toLowerCase().endsWith('.xapk');
-      final isTarball =
-          originalAssetName.endsWith('.tar.gz') ||
-          originalAssetName.endsWith('.tgz') ||
-          originalAssetName.endsWith('.tar.bz2') ||
-          originalAssetName.endsWith('.tar.xz');
+      // The asset name is authoritative for the advertised format; the
+      // downloaded path can lack the original multipart suffix (.tar.gz).
+      final artifactFormat = installArtifactFormat(originalAssetName) ??
+          installArtifactFormat(downloadedFile.path);
+      if (artifactFormat == null) {
+        throw const FormatException('Unsupported Android package artifact');
+      }
+      final isAPK = artifactFormat == InstallArtifactFormat.apk;
+      final isXAPK = artifactFormat == InstallArtifactFormat.xapk;
+      final isTarball = artifactFormat == InstallArtifactFormat.tarball;
       Directory? apkDir;
       if (isAPK) {
         parsedArchivePath = downloadedFile.path;
@@ -780,61 +784,63 @@ extension AppsProviderInstall on AppsProvider {
         );
       } else {
         final String apkDirPath = '${downloadedFile.path}-dir';
-        if (isTarball) {
-          await extractTarballFile(downloadedFile.path, apkDirPath);
-        } else {
-          await unzipFile(downloadedFile.path, apkDirPath);
-        }
-        apkDir = Directory(apkDirPath);
-        var apks = apkDir
-            .listSync(recursive: true)
-            .where((e) => AppSource.isApkOrContainerFile(e.path))
-            .toList();
+        try {
+          if (isTarball) {
+            await extractTarballFile(downloadedFile.path, apkDirPath);
+          } else {
+            await unzipFile(downloadedFile.path, apkDirPath);
+          }
+          apkDir = Directory(apkDirPath);
+          // Nested containers must not be mistaken for installable APKs.
+          final apks = apkDir
+              .listSync(recursive: true, followLinks: false)
+              .whereType<File>()
+              .where((file) => file.path.toLowerCase().endsWith('.apk'))
+              .toList();
+          final originalSplits = apks
+              .where((file) => isConfigurationSplitApk(file.path))
+              .map((file) => file.path)
+              .toSet();
 
-        apks = _preferMatchingApk(apks, app.id);
-
-        String? filterRegEx;
-        if (isTarball &&
-            app.settings
-                    .getStringOrNull('tarballedApkFilterRegEx')
-                    ?.isNotEmpty ==
-                true) {
-          filterRegEx = app.settings.getStringOrNull('tarballedApkFilterRegEx');
-        } else if (!isTarball &&
-            app.settings.getStringOrNull('zippedApkFilterRegEx')?.isNotEmpty ==
-                true) {
-          filterRegEx = app.settings.getStringOrNull('zippedApkFilterRegEx');
-        }
-        if (filterRegEx != null) {
-          final reg = RegExp(filterRegEx);
-          apks.removeWhere((apk) {
-            final relativePath = apk.path.substring(apkDir!.path.length + 1);
-            final shouldDelete = !reg.hasMatch(relativePath);
-            if (shouldDelete) {
-              apk.delete();
-            }
-            return shouldDelete;
-          });
-        }
-
-        if (apks.isEmpty) {
-          throw NoAPKError();
-        }
-
-        for (var i = 0; i < apks.length; i++) {
-          try {
-            newInfo = await packageManager.getPackageArchiveInfo(
-              archiveFilePath: apks[i].path,
-            );
-            if (newInfo != null) {
-              parsedArchivePath = apks[i].path;
-              break;
-            }
-          } catch (e) {
-            if (i == apks.length - 1) {
-              rethrow;
+          String? filterRegEx;
+          if (isTarball &&
+              app.settings
+                      .getStringOrNull('tarballedApkFilterRegEx')
+                      ?.isNotEmpty ==
+                  true) {
+            filterRegEx = app.settings.getStringOrNull('tarballedApkFilterRegEx');
+          } else if (!isTarball &&
+              app.settings.getStringOrNull('zippedApkFilterRegEx')?.isNotEmpty ==
+                  true) {
+            filterRegEx = app.settings.getStringOrNull('zippedApkFilterRegEx');
+          }
+          if (filterRegEx != null) {
+            final reg = RegExp(filterRegEx);
+            apks.removeWhere((apk) {
+              final relativePath = apk.path.substring(apkDir!.path.length + 1);
+              return !reg.hasMatch(relativePath);
+            });
+            // Do not allow a regex to silently strip required config splits.
+            final retained = apks.map((file) => file.path).toSet();
+            if (originalSplits.difference(retained).isNotEmpty) {
+              throw const FormatException(
+                'Archive APK filter excludes required split configurations',
+              );
             }
           }
+          final (plan, baseInfo) = await _inspectInstallBundle(
+            apks,
+            format: artifactFormat,
+          );
+          newInfo = baseInfo;
+          parsedArchivePath = plan.baseApkPath;
+        } catch (_) {
+          // Discard any archive whose package inventory is invalid.
+          final extracted = Directory(apkDirPath);
+          if (extracted.existsSync()) {
+            extracted.deleteSync(recursive: true);
+          }
+          rethrow;
         }
       }
       if (newInfo == null) {
@@ -882,6 +888,10 @@ extension AppsProviderInstall on AppsProvider {
         DownloadedDirType dirType;
         if (isXAPK) {
           dirType = DownloadedDirType.xapk;
+        } else if (artifactFormat == InstallArtifactFormat.apks) {
+          dirType = DownloadedDirType.apks;
+        } else if (artifactFormat == InstallArtifactFormat.apkm) {
+          dirType = DownloadedDirType.apkm;
         } else if (isTarball) {
           dirType = DownloadedDirType.tarball;
         } else {
@@ -1030,12 +1040,14 @@ extension AppsProviderInstall on AppsProvider {
       );
       if (!proceedAfterVerification) return false;
     }
-    // Try installing all APKs; succeed if at least one installed.
+    // R02: inspect every candidate before the installer is ever invoked.
+    // One complete base+config session is required, not an arbitrary first APK.
     var somethingInstalled = false;
     final installer = getInstaller();
     try {
       final MultiAppMultiError errors = MultiAppMultiError();
-      List<File> apkFiles = [];
+      final apkFiles = <File>[];
+      final obbFiles = <File>[];
       for (var file
           in dir.extracted
               .listSync(recursive: true, followLinks: false)
@@ -1043,24 +1055,35 @@ extension AppsProviderInstall on AppsProvider {
         if (file.path.toLowerCase().endsWith('.apk')) {
           apkFiles.add(file);
         } else if (file.path.toLowerCase().endsWith('.obb')) {
-          await moveObbFile(file, dir.appId);
+          // Do not write expansion data before Android confirms install.
+          obbFiles.add(file);
         }
       }
+      final format = switch (dir.type) {
+        DownloadedDirType.xapk => InstallArtifactFormat.xapk,
+        DownloadedDirType.apks => InstallArtifactFormat.apks,
+        DownloadedDirType.apkm => InstallArtifactFormat.apkm,
+        DownloadedDirType.tarball => InstallArtifactFormat.tarball,
+        DownloadedDirType.zip => InstallArtifactFormat.zip,
+      };
+      final (plan, plannedInfo) = await _inspectInstallBundle(
+        apkFiles,
+        format: format,
+        expectedPackageName: dir.appId,
+      );
+      validateObbFileNames(
+        obbFiles.map((file) => file.path).toList(),
+        plan.packageName,
+      );
 
       if (installer.wantsContainerHandoff) {
         // Hand off the original bundle file (XAPK/ZIP/tarball) to the
         // third-party installer rather than the extracted split APKs.
         InstallReleaseSnapshot? release;
         try {
-          final candidates = _preferMatchingApk(
-            apkFiles,
-            dir.appId,
-          ).cast<File>().toList();
-          if (candidates.isEmpty) throw NoAPKError();
-          final packageInfo = await packageManager.getPackageArchiveInfo(
-            archiveFilePath: candidates.first.path,
-          );
-          if (packageInfo == null) throw NoAPKError();
+          // Even for a third-party handoff, the bundle has to be unambiguous.
+          // The original container is handed off, not one extracted split.
+          final packageInfo = plannedInfo;
           release = dir.release?.withPackage(packageInfo);
           await _recordPendingInstall(dir.appId, release);
           final result = await installer.installApk(
@@ -1104,21 +1127,14 @@ extension AppsProviderInstall on AppsProvider {
         return somethingInstalled;
       }
 
-      apkFiles = _preferMatchingApk(apkFiles, dir.appId).cast<File>().toList();
-
-      if (apkFiles.isEmpty) {
-        throw NoAPKError();
-      }
-
       try {
         final wasInstalled = await installApk(
-          DownloadedApk(dir.appId, apkFiles[0], release: dir.release),
+          DownloadedApk(dir.appId, File(plan.baseApkPath), release: dir.release),
           firstInstallNotificationsProvider,
           needsBGWorkaround: needsBGWorkaround,
           installOptions: installOptions,
-          additionalAPKs: apkFiles
-              .sublist(1)
-              .map((a) => DownloadedApk(dir.appId, a, release: dir.release))
+          additionalAPKs: plan.configApkPaths
+              .map((path) => DownloadedApk(dir.appId, File(path), release: dir.release))
               .toList(),
           // Container already verified/scanned above.
           skipMalwareScan: true,
@@ -1128,6 +1144,11 @@ extension AppsProviderInstall on AppsProvider {
           skipApkSaveFolderPersistForPrimaryApk: true,
         );
         somethingInstalled = somethingInstalled || wasInstalled;
+        if (wasInstalled) {
+          for (final obb in obbFiles) {
+            await moveObbFile(obb, plan.packageName);
+          }
+        }
         unawaited(_disposeDownloadedBundle(dir, somethingInstalled));
       } catch (e) {
         unawaited(
@@ -1141,7 +1162,10 @@ extension AppsProviderInstall on AppsProvider {
         throw errors;
       }
     } finally {
-      unawaited(dir.extracted.delete(recursive: true));
+      // Keep cleanup complete before another retry can reuse the same path.
+      if (dir.extracted.existsSync()) {
+        await dir.extracted.delete(recursive: true);
+      }
     }
     return somethingInstalled;
   }
@@ -1837,22 +1861,55 @@ extension AppsProviderInstall on AppsProvider {
     return downloadedIds;
   }
 
-  List<FileSystemEntity> _preferMatchingApk(
-    List<FileSystemEntity> apks,
-    String appId,
-  ) {
-    FileSystemEntity? temp;
-    apks.removeWhere((element) {
-      final bool res = element.uri.pathSegments.last.startsWith(appId);
-      if (res) {
-        temp = element;
+  /// Collect package metadata for every member and return a deterministic,
+  /// compatible complete session. Configuration-split metadata can be absent
+  /// from Android PackageManager, but an unidentified base is always refused.
+  Future<(InstallBundlePlan, PackageInfo)> _inspectInstallBundle(
+    List<File> apkFiles, {
+    required InstallArtifactFormat format,
+    String? expectedPackageName,
+  }) async {
+    final members = <InstallApkMember>[];
+    final infoByPath = <String, PackageInfo>{};
+    for (final file in apkFiles) {
+      if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
+          FileSystemEntityType.file) {
+        throw const FormatException('APK member is not a regular file');
       }
-      return res;
-    });
-    if (temp != null) {
-      apks = [temp!, ...apks];
+      PackageInfo? info;
+      try {
+        info = await packageManager.getPackageArchiveInfo(
+          archiveFilePath: file.path,
+        );
+      } catch (_) {
+        if (!isConfigurationSplitApk(file.path)) {
+          rethrow;
+        }
+      }
+      if (info != null) {
+        infoByPath[file.path] = info;
+      }
+      members.add(InstallApkMember(
+        path: file.path,
+        packageName: info?.packageName,
+        versionCode: info?.versionCode,
+        minSdkVersion: info?.applicationInfo?.minSdkVersion,
+        targetSdkVersion: info?.applicationInfo?.targetSdkVersion,
+      ));
     }
-    return apks;
+    final device = await DeviceInfoPlugin().androidInfo;
+    final plan = resolveInstallBundlePlan(
+      members: members,
+      format: format,
+      supportedAbis: device.supportedAbis,
+      deviceSdkVersion: device.version.sdkInt,
+      expectedPackageName: expectedPackageName,
+    );
+    final baseInfo = infoByPath[plan.baseApkPath];
+    if (baseInfo == null) {
+      throw const FormatException('Base APK identity cannot be verified');
+    }
+    return (plan, baseInfo);
   }
 
   Future<void> _installDownloadedApp(

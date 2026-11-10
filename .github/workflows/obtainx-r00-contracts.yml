@@ -28,3 +28,5 @@ jobs:
         run: python3 scripts/ci/r00_source_contract.py --check
       - name: Enforce R01 archive/signing source contracts
         run: python3 scripts/ci/r01_security_contract.py --check
+      - name: Enforce R02 package plan/source staleness contracts
+        run: python3 scripts/ci/r02_install_contract.py --check

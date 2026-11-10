@@ -282,7 +282,7 @@ class DownloadedApk {
   DownloadedApk(this.appId, this.file, {this.release});
 }
 
-enum DownloadedDirType { xapk, zip, tarball }
+enum DownloadedDirType { xapk, apks, apkm, zip, tarball }
 
 class DownloadedDir {
   String appId;

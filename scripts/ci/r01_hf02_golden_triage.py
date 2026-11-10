@@ -33,10 +33,19 @@ def classify(text: str) -> dict:
         raise ValueError('Unrelated or missing failures: '+repr(failures)[:900])
     if text.count('Golden "goldens/app-row-')!=6:
         raise ValueError('Unexpected golden-failure count or missing golden evidence')
-    # The expanded reporter summarizes failures as '+N -2: Some tests
-    # failed.', while GitHub reporter may write 'N passed, 2 failed'.
-    if not (re.search(r'\b2 failed\b', text) or
-            re.search(r'(?m)^\d\d:\d\d[^\n]*\+\d+ -2: Some tests failed\.', text)):
+    # Flutter's expanded reporter includes a skipped-test counter only when
+    # nonzero: "+823 ~1 -2: Some tests failed."  A previous parser accepted
+    # "+823 -2" but rejected this legitimate, fully accounted-for result.
+    # Count the FINAL reporter summary, not an incidental "-2" in a test line.
+    progress = re.findall(
+        r'(?m)^\d{2}:\d{2}\s+\+\d+(?:\s+~\d+)?\s+-(\d+):\s+Some tests failed\.\s*$',
+        text,
+    )
+    prose = re.findall(
+        r'(?m)^\d+ tests passed, (\d+) failed(?:, \d+ skipped)?\.\s*$',
+        text,
+    )
+    if len(progress) + len(prose) != 1 or (progress + prose) != ['2']:
         raise ValueError('Full-suite failure total not exactly 2')
     if not ('Pixel test failed' in text and 'app-row-swiping' in text):
         raise ValueError('Golden mismatch evidence incomplete')

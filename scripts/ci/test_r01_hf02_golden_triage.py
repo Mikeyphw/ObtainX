@@ -25,6 +25,28 @@ class GoldenTriage(unittest.TestCase):
         data=runlog().replace('810 tests passed, 2 failed, 1 skipped.',
                               '00:41 +810 -2: Some tests failed.')
         self.assertEqual(t.classify(data)['other_test_failures'],0)
+    def test_real_hosted_progress_with_one_skip_is_accepted(self):
+        # CI run 42854406591: 823 passed, 1 skipped, 2 known golden failures.
+        data=runlog().replace('810 tests passed, 2 failed, 1 skipped.',
+                              '01:19 +823 ~1 -2: Some tests failed.')
+        self.assertEqual(t.classify(data)['other_test_failures'], 0)
+    def test_multiple_skips_are_supported_without_masking_failures(self):
+        data=runlog().replace('810 tests passed, 2 failed, 1 skipped.',
+                              '12:34 +823 ~11 -2: Some tests failed.')
+        self.assertEqual(t.classify(data)['classification'], 'GOLDEN_ONLY_FAILURE')
+    def test_skipped_test_with_three_failures_is_refused(self):
+        data=runlog().replace('810 tests passed, 2 failed, 1 skipped.',
+                              '01:19 +823 ~1 -3: Some tests failed.')
+        with self.assertRaises(ValueError):t.classify(data)
+    def test_missing_final_summary_is_refused(self):
+        data=runlog().replace('810 tests passed, 2 failed, 1 skipped.', '')
+        with self.assertRaises(ValueError):t.classify(data)
+    def test_contradictory_summaries_are_refused(self):
+        data=runlog()+'01:19 +823 ~1 -3: Some tests failed.\n'
+        with self.assertRaises(ValueError):t.classify(data)
+    def test_additional_failure_with_two_golden_errors_is_refused(self):
+        data=runlog()+'01:19 +823 ~1 -3: test/source_provider_test.dart: failed ABI check [E]\n'
+        with self.assertRaises(ValueError):t.classify(data)
     def test_behavioral_failure_added_refused(self):
         s=runlog()+'00:30 +810 -3: test/source_provider_test.dart: ABI regression [E]\n'
         with self.assertRaises(ValueError):t.classify(s)

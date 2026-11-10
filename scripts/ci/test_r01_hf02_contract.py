@@ -50,7 +50,21 @@ class HF02(unittest.TestCase):
         with self.assertRaises(ValueError):T.classify(data)
     def test_exact_golden_only_evidence(self):
         data='\n'.join('00:21 +810 -2: test/apps_scroll_work_test.dart: '+s+' [E]' for s in sorted(T.EXPECTED))+'\n'+\
-            'Golden "goldens/app-row-x.png": Pixel test failed\n'*6+'app-row-swiping\n2 failed\n'
+            'Golden "goldens/app-row-x.png": Pixel test failed\n'*6+\
+            'app-row-swiping\n01:19 +823 ~1 -2: Some tests failed.\n'
         self.assertEqual(T.classify(data)['classification'],'GOLDEN_ONLY_FAILURE')
+    def test_complete_prose_report_is_still_supported(self):
+        data='\n'.join('00:21 +810 -2: test/apps_scroll_work_test.dart: '+s+' [E]' for s in sorted(T.EXPECTED))+'\n'+\
+            'Golden "goldens/app-row-x.png": Pixel test failed\n'*6+\
+            'app-row-swiping\n823 tests passed, 2 failed, 1 skipped.\n'
+        self.assertEqual(T.classify(data)['classification'],'GOLDEN_ONLY_FAILURE')
+    def test_bare_failure_count_is_not_a_valid_full_suite_summary(self):
+        # The prior synthetic positive fixture said only '2 failed' and
+        # incorrectly allowed truncated/ambiguous reporter summaries.
+        data='\n'.join('00:21 +810 -2: test/apps_scroll_work_test.dart: '+s+' [E]' for s in sorted(T.EXPECTED))+'\n'+\
+            'Golden "goldens/app-row-x.png": Pixel test failed\n'*6+\
+            'app-row-swiping\n2 failed\n'
+        with self.assertRaises(ValueError):
+            T.classify(data)
 
 if __name__=='__main__':unittest.main()

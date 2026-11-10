@@ -34,7 +34,25 @@ jobs:
         run: flutter pub get
       - name: Analyze current source and tests
         run: flutter analyze lib test
+      - name: Execute R01 adversarial archive fixtures first
+        run: flutter test --no-pub test/archive_extraction_security_test.dart
       - name: Execute full Flutter test suite
-        run: flutter test --no-pub
+        run: |
+          set -o pipefail
+          flutter test --no-pub --reporter expanded 2>&1 | tee "$RUNNER_TEMP/ox-full-tests.log"
+      - name: Triage known app-row golden drift without changing qualification
+        id: golden_triage
+        if: ${{ failure() }}
+        run: |
+          python3 scripts/ci/r01_hf02_golden_triage.py "$RUNNER_TEMP/ox-full-tests.log" test/goldens/R01_HF02_TRIAGE.json
+          flutter test --no-pub --update-goldens test/apps_scroll_work_test.dart
+      - name: Publish golden references for reviewed commit (job stays failed)
+        if: ${{ failure() && steps.golden_triage.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 pinned
+        with:
+          name: obtainx-r01-hf02-golden-review-${{ github.event.pull_request.head.sha }}
+          path: test/goldens/
+          if-no-files-found: error
+          retention-days: 7
       - name: Compile unsigned debug Android APK
         run: flutter build apk --debug --flavor normal --no-pub

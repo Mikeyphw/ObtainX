@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_WORKFLOWS = {
     'obtainx-r00-contracts.yml',
     'obtainx-r00-flutter.yml',
+    # Reviewed, read-only, SHA-pinned, emulator-only workflow (R02 RT01).
+    'obtainx-r02-api36.yml',
 }
 LEGACY_WORKFLOWS = {
     'build.yml', 'release.yml', 'pr-base-guard.yml',

@@ -44,8 +44,38 @@ class R00ContractTests(unittest.TestCase):
 
     def test_valid_strict_workflows(self):
         files = {name: EXAMPLE_WORKFLOW for name in (
-            'obtainx-r00-contracts.yml', 'obtainx-r00-flutter.yml')}
+            'obtainx-r00-contracts.yml', 'obtainx-r00-flutter.yml',
+            'obtainx-r02-api36.yml')}
         self.assertEqual(check_workflows(files), [])
+
+
+    def test_reviewed_api36_required_and_no_unknown_workflows(self):
+        reviewed = {name: EXAMPLE_WORKFLOW for name in (
+            'obtainx-r00-contracts.yml', 'obtainx-r00-flutter.yml',
+            'obtainx-r02-api36.yml')}
+        self.assertEqual(check_workflows(reviewed), [])
+        removed = dict(reviewed)
+        del removed['obtainx-r02-api36.yml']
+        self.assertTrue(any('missing workflow(s): obtainx-r02-api36.yml' in msg
+                            for msg in check_workflows(removed)))
+        injected = dict(reviewed)
+        injected['hidden-release.yml'] = EXAMPLE_WORKFLOW
+        self.assertTrue(any('unreviewed workflow(s): hidden-release.yml' in msg
+                            for msg in check_workflows(injected)))
+
+    def test_reviewed_emulator_still_read_only_and_no_release(self):
+        reviewed = {name: EXAMPLE_WORKFLOW for name in (
+            'obtainx-r00-contracts.yml', 'obtainx-r00-flutter.yml',
+            'obtainx-r02-api36.yml')}
+        changed = dict(reviewed)
+        changed['obtainx-r02-api36.yml'] = EXAMPLE_WORKFLOW.replace('contents: read', 'contents: write')
+        self.assertTrue(any('write access' in msg for msg in check_workflows(changed)))
+        changed['obtainx-r02-api36.yml'] = EXAMPLE_WORKFLOW.replace(
+            'actions/checkout@11d5960a326750d5838078e36cf38b85af677262',
+            'actions/checkout@v4')
+        self.assertTrue(any('not pinned' in msg for msg in check_workflows(changed)))
+        changed['obtainx-r02-api36.yml'] = EXAMPLE_WORKFLOW + '      - run: gh release create\n'
+        self.assertTrue(any('release publication' in msg for msg in check_workflows(changed)))
 
     def test_baseline_drift_fails(self):
         with tempfile.TemporaryDirectory() as td:
@@ -61,7 +91,8 @@ class R00ContractTests(unittest.TestCase):
                 'upstream_repo': 'bikram-agarwal/ObtainX',
                 'fork_repo': 'Mikeyphw/ObtainX', 'roadmap_sha256':'0'*64,
             }), encoding='utf-8')
-            for name in ('obtainx-r00-contracts.yml', 'obtainx-r00-flutter.yml'):
+            for name in ('obtainx-r00-contracts.yml', 'obtainx-r00-flutter.yml',
+                         'obtainx-r02-api36.yml'):
                 (root / '.github/workflows'/name).write_text(EXAMPLE_WORKFLOW, encoding='utf-8')
             self.assertTrue(any('roadmap digest drift' in i for i in inspect(root, validate_git=False)))
 

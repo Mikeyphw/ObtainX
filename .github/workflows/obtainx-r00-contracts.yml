@@ -32,3 +32,5 @@ jobs:
         run: python3 scripts/ci/r02_install_contract.py --check
       - name: Enforce R02 HF02 analyzer and golden-triage contracts
         run: python3 scripts/ci/r02_hf02_contract.py --check
+      - name: Enforce R02 API36 emulator source/evidence staleness contracts
+        run: python3 scripts/ci/r02_api36_contract.py --check

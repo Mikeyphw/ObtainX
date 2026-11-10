@@ -1,0 +1,65 @@
+{
+  "golden_matcher_relaxed": false,
+  "goldens": {
+    "app-row-false.png": {
+      "changed_fraction": 0.0149038,
+      "changed_pixels": 558,
+      "height": 78,
+      "hosted_sha256": "0c8b572266c5bd00255990f3d360daaca0e5875f42b8d6c22fc253ac5123a998",
+      "pixels": 37440,
+      "prior_sha256": "5b2e33a44f93e6bc0291429091cf42a05793c8a34f524bbc7ce741a4e0ce9e47",
+      "width": 480
+    },
+    "app-row-selected-false.png": {
+      "changed_fraction": 0.013786,
+      "changed_pixels": 536,
+      "height": 81,
+      "hosted_sha256": "5423c09578d371745d34d3b1bc5324c680329662fe82d313c86d2b0999087f0f",
+      "pixels": 38880,
+      "prior_sha256": "9b08ed873d0859cba27776f6e377890b31949cc40de78886c482cb32c82baf59",
+      "width": 480
+    },
+    "app-row-selected-true.png": {
+      "changed_fraction": 0.013786,
+      "changed_pixels": 536,
+      "height": 81,
+      "hosted_sha256": "28056a99c5eae070148fd66b05ebcf510a3d97113936fa2180b36c40fa91195c",
+      "pixels": 38880,
+      "prior_sha256": "dfd36d9978e39a7bf0b6f11ba72a537d418cac961a56542d50cb97836e3c4cd0",
+      "width": 480
+    },
+    "app-row-swiping-false.png": {
+      "changed_fraction": 0.0130144,
+      "changed_pixels": 506,
+      "height": 81,
+      "hosted_sha256": "d76efed24ad15fef2b7a2680fc6c7c4d5e4c7c89b8a52356e6ddd6c6e81997ac",
+      "pixels": 38880,
+      "prior_sha256": "287d2bc35729288725abac0e7a7d9050db152ea45f96267f5adaef2bc86965a4",
+      "width": 480
+    },
+    "app-row-swiping-true.png": {
+      "changed_fraction": 0.0130144,
+      "changed_pixels": 506,
+      "height": 81,
+      "hosted_sha256": "b2aec9c5db21a65c7133a0f0d798a444cff81f273b1abd41a75964f6bffab2ad",
+      "pixels": 38880,
+      "prior_sha256": "dd3be32806c527b330490e6b4ebd83bf1696dafe6278b79c9188b76c3c3b5681",
+      "width": 480
+    },
+    "app-row-true.png": {
+      "changed_fraction": 0.0149038,
+      "changed_pixels": 558,
+      "height": 78,
+      "hosted_sha256": "08379606562ef3a2ed068c3f3fa247e3cc6f3d621a51015a4fb5123122092625",
+      "pixels": 37440,
+      "prior_sha256": "5bd69b100ac239300e54bfa7c667419e8f7528d075753716e57ea77b54885a66",
+      "width": 480
+    }
+  },
+  "hosted_run_id": 42858554795,
+  "qualifies_release": false,
+  "reference_environment": "ubuntu-24.04 / Flutter 3.47.6 / devicePixelRatio=1 / 480px widget viewport",
+  "schema": 1,
+  "source_commit": "86a7a0eadc4fa774e85a9a80d7d3e2717328b39a",
+  "status": "REBASELINE_READY_FOR_STRICT_VERIFICATION"
+}

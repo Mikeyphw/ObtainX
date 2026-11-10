@@ -80,6 +80,60 @@ def verify_fresh_package_absent() -> None:
     print('OX_R02_API36_FRESH_PACKAGE_ABSENT_PASS', flush=True)
 
 
+def query_main_pid() -> str:
+    """Allow a temporarily absent PID, never an ambiguous ADB failure."""
+    argv = ('adb', '-s', SERIAL, 'shell', 'pidof', PACKAGE)
+    try:
+        result = subprocess.run(argv, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, timeout=40, check=False)
+    except (OSError, subprocess.TimeoutExpired) as ex:
+        raise Refused('Main-process PID query unavailable') from ex
+    stdout = result.stdout.decode(errors='replace').strip()
+    stderr = result.stderr.decode(errors='replace').strip()
+    if result.returncode == 1 and not stdout and not stderr:
+        return ''
+    need(result.returncode == 0 and not stderr and
+         bool(re.fullmatch(r'[0-9]+', stdout)),
+         f'Ambiguous main-process PID query: rc={result.returncode}, '
+         f'stdout={stdout[-120:]!r}, stderr={stderr[-120:]!r}')
+    return stdout
+
+
+def _mentions_exact_main_activity(line: str) -> bool:
+    """No substring matching other packages or other activities."""
+    options = (COMPONENT, PACKAGE + '/.MainActivity')
+    return any(re.search(r'(?<![A-Za-z0-9_.])' + re.escape(value) +
+                         r'(?=$|[\s}\],])', line) for value in options)
+
+
+def main_activity_proof(activities: str, windows: str) -> str:
+    """Require actual *resumed or focused* MainActivity, not a launch banner.
+
+    Android's am start -W output differs by API and task-reuse state. A
+    successful shell return alone is insufficient for a runtime pass.
+    """
+    resumed = re.compile(r'^\s*(?:topResumedActivity|mResumedActivity|ResumedActivity)\s*[:=]')
+    focused = re.compile(r'^\s*(?:mCurrentFocus|mFocusedApp|mFocusedWindow)\s*[:=]')
+    for line in activities.splitlines():
+        if resumed.match(line) and _mentions_exact_main_activity(line):
+            return 'resumed'
+    for line in windows.splitlines():
+        if focused.match(line) and _mentions_exact_main_activity(line):
+            return 'focused'
+    return ''
+
+
+def observe_main_activity() -> str:
+    activities = adb('shell', 'dumpsys', 'activity', 'activities', timeout=45)
+    windows = adb('shell', 'dumpsys', 'window', 'windows', timeout=45)
+    return main_activity_proof(activities, windows)
+
+
+def launch_report(text: str) -> str:
+    """Keep bounded, single-line diagnostic text, never silently accept errors."""
+    return ' | '.join(line.strip() for line in text.splitlines() if line.strip())[-600:]
+
+
 def stage(label: str) -> None:
     print('OX_R02_API36_STAGE='+label, flush=True)
 
@@ -153,18 +207,35 @@ def run_emulator(out: Path) -> None:
          'on-emulator installed bytes do not match CI-built artifact')
     stage('START_OBTAINX_MAIN_ACTIVITY')
     start = adb('shell', 'am', 'start', '-W', '-n', COMPONENT, timeout=90)
-    need('Status: ok' in start or 'Status: timeout' not in start and 'Complete' in start,
-         'MainActivity did not launch')
-    # Flutter's first startup can take longer than the Android am start return.
+    start_detail = launch_report(start)
+    print('OX_R02_API36_AM_START_OUTPUT=' + (start_detail or '<empty>'), flush=True)
+    # adb/am has returned zero, but Android 16 sometimes reports a task-reuse
+    # warning or different Status/Complete syntax. Do not trust any banner:
+    # validate the running process AND current resumed/focused activity.
+    need(not re.search(r'(?im)^\s*(?:Error:|Exception|SecurityException|Failure \[)', start),
+         'Android activity manager rejected launch: ' + start_detail)
+    stage('VERIFY_MAIN_ACTIVITY_RESUMED')
     pid = ''
+    activity_proof = ''
     for _ in range(15):
-        pid = adb('shell', 'pidof', PACKAGE)
-        if bool(re.fullmatch(r'[0-9]+', pid)):
-            break
+        current = query_main_pid()
+        if current:
+            if pid and pid != current:
+                raise Refused('ObtainX process restarted before foreground verification')
+            pid = current
+            activity_proof = observe_main_activity()
+            if activity_proof:
+                break
         time.sleep(2)
-    need(bool(re.fullmatch(r'[0-9]+', pid)), 'ObtainX process never started')
+    need(bool(re.fullmatch(r'[0-9]+', pid)),
+         'ObtainX process never started; am start=' + start_detail)
+    need(activity_proof in ('resumed', 'focused'),
+         'No resumed/focused MainActivity observed; am start=' + start_detail)
     time.sleep(5)
-    need(adb('shell', 'pidof', PACKAGE) == pid, 'ObtainX process exited or restarted unexpectedly')
+    need(query_main_pid() == pid, 'ObtainX process exited or restarted unexpectedly')
+    need(observe_main_activity() in ('resumed', 'focused'),
+         'MainActivity did not remain foreground after process stability check')
+    print('OX_R02_API36_MAIN_ACTIVITY_DEVICE_PROOF=' + activity_proof, flush=True)
     stage('CAPTURE_EMULATOR_SCREENSHOT')
     image_bytes = adb('exec-out', 'screencap', '-p', binary=True, timeout=40)
     need(image_bytes.startswith(b'\x89PNG\r\n\x1a\n') and len(image_bytes) > 2000,
@@ -173,6 +244,7 @@ def run_emulator(out: Path) -> None:
     image_path.write_bytes(image_bytes)
     receipt = {**prior, 'status':'PASS', 'api_level':36, 'emulator_abi':'x86_64',
                'emulator_serial':SERIAL, 'package':PACKAGE, 'activity':COMPONENT,
+               'activity_proof':activity_proof, 'foreground_activity_verified':True,
                'app_apk_sha256':apk_sha, 'installed_apk_sha256':installed_sha_text[0],
                'debug_certificate_sha256':cert_sha,
                'app_launch_png_sha256':hashlib.sha256(image_bytes).hexdigest(),
@@ -195,8 +267,11 @@ def verify(out: Path) -> None:
         'release_qualified': False, 'publication_allowed': False,
         'api_level': 36, 'emulator_abi': 'x86_64', 'emulator_serial': SERIAL,
         'package': PACKAGE, 'activity': COMPONENT,
+        'foreground_activity_verified': True,
     }.items():
         need(data.get(key) == expected, f'receipt field invalid: {key}')
+    need(data.get('activity_proof') in ('resumed', 'focused'),
+         'missing device-state MainActivity foreground proof')
     for key in ('app_apk_sha256', 'installed_apk_sha256',
                 'debug_certificate_sha256', 'app_launch_png_sha256'):
         need(bool(SHA_PATTERN.fullmatch(data.get(key, ''))), f'invalid digest: {key}')

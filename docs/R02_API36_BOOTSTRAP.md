@@ -64,3 +64,28 @@ Hosted run 42879069321 booted the Cinderbox-style Google APIs x86_64 emulator an
 HF02 accepts only `pm path` exit status 0 or 1 **with empty stdout/stderr**, and only when a *second independent* successful `cmd package list packages --user 0 <exact package>` query is also empty. Existing installations, query errors, nonzero codes other than 1, ambiguous output and failed secondary queries all refuse. Each emulator stage is logged and command errors include the exact operation and bounded stdout/stderr; no installation evidence is asserted on failure.
 
 The only permitted qualification after a fully green run is **hosted API 36 debug APK boot and byte identity**, not user-device acceptance, ObtainX-driven package installation, split install, a release signature, or publication.
+
+## RT01 HF03 — Real activity state instead of `am start -W` text
+
+On hosted run 42884264556 (commit 601e1caa883cefaf32e0c49138bddfb23a4e477e),
+Android 16 booted, the debug APK installed, and the installed APK's SHA-256
+matched the build. The final failure was `MainActivity did not launch`
+at `START_OBTAINX_MAIN_ACTIVITY`, **before** any process/foreground probe.
+The `am start -W` output was discarded by the old assertion, so this record
+does not prove whether a real activity launch or only a text-format mismatch
+was responsible.
+
+HF03 logs a bounded launch-output summary and rejects explicit ActivityManager
+errors, but does not infer a successful launch from any `Status:` or `Complete`
+banner. It checks that an exact ObtainX main-process PID appears, that the real
+`MainActivity` is currently resumed (`dumpsys activity activities`) or
+focused (`dumpsys window windows`), and that both PID and foreground proof
+remain valid after a stability interval. Absent PID is retryable only for an
+empty `pidof` exit status 1; ambiguous ADB results always refuse. Both runtime
+proof and screenshot hash are required in the independent receipt verifier.
+Synthetic unit tests cover actual resumed/focused states, wrong package/activity,
+non-top activity records, missing/stale PID and bypass mutations.
+
+**No test is weakened.** This is still emulator bootstrap only; actual
+ObtainX-driven split installation (RT02), physical-device acceptance, release
+and publication remain unqualified.

@@ -65,7 +65,7 @@ class R02Api36SafetyContracts(unittest.TestCase):
     def test_app_identity_mandatory(self):self.mutate(audit.SMOKE,"f\"package: name='{PACKAGE}'\" in badging",'True')
     def test_do_not_claim_split_e2e(self):self.mutate(audit.SMOKE,"'split_install_e2e_qualified': False","'split_install_e2e_qualified': True")
     def test_do_not_claim_release_qualification(self):self.mutate(audit.SMOKE,"'release_qualified': False","'release_qualified': True")
-    def test_activity_process_proof_mandatory(self):self.mutate(audit.SMOKE,"adb('shell', 'pidof', PACKAGE) == pid",'True')
+    def test_activity_process_proof_mandatory(self):self.mutate(audit.SMOKE,"query_main_pid() == pid",'True')
     def test_upload_allowlist_mandatory(self):self.mutate(audit.WORKFLOW,'obtainx-r02-api36/receipt.json','somewhere-else/receipt.json')
     def test_package_id_verifier_mandatory(self):self.mutate(audit.SMOKE,"'package': PACKAGE", "'package': 'other'")
     def test_docs_scope_required(self):self.mutate(audit.DOC,'NOT a split-install E2E qualification','does all installation')
@@ -79,6 +79,18 @@ class R02Api36SafetyContracts(unittest.TestCase):
         self.mutate(audit.SMOKE, 'need(not listing.strip()', 'need(True')
     def test_stdout_errors_must_be_visible(self):
         self.mutate(audit.SMOKE, "or result.stdout.decode(errors='replace').strip()", "or ''")
+    def test_foreground_activity_proof_not_skippable(self):
+        self.mutate(audit.SMOKE, "activity_proof in ('resumed', 'focused')", 'True')
+    def test_foreground_activity_state_must_be_queried(self):
+        self.mutate(audit.SMOKE, "adb('shell', 'dumpsys', 'activity', 'activities'", "adb('shell', 'getprop', 'ro.product.brand'")
+    def test_foreground_window_state_must_be_queried(self):
+        self.mutate(audit.SMOKE, "adb('shell', 'dumpsys', 'window', 'windows'", "adb('shell', 'getprop', 'ro.product.brand'")
+    def test_stable_process_must_be_queried(self):
+        self.mutate(audit.SMOKE, 'query_main_pid() == pid', 'True')
+    def test_foreground_activity_stability_required(self):
+        self.mutate(audit.SMOKE, "observe_main_activity() in ('resumed', 'focused')", 'True')
+    def test_receipt_foreground_proof_mandatory(self):
+        self.mutate(audit.SMOKE, "data.get('activity_proof') in ('resumed', 'focused')", 'True')
 
 class R02Api36FreshPackageProof(unittest.TestCase):
     """Reproduce API36 pm path's absent-package exit and verify fail-closed proof."""
@@ -136,6 +148,107 @@ class R02Api36FreshPackageProof(unittest.TestCase):
         self.assertIn('device offline', str(ex.exception))
 
 
+class R02Api36ActivityProof(unittest.TestCase):
+    RESUMED = ('  topResumedActivity=ActivityRecord{21c u0 '
+               + smoke.COMPONENT + ' t14}')
+    FOCUSED = '  mCurrentFocus=Window{123 u0 ' + smoke.COMPONENT + '}'
+
+    def test_am_start_different_output_requires_real_activity(self):
+        # A successful am-start banner on its own must NEVER prove launch.
+        self.assertEqual(smoke.main_activity_proof('Starting: Intent', 'Status: ok'), '')
+        self.assertEqual(smoke.launch_report('Starting: Intent\nWarning: task reused'),
+                         'Starting: Intent | Warning: task reused')
+
+    def test_resumed_activity_exact_package(self):
+        self.assertEqual(smoke.main_activity_proof(self.RESUMED, ''), 'resumed')
+        shortened = 'mResumedActivity: ActivityRecord{42 ' + smoke.PACKAGE + '/.MainActivity t2}'
+        self.assertEqual(smoke.main_activity_proof(shortened, ''), 'resumed')
+
+    def test_focused_activity_exact_package(self):
+        self.assertEqual(smoke.main_activity_proof('', self.FOCUSED), 'focused')
+
+    def test_foreground_unrelated_process_refused(self):
+        other = 'mCurrentFocus=Window{a u0 another.app/dev.imranr.obtainium.MainActivity}'
+        self.assertEqual(smoke.main_activity_proof('', other), '')
+        spoof = ('mCurrentFocus=Window{1 ' + smoke.PACKAGE
+                 + '.evil/dev.imranr.obtainium.MainActivity}')
+        self.assertEqual(smoke.main_activity_proof('', spoof), '')
+
+    def test_foreground_activity_text_not_in_resumed_field_refused(self):
+        history = 'ActivityRecord{a ' + smoke.COMPONENT + ' t2}'
+        not_top = 'mResumedActivity: ActivityRecord{b another.app/.MainActivity t3}'
+        self.assertEqual(smoke.main_activity_proof(history + '\n' + not_top, ''), '')
+        self.assertEqual(smoke.main_activity_proof('topResumedActivity=None',
+                         'mCurrentFocus=Window{0 com.android.launcher/.Launcher}'), '')
+
+    def test_missing_pid_may_be_transient(self):
+        value = subprocess.CompletedProcess(['adb'], 1, b'', b'')
+        with patch.object(smoke.subprocess, 'run', return_value=value):
+            self.assertEqual(smoke.query_main_pid(), '')
+
+    def test_ambiguous_pid_query_refused(self):
+        for rc,out,err in ((0,b'123 456',b''),(2,b'',b'device offline'),(1,b'',b'oops')):
+            value = subprocess.CompletedProcess(['adb'], rc, out, err)
+            with patch.object(smoke.subprocess, 'run', return_value=value):
+                with self.assertRaises(smoke.Refused): smoke.query_main_pid()
+
+    def test_valid_pid_query(self):
+        value = subprocess.CompletedProcess(['adb'], 0, b'4321\n', b'')
+        with patch.object(smoke.subprocess, 'run', return_value=value):
+            self.assertEqual(smoke.query_main_pid(), '4321')
+
+    def emulate_launch(self, proof, start):
+        with tempfile.TemporaryDirectory(prefix='rt01-hf03-integration-') as td:
+            out=Path(td)/'out';out.mkdir()
+            apk=Path(td)/'app-normal-debug.apk'
+            blob=b'APK-source-byte-proof'*8000
+            apk.write_bytes(blob)
+            sdk=Path(td)/'android-sdk';tools=sdk/'build-tools'/'35.0.0';tools.mkdir(parents=True)
+            (tools/'aapt').write_text('fixture')
+            (tools/'apksigner').write_text('fixture')
+            sha=hashlib.sha256(blob).hexdigest()
+            source='a'*40;run_id='42'
+            receipt={'schema':1,'status':'NOT_RUN','source_sha':source,'run_id':run_id,
+                     'hosted_emulator_only':True,'physical_device_qualified':False,
+                     'split_install_e2e_qualified':False,'obtainx_installer_e2e_qualified':False,
+                     'release_qualified':False,'publication_allowed':False}
+            (out/'receipt.json').write_text(json.dumps(receipt))
+            png=b'\x89PNG\r\n\x1a\n'+b'0'*3000
+            def fake_adb(*args,**kwargs):
+                if args==('get-state',):return 'device'
+                if args==('shell','getprop','ro.kernel.qemu'):return '1'
+                if args==('shell','getprop','ro.build.version.sdk'):return '36'
+                if args==('install','-t',str(apk)):return 'Success'
+                if args==('shell','pm','path',smoke.PACKAGE):return 'package:/data/app/fixture/base.apk'
+                if args==('shell','sha256sum','/data/app/fixture/base.apk'):
+                    return sha+'  /data/app/fixture/base.apk'
+                if args==('shell','am','start','-W','-n',smoke.COMPONENT):return start
+                if args==('exec-out','screencap','-p'):return png
+                raise AssertionError('unexpected device command '+str(args))
+            def fake_call(*args,**kwargs):
+                if args[1:]==('dump','badging',str(apk)):
+                    return "package: name='"+smoke.PACKAGE+"' versionCode='1'"
+                if args[1:]==('verify','--print-certs',str(apk)):
+                    return 'Signer #1 certificate SHA-256 digest: '+'b'*64
+                raise AssertionError('unexpected host command '+str(args))
+            with patch.object(smoke,'host_identity',return_value=(source,run_id)),                  patch.object(smoke,'APK',apk),                  patch.object(smoke,'adb',side_effect=fake_adb),                  patch.object(smoke,'call',side_effect=fake_call),                  patch.object(smoke,'verify_fresh_package_absent'),                  patch.object(smoke,'query_main_pid',return_value='5123'),                  patch.object(smoke,'observe_main_activity',return_value=proof),                  patch.dict(smoke.os.environ,{'ANDROID_HOME':str(sdk)}),                  patch.object(smoke.time,'sleep',return_value=None):
+                if proof:
+                    smoke.run_emulator(out)
+                    smoke.verify(out)
+                    result=json.loads((out/'receipt.json').read_text())
+                    self.assertEqual(result['activity_proof'],proof)
+                    self.assertTrue(result['foreground_activity_verified'])
+                else:
+                    with self.assertRaises(smoke.Refused):smoke.run_emulator(out)
+                    self.assertEqual(json.loads((out/'receipt.json').read_text())['status'],'NOT_RUN')
+
+    def test_full_launch_nonstandard_am_stdout_requires_resumed_proof(self):
+        self.emulate_launch('resumed','Starting: Intent { cmp=... }\nWarning: Activity not started, task brought to front')
+
+    def test_full_launch_no_foreground_refused_even_if_am_status_ok(self):
+        self.emulate_launch('', 'Status: ok\nComplete')
+
+
 class R02Api36ReceiptProof(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(prefix='ox-api36-receipt-')
@@ -153,6 +266,7 @@ class R02Api36ReceiptProof(unittest.TestCase):
             'release_qualified':False,'publication_allowed':False,'api_level':36,
             'emulator_abi':'x86_64','emulator_serial':smoke.SERIAL,
             'package':smoke.PACKAGE,'activity':smoke.COMPONENT,
+            'activity_proof':'resumed','foreground_activity_verified':True,
             'app_apk_sha256':self.app_sha,'installed_apk_sha256':self.app_sha,
             'debug_certificate_sha256':self.cert,
             'app_launch_png_sha256':hashlib.sha256(self.png).hexdigest(),
@@ -164,6 +278,12 @@ class R02Api36ReceiptProof(unittest.TestCase):
         with patch.object(smoke,'host_identity',return_value=(self.sha,self.run)):
             smoke.verify(self.out)
     def test_valid_receipt(self):self.verified()
+    def test_activity_missing_receipt_refused(self):
+        self.receipt.pop('activity_proof'); self._write()
+        with self.assertRaises(smoke.Refused):self.verified()
+    def test_activity_unverified_receipt_refused(self):
+        self.receipt['foreground_activity_verified']=False; self._write()
+        with self.assertRaises(smoke.Refused):self.verified()
     def test_wrong_source_refused(self):
         self.receipt['source_sha']='d'*40;self._write()
         with self.assertRaises(smoke.Refused):self.verified()

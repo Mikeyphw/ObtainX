@@ -96,7 +96,17 @@ def inspect(root: Path = ROOT) -> list[str]:
         "adb('shell', 'sha256sum', remote_path)",
         "installed_sha_text[0] == apk_sha",
         "adb('shell', 'am', 'start', '-W', '-n', COMPONENT",
-        "adb('shell', 'pidof', PACKAGE) == pid",
+        'main_activity_proof(activities: str, windows: str)',
+        "adb('shell', 'dumpsys', 'activity', 'activities'",
+        "adb('shell', 'dumpsys', 'window', 'windows'",
+        'query_main_pid() == pid',
+        "activity_proof in ('resumed', 'focused')",
+        "observe_main_activity() in ('resumed', 'focused')",
+        "'foreground_activity_verified':True",
+        "'foreground_activity_verified': True",
+        "data.get('activity_proof') in ('resumed', 'focused')",
+        'OX_R02_API36_MAIN_ACTIVITY_DEVICE_PROOF=',
+        'query_main_pid() == pid',
         "adb('exec-out', 'screencap', '-p'",
         "data['app_apk_sha256'] == data['installed_apk_sha256']",
         "data['app_launch_png_sha256']",
@@ -123,6 +133,21 @@ def inspect(root: Path = ROOT) -> list[str]:
     ):
         if proof_test not in files[TEST]:
             p.append('missing exact-package probe mutation regression: '+proof_test)
+    for proof_test in (
+        'test_am_start_different_output_requires_real_activity',
+        'test_resumed_activity_exact_package',
+        'test_focused_activity_exact_package',
+        'test_foreground_unrelated_process_refused',
+        'test_foreground_activity_text_not_in_resumed_field_refused',
+        'test_missing_pid_may_be_transient',
+        'test_ambiguous_pid_query_refused',
+        'test_activity_missing_receipt_refused',
+        'test_activity_unverified_receipt_refused',
+        'test_full_launch_nonstandard_am_stdout_requires_resumed_proof',
+        'test_full_launch_no_foreground_refused_even_if_am_status_ok',
+    ):
+        if proof_test not in files[TEST]:
+            p.append('missing launch/runtime proof mutation regression: ' + proof_test)
     if s.count('    verify_fresh_package_absent()\n') != 1:
         p.append('mandatory fresh-package probe invocation missing or duplicated')
     if s.count("'split_install_e2e_qualified': False") != 2:

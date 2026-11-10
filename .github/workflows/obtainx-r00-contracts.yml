@@ -1,0 +1,28 @@
+name: ObtainX R00 / Source and Contract Integrity
+
+on:
+  push:
+    branches: [main, 'feature/**', 'fix/**', 'bootstrap/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: obtainx-r00-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Run bootstrap regression tests
+        run: python3 -m unittest discover -s scripts/ci -p 'test_r00_*.py' -v
+      - name: Enforce R00 source/security contracts
+        run: python3 scripts/ci/r00_source_contract.py --check

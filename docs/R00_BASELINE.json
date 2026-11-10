@@ -1,0 +1,13 @@
+{
+  "created_utc": "2026-11-10T15:16:14.684444+00:00",
+  "fork_main_sha": "aea18592413de992e813bd063cb9ad453259582b",
+  "fork_repo": "Mikeyphw/ObtainX",
+  "release_authorized": false,
+  "roadmap_sha256": "db838a456c6909542199e1c2387225dae9e65f9724f46bad0511a71ee82fe4a5",
+  "runtime_qualified": false,
+  "schema_version": 1,
+  "upstream_default_branch": "main",
+  "upstream_repo": "bikram-agarwal/ObtainX",
+  "upstream_sha": "aea18592413de992e813bd063cb9ad453259582b",
+  "wizzwuz_changes_imported": false
+}

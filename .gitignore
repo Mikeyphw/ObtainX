@@ -59,3 +59,14 @@ node_modules/
 
 # FVM Version Cache
 .fvm/
+# --- ObtainX fork R00 signing and private-material exclusions ---
+/android/key.properties
+/android/app/*.jks
+/android/app/*.keystore
+/android/app/*.p12
+/android/app/*.pfx
+**/.env
+**/.env.*
+**/__pycache__/
+*.private-key
+# --- End ObtainX fork R00 exclusions ---

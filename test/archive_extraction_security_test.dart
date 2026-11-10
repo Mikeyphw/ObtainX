@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:archive/archive.dart' as archive;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:obtainium/services/artifact_file_work.dart';
 
@@ -65,6 +67,23 @@ void main() {
     await extractTarballOffIsolate(fixture('valid.tar.gz'), target());
     expect(File('${target()}/bundle/base.apk').readAsBytesSync(),
         'tar apk'.codeUnits);
+  });
+
+  test('ZIP and TAR.GZ stream members larger than the 64KiB read chunk', () async {
+    final payload = List<int>.generate(196608 + 37, (i) => (i * 31) % 251);
+    final contents = archive.Archive()
+      ..add(archive.ArchiveFile.bytes('bundle/base.apk', payload));
+    final zipFile = File('${workspace.path}/large-valid.zip')
+      ..writeAsBytesSync(archive.ZipEncoder().encode(contents));
+    final tarFile = File('${workspace.path}/large-valid.tar.gz')
+      ..writeAsBytesSync(
+        const archive.GZipEncoder().encode(archive.TarEncoder().encode(contents)),
+      );
+    await extractZipOffIsolate(zipFile.path, target());
+    expect(File('${target()}/bundle/base.apk').readAsBytesSync(), payload);
+    final tarTarget = '${workspace.path}/tar-extracted';
+    await extractTarballOffIsolate(tarFile.path, tarTarget);
+    expect(File('$tarTarget/bundle/base.apk').readAsBytesSync(), payload);
   });
 
   test('ZIP refuses ../ traversal', () async {

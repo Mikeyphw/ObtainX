@@ -120,12 +120,15 @@ class _LimitedOutputStream extends archive.OutputStream {
     // Avoid converting the entire decompressed entry into a single byte array.
     const chunkBytes = 64 * 1024;
     final start = stream.position;
-    final buffer = Uint8List(chunkBytes);
     try {
       while (!stream.isEOS) {
-        final got = stream.readInto(buffer, 0, buffer.length);
-        if (got <= 0) break;
-        writeBytes(buffer, length: got);
+        // archive v4 exposes readBytes on InputStream; readInto is available
+        // only on concrete input-stream types. Never buffer more than 64KiB.
+        final bytes = stream.readBytes(chunkBytes).toUint8List();
+        if (bytes.isEmpty) {
+          throw const FormatException('Unexpected end of archive stream');
+        }
+        writeBytes(bytes);
       }
     } finally {
       stream.setPosition(start);

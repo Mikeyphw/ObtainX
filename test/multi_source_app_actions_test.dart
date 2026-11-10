@@ -78,6 +78,7 @@ class _Device extends DeviceInfoPlatform {
         'tags',
       ])
         key: '',
+      'time': 0, // Build.TIME required by device_info_plus 13.3.0.
       'type': 'user',
       'supported32BitAbis': ['armeabi-v7a'],
       'supported64BitAbis': ['arm64-v8a'],

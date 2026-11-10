@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -68,6 +69,72 @@ class R02Api36SafetyContracts(unittest.TestCase):
     def test_upload_allowlist_mandatory(self):self.mutate(audit.WORKFLOW,'obtainx-r02-api36/receipt.json','somewhere-else/receipt.json')
     def test_package_id_verifier_mandatory(self):self.mutate(audit.SMOKE,"'package': PACKAGE", "'package': 'other'")
     def test_docs_scope_required(self):self.mutate(audit.DOC,'NOT a split-install E2E qualification','does all installation')
+    def test_fresh_probe_must_be_invoked(self):
+        self.mutate(audit.SMOKE, '    verify_fresh_package_absent()\n', '    pass # bypass fresh-package proof\n')
+    def test_package_listing_mandatory(self):
+        self.mutate(audit.SMOKE, "'shell', 'cmd', 'package', 'list', 'packages', '--user', '0', PACKAGE", "'shell', 'getprop', 'ro.product.brand'")
+    def test_exit_code_must_be_bounded(self):
+        self.mutate(audit.SMOKE, 'result.returncode in (0, 1) and not stdout and not stderr', 'True')
+    def test_package_inventory_must_be_empty(self):
+        self.mutate(audit.SMOKE, 'need(not listing.strip()', 'need(True')
+    def test_stdout_errors_must_be_visible(self):
+        self.mutate(audit.SMOKE, "or result.stdout.decode(errors='replace').strip()", "or ''")
+
+class R02Api36FreshPackageProof(unittest.TestCase):
+    """Reproduce API36 pm path's absent-package exit and verify fail-closed proof."""
+    def probe(self, status=1, stdout=b'', stderr=b'', listing=''):
+        result=subprocess.CompletedProcess(['adb'], status, stdout, stderr)
+        with patch.object(smoke.subprocess, 'run', return_value=result) as run, \
+             patch.object(smoke, 'adb', return_value=listing) as listing_call:
+            smoke.verify_fresh_package_absent()
+            run.assert_called_once()
+            listing_call.assert_called_once_with(
+                'shell', 'cmd', 'package', 'list', 'packages', '--user', '0', smoke.PACKAGE)
+
+    def test_absent_pm_path_rc1_with_independent_listing(self):
+        self.probe(status=1)
+
+    def test_absent_pm_path_rc0_with_independent_listing(self):
+        self.probe(status=0)
+
+    def test_nonfresh_pm_path_refused(self):
+        with self.assertRaises(smoke.Refused):
+            self.probe(status=0, stdout=b'package:/data/app/installed/base.apk')
+
+    def test_nonfresh_package_listing_refused(self):
+        with self.assertRaises(smoke.Refused):
+            self.probe(status=1, listing='package:'+smoke.PACKAGE)
+
+    def test_ambiguous_pm_path_status_refused(self):
+        with self.assertRaises(smoke.Refused):
+            self.probe(status=2)
+
+    def test_ambiguous_pm_path_stderr_refused(self):
+        with self.assertRaises(smoke.Refused):
+            self.probe(status=1, stderr=b'Package manager unavailable')
+
+    def test_failed_second_probe_refused(self):
+        result=subprocess.CompletedProcess(['adb'], 1, b'', b'')
+        with patch.object(smoke.subprocess, 'run', return_value=result), \
+             patch.object(smoke, 'adb', side_effect=smoke.Refused('ADB query failed')):
+            with self.assertRaises(smoke.Refused):
+                smoke.verify_fresh_package_absent()
+
+    def test_command_failure_logs_argv_and_stdout(self):
+        result=subprocess.CompletedProcess(['adb'], 1, b'stdout-only reason', b'')
+        with patch.object(smoke.subprocess, 'run', return_value=result):
+            with self.assertRaises(smoke.Refused) as ex:
+                smoke.call('adb', '-s', smoke.SERIAL, 'shell', 'pm', 'path', smoke.PACKAGE)
+        self.assertIn('shell pm path', str(ex.exception))
+        self.assertIn('stdout-only reason', str(ex.exception))
+
+    def test_command_failure_logs_stderr(self):
+        result=subprocess.CompletedProcess(['adb'], 2, b'', b'device offline')
+        with patch.object(smoke.subprocess, 'run', return_value=result):
+            with self.assertRaises(smoke.Refused) as ex:
+                smoke.call('adb', '-s', smoke.SERIAL, 'get-state')
+        self.assertIn('device offline', str(ex.exception))
+
 
 class R02Api36ReceiptProof(unittest.TestCase):
     def setUp(self):

@@ -56,3 +56,11 @@ Add controlled, signed lab APK plus real base/config split inventory on the
 emulator. Drive installation through ObtainX's own session APIs and capture
 Android PackageManager installed splitNames, status, consent and cleanup. Do
 not label R02 fully runtime-qualified until that follow-up E2E gate succeeds.
+
+## RT01 HF02 — Android API 36 fresh-package probe
+
+Hosted run 42879069321 booted the Cinderbox-style Google APIs x86_64 emulator and built the debug APK, but the smoke script failed at an ADB operation with exit 1 and no stderr. The original script did not log the failing command. A plausible first failing operation is `pm path` on a fresh (absent) package: Android may return exit 1 without any output. This remains a hypothesis until rerun evidence identifies the exact stage.
+
+HF02 accepts only `pm path` exit status 0 or 1 **with empty stdout/stderr**, and only when a *second independent* successful `cmd package list packages --user 0 <exact package>` query is also empty. Existing installations, query errors, nonzero codes other than 1, ambiguous output and failed secondary queries all refuse. Each emulator stage is logged and command errors include the exact operation and bounded stdout/stderr; no installation evidence is asserted on failure.
+
+The only permitted qualification after a fully green run is **hosted API 36 debug APK boot and byte identity**, not user-device acceptance, ObtainX-driven package installation, split install, a release signature, or publication.

@@ -39,13 +39,49 @@ def call(*argv: str, timeout: int = 45, binary: bool = False):
     except (OSError, subprocess.TimeoutExpired) as ex:
         raise Refused(f'Command unavailable or timed out: {argv[0]}') from ex
     if result.returncode:
-        detail = result.stderr.decode(errors='replace')[-700:]
-        raise Refused(f'{argv[0]} returned {result.returncode}: {detail}')
+        # Always expose the actual failing operation, including stdout-only
+        # Android errors. Never log an entire environment or any credentials.
+        detail = (result.stderr.decode(errors='replace').strip()
+                  or result.stdout.decode(errors='replace').strip()
+                  or '<no command output>')[-700:]
+        command = ' '.join(argv[:10])
+        raise Refused(f'{command} returned {result.returncode}: {detail}')
     return result.stdout if binary else result.stdout.decode(errors='replace').strip()
 
 
 def adb(*argv: str, binary: bool = False, timeout: int = 40):
     return call('adb', '-s', SERIAL, *argv, binary=binary, timeout=timeout)
+
+
+def verify_fresh_package_absent() -> None:
+    """Fail closed on an existing installation or an ambiguous package query.
+
+    On API 36, `pm path <absent-package>` may return exit 1 and *no* output.
+    That is not an ADB failure when a second, independent package-manager
+    query succeeds and also shows that this exact package is absent.
+    """
+    argv = ('adb', '-s', SERIAL, 'shell', 'pm', 'path', PACKAGE)
+    try:
+        result = subprocess.run(argv, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, timeout=40,
+                                check=False)
+    except (OSError, subprocess.TimeoutExpired) as ex:
+        raise Refused('Fresh-install package-path probe unavailable') from ex
+    stdout = result.stdout.decode(errors='replace').strip()
+    stderr = result.stderr.decode(errors='replace').strip()
+    need(result.returncode in (0, 1) and not stdout and not stderr,
+         f'Existing/ambiguous package-path probe: status={result.returncode}, '
+         f'stdout={stdout[-180:]!r}, stderr={stderr[-180:]!r}')
+    # A successful second command is mandatory. An empty inventory confirms
+    # absence; any installed match, command failure, or unexpected output redacts
+    # no error and refuses the run. Never interpret ADB/pm failures as absence.
+    listing = adb('shell', 'cmd', 'package', 'list', 'packages', '--user', '0', PACKAGE)
+    need(not listing.strip(), 'Package inventory is non-empty: emulator is not fresh')
+    print('OX_R02_API36_FRESH_PACKAGE_ABSENT_PASS', flush=True)
+
+
+def stage(label: str) -> None:
+    print('OX_R02_API36_STAGE='+label, flush=True)
 
 
 def host_identity() -> tuple[str, str]:
@@ -83,6 +119,7 @@ def run_emulator(out: Path) -> None:
     prior = json.loads(receipt_path(out).read_text())
     need(prior.get('status') == 'NOT_RUN' and prior.get('source_sha') == source
          and prior.get('run_id') == run_id, 'failure receipt missing or stale')
+    stage('VERIFY_EMULATOR_IDENTITY')
     need(adb('get-state') == 'device', 'ADB emulator not connected')
     need(adb('shell', 'getprop', 'ro.kernel.qemu') == '1', 'physical/unknown device refused')
     need(adb('shell', 'getprop', 'ro.build.version.sdk') == '36', 'Android API 36 required')
@@ -93,14 +130,18 @@ def run_emulator(out: Path) -> None:
     aapt = android_home / 'build-tools/35.0.0/aapt'
     apksigner = android_home / 'build-tools/35.0.0/apksigner'
     need(aapt.is_file() and apksigner.is_file(), 'Android SDK tools missing')
+    stage('VERIFY_APK_METADATA_AND_SIGNATURE')
     badging = call(str(aapt), 'dump', 'badging', str(APK), timeout=45)
     need(f"package: name='{PACKAGE}'" in badging, 'APK package ID mismatch')
     certs = call(str(apksigner), 'verify', '--print-certs', str(APK), timeout=45)
     matches = re.findall(r'Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]{64})', certs)
     need(len(matches) == 1, 'debug APK signature unverified')
     cert_sha = matches[0].lower()
-    need(not adb('shell', 'pm', 'path', PACKAGE), 'non-fresh emulator app state')
+    stage('VERIFY_FRESH_PACKAGE')
+    verify_fresh_package_absent()
+    stage('INSTALL_DEBUG_APK')
     adb('install', '-t', str(APK), timeout=180)
+    stage('VERIFY_INSTALLED_APK_BYTES')
     package_paths = adb('shell', 'pm', 'path', PACKAGE).splitlines()
     need(len(package_paths) == 1 and package_paths[0].startswith('package:/data/app/')
          and package_paths[0].endswith('/base.apk'), 'installed package path unexpected')
@@ -110,6 +151,7 @@ def run_emulator(out: Path) -> None:
     installed_sha_text = adb('shell', 'sha256sum', remote_path).split()
     need(len(installed_sha_text) == 2 and installed_sha_text[0] == apk_sha,
          'on-emulator installed bytes do not match CI-built artifact')
+    stage('START_OBTAINX_MAIN_ACTIVITY')
     start = adb('shell', 'am', 'start', '-W', '-n', COMPONENT, timeout=90)
     need('Status: ok' in start or 'Status: timeout' not in start and 'Complete' in start,
          'MainActivity did not launch')
@@ -123,6 +165,7 @@ def run_emulator(out: Path) -> None:
     need(bool(re.fullmatch(r'[0-9]+', pid)), 'ObtainX process never started')
     time.sleep(5)
     need(adb('shell', 'pidof', PACKAGE) == pid, 'ObtainX process exited or restarted unexpectedly')
+    stage('CAPTURE_EMULATOR_SCREENSHOT')
     image_bytes = adb('exec-out', 'screencap', '-p', binary=True, timeout=40)
     need(image_bytes.startswith(b'\x89PNG\r\n\x1a\n') and len(image_bytes) > 2000,
          'emulator screenshot invalid')

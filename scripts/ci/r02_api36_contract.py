@@ -82,7 +82,16 @@ def inspect(root: Path = ROOT) -> list[str]:
         "adb('shell', 'getprop', 'ro.build.version.sdk') == '36'",
         "f\"package: name='{PACKAGE}'\" in badging",
         "'verify', '--print-certs'",
-        "not adb('shell', 'pm', 'path', PACKAGE)",
+        'verify_fresh_package_absent()',
+        "'shell', 'pm', 'path', PACKAGE",
+        "'shell', 'cmd', 'package', 'list', 'packages', '--user', '0', PACKAGE",
+        'result.returncode in (0, 1) and not stdout and not stderr',
+        'need(not listing.strip()',
+        "stage('VERIFY_FRESH_PACKAGE')",
+        "stage('INSTALL_DEBUG_APK')",
+        "stage('VERIFY_INSTALLED_APK_BYTES')",
+        "detail = (result.stderr.decode(errors='replace').strip()",
+        "or result.stdout.decode(errors='replace').strip()",
         "adb('install', '-t', str(APK)",
         "adb('shell', 'sha256sum', remote_path)",
         "installed_sha_text[0] == apk_sha",
@@ -101,6 +110,21 @@ def inspect(root: Path = ROOT) -> list[str]:
     for needle in required_smoke:
         if needle not in s:
             p.append('emulator safety/proof code missing: ' + needle)
+    for proof_test in (
+        'test_absent_pm_path_rc1_with_independent_listing',
+        'test_absent_pm_path_rc0_with_independent_listing',
+        'test_nonfresh_pm_path_refused',
+        'test_nonfresh_package_listing_refused',
+        'test_ambiguous_pm_path_status_refused',
+        'test_ambiguous_pm_path_stderr_refused',
+        'test_failed_second_probe_refused',
+        'test_command_failure_logs_argv_and_stdout',
+        'test_command_failure_logs_stderr',
+    ):
+        if proof_test not in files[TEST]:
+            p.append('missing exact-package probe mutation regression: '+proof_test)
+    if s.count('    verify_fresh_package_absent()\n') != 1:
+        p.append('mandatory fresh-package probe invocation missing or duplicated')
     if s.count("'split_install_e2e_qualified': False") != 2:
         p.append('split-install admission flag must remain false at init and independent verify')
     if s.count("'package': PACKAGE") != 1 or s.count("'package':PACKAGE") != 1:

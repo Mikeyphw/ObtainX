@@ -525,6 +525,7 @@ class _FakeAndroidDeviceInfoPlatform extends DeviceInfoPlatform {
       'supported64BitAbis': const ['arm64-v8a'],
       'supportedAbis': const ['arm64-v8a', 'armeabi-v7a'],
       'tags': '',
+      'time': 0, // Build.TIME required by device_info_plus 13.3.0.
       'type': 'user',
       'isPhysicalDevice': true,
       'freeDiskSize': 1,

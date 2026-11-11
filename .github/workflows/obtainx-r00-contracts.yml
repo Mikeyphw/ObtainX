@@ -34,3 +34,5 @@ jobs:
         run: python3 scripts/ci/r02_hf02_contract.py --check
       - name: Enforce R02 API36 emulator source/evidence staleness contracts
         run: python3 scripts/ci/r02_api36_contract.py --check
+      - name: Enforce RT02 real Android system-installer source and mutation contracts
+        run: python3 scripts/ci/r02_rt02_contract.py --check

@@ -73,7 +73,11 @@ Future<Map<String, dynamic>> control(String route, String name, {String? result}
     final request = await client.postUrl(Uri.parse('http://127.0.0.1:$fixturePort/rt02c/$route'));
     request.headers.contentType = ContentType.json;
     request.headers.set('X-RT02C-Token', controlToken);
-    request.write(jsonEncode({'case': name, if (result != null) 'result': result}));
+    final body = <String, String>{'case': name};
+    if (result != null) {
+      body['result'] = result;
+    }
+    request.write(jsonEncode(body));
     final response = await request.close().timeout(const Duration(minutes: 4));
     final text = await utf8.decoder.bind(response).join();
     if (response.statusCode != HttpStatus.ok) {

@@ -95,6 +95,7 @@ jobs:
           name: obtainx-r02-rt02-system-installer-${{ github.sha }}
           path: |
             ${{ runner.temp }}/obtainx-rt02/rt02-receipt.json
+            ${{ runner.temp }}/obtainx-rt02/progress.json
             ${{ runner.temp }}/obtainx-rt02/fixtures/fixture_inventory.json
           if-no-files-found: warn
           retention-days: 7

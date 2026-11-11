@@ -53,9 +53,10 @@ def inspect(root:Path=ROOT)->list[str]:
                   'test -c /dev/kvm', "'system-images;android-36;google_apis;x86_64'",
                   'ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d',
                   'api-level: 36','target: google_apis','arch: x86_64',
-                  'if: always()', 'rt02-receipt.json','fixture_inventory.json',
+                  'if: always()', 'rt02-receipt.json','progress.json','fixture_inventory.json',
                   'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'),
         DART:("IntegrationTestWidgetsFlutterBinding.ensureInitialized()",
+              'OX_R02_RT02_DART_STAGE=INSTALL_CALL',
               "const version = scenario == 'standalone' ? 1 : 2;",
               'StockInstaller(SettingsProvider()).installApk(',
               'resolveInstallBundlePlan(',"expectedPackageName:packageName",
@@ -79,6 +80,8 @@ def inspect(root:Path=ROOT)->list[str]:
               "label in ('Install','Update','Install app','Update app')",
               "tap_count==1", "'All tests passed!' in text",
               "installed_state(1 if scenario=='standalone' else 2",
+              'RT02_FLUTTER_TIMEOUT', 'flutter_phase(logfile)',
+              'record_flutter_progress(out,scenario,phase',
               "'shell','sha256sum'", "'shell','pm','path'",
               "'status']='PASS_TWO_ANDROID_SYSTEM_SESSIONS'",
               "'full_r02_matrix_qualified':False",
@@ -97,6 +100,8 @@ def inspect(root:Path=ROOT)->list[str]:
                   "'physical_device_qualified':False", "'publication_allowed':False"):
         if host.count(label) != 2:
             errors.append('runtime gate false admission flag missing in initial receipt: '+label)
+    if host.count('phase=flutter_phase(logfile)') != 2:
+        errors.append('runtime progress phase probes missing or duplicated')
     # The verification must be source-bound and require both distinct scenarios.
     if "for scenario in ('standalone','split')" not in host:
         errors.append('real installer host must execute both actual Android sessions')
@@ -134,7 +139,8 @@ def inspect(root:Path=ROOT)->list[str]:
         hf=_functions(host);ff=_functions(fixture)
         for name,needles in {
             'installed_state': ('sha_file(fixture_dir/', "'shell','sha256sum'", "digest[0]==expected[name]", "str(expected_version) in matches", "'shell','dumpsys','package'"),
-            'one_scenario': ('flutter', "tap_count==1", "'All tests passed!' in text"),
+            'one_scenario': ('flutter', "tap_count==1", "'All tests passed!' in text",
+                             'flutter_phase(logfile)', 'record_flutter_progress(out,scenario,phase'),
             '_tap_confirmed_install_dialog': ('APPROVERS',"NAME in", "label in ('Install','Update'"),
             'execute': ("for scenario in ('standalone','split')", "'status']='PASS_TWO_ANDROID_SYSTEM_SESSIONS'"),
             'verify': ("'status':'PASS_TWO_ANDROID_SYSTEM_SESSIONS'", "'scenarios')==["),

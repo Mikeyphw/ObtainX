@@ -2,6 +2,7 @@
 // Hosted disposable Android 16 emulator only. Never included in release builds.
 import 'dart:io';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:obtainium/installers/stock_installer.dart';
@@ -38,6 +39,7 @@ Future<File> fetchFixture(String name, String expected, Directory parent) async 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('RT02 controlled APK session through ObtainX StockInstaller', (tester) async {
+    debugPrint('OX_R02_RT02_DART_STAGE=SCENARIO_STARTED');
     if (!Platform.isAndroid) throw StateError('RT02 is Android-only');
     if (scenario != 'standalone' && scenario != 'split') {
       throw StateError('RT02 scenario not approved');
@@ -66,9 +68,11 @@ void main() {
       expect(plan.sessionPaths.length, scenario == 'split' ? 2 : 1);
       expect(plan.requiresSplitSession, scenario == 'split');
       // Android's real system installer must confirm success; no mocked channels.
+      debugPrint('OX_R02_RT02_DART_STAGE=INSTALL_CALL');
       final result = await StockInstaller(SettingsProvider()).installApk(
         plan.sessionPaths, appId:packageName,
       ).timeout(const Duration(minutes: 3));
+      debugPrint('OX_R02_RT02_DART_STAGE=INSTALL_RETURNED');
       expect(result.isSuccess, isTrue,
         reason:'Real system PackageInstaller did not confirm installation');
     } finally {

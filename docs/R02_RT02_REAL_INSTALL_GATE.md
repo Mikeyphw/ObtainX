@@ -59,3 +59,18 @@ CI-only and signed with a freshly generated key deleted after use.
 This is only a fixture-generation correction. It does not qualify the real
 StockInstaller journeys, the full R02 matrix, signing for release, or a
 physical device until the corresponding hosted acceptance receipts pass.
+
+### RT02A HF04 run tracking and bounded diagnostics
+
+The source-pinned Termux overlay launcher follows the PR #4 head's four GitHub Actions
+workflows **synchronously after the push**. It refuses runs for older commits or other
+branches, prints each discovered run URL and exact failing step, and exits nonzero if
+RT02A real installer acceptance fails. `--watch-only` resumes watching the current
+PR head; `--no-watch` explicitly opts out. No scheduled ChatGPT reminders are created.
+
+The hosted fixture integration harness now reports a bounded, allowlisted Flutter
+progress phase (Gradle build, APK install, Dart test, StockInstaller call/return)
+and the package approval count. Failures upload `progress.json` and a fail-closed
+receipt, never raw Flutter logs, device logs or signing secrets. The cold-build
+ceiling is enlarged, but installer approvals still have their own short limit.
+Passing this scoped lane does **not** qualify all APK/APKM/APKS/XAPK cases.

@@ -60,6 +60,14 @@ class SourceMutations(unittest.TestCase):
             "const version = scenario == 'standalone' ? 1 : 2;",
             "final version = scenario == 'standalone' ? 1 : 2;")
     def test_dart_plan(self):self.mutation(C.DART,'resolveInstallBundlePlan(','fakePlan(')
+    def test_missing_progress_artifact_rejected(self):
+        self.mutation(C.WORKFLOW,'obtainx-rt02/progress.json','obtainx-rt02/lost.json')
+    def test_timeout_not_silenced(self):
+        self.mutation(C.HOST,'RT02_FLUTTER_TIMEOUT','IGNORED_TIMEOUT')
+    def test_installer_stage_not_silenced(self):
+        self.mutation(C.HOST,'phase=flutter_phase(logfile)',"phase='IGNORED'")
+    def test_dart_instrumentation_not_silenced(self):
+        self.mutation(C.DART,'OX_R02_RT02_DART_STAGE=INSTALL_CALL','IGNORED_STAGE')
     def test_r00_test_must_be_updated(self):self.mutation(C.R00_TEST,'test_reviewed_rt02_required_and_release_is_still_prohibited','test_fake')
     def test_ci_source_gate(self):self.mutation(C.SOURCE_GATE,'run: python3 scripts/ci/r02_rt02_contract.py --check','run: true')
     def test_missing_dart_dep(self):self.mutation(C.PUBSPEC,'integration_test:', 'ignored_integration_test:')

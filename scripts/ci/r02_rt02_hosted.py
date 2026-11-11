@@ -152,6 +152,44 @@ def _tap_confirmed_install_dialog()->bool:
     print('OX_R02_RT02_ANDROID_CONFIRMATION_TAPPED',flush=True)
     return True
 
+# Only allowlisted progress phases are emitted or retained; raw Flutter logs remain
+# local to the ephemeral runner and are deliberately excluded from artifacts.
+PHASES=('FLUTTER_STARTING','GRADLE_BUILD','TEST_APK_INSTALL',
+        'DART_TEST_STARTED','STOCK_INSTALLER_CALL','STOCK_INSTALLER_RETURNED')
+
+
+def flutter_phase(logfile:Path)->str:
+    if not logfile.is_file(): return 'FLUTTER_STARTING'
+    with logfile.open('rb') as stream:
+        stream.seek(max(0,logfile.stat().st_size-48000))
+        tail=stream.read().decode('utf-8','replace')
+    if 'OX_R02_RT02_DART_STAGE=INSTALL_RETURNED' in tail:
+        return 'STOCK_INSTALLER_RETURNED'
+    if 'OX_R02_RT02_DART_STAGE=INSTALL_CALL' in tail:
+        return 'STOCK_INSTALLER_CALL'
+    if 'OX_R02_RT02_DART_STAGE=SCENARIO_STARTED' in tail:
+        return 'DART_TEST_STARTED'
+    if 'Installing build/' in tail or 'Installing APK' in tail:
+        return 'TEST_APK_INSTALL'
+    if 'Running Gradle task' in tail or 'Gradle task assemble' in tail:
+        return 'GRADLE_BUILD'
+    return 'FLUTTER_STARTING'
+
+
+def record_flutter_progress(out:Path,scenario:str,phase:str,elapsed:int,
+                            app_installed:bool,confirmations:int)->None:
+    need(phase in PHASES and scenario in ('standalone','split'),
+         'invalid bounded diagnostic phase')
+    evidence={'schema':1,'status':'RUNNING','scenario':scenario,
+              'flutter_phase':phase,'elapsed_seconds':int(elapsed),
+              'obtainx_apk_present':app_installed,
+              'android_confirmation_count':confirmations,
+              'contains_raw_device_logs':False}
+    (out/'progress.json').write_text(json.dumps(evidence,sort_keys=True,indent=2)+'\n')
+    print(f'OX_R02_RT02_PROGRESS scenario={scenario} phase={phase} elapsed={int(elapsed)}s '
+          f'app_installed={int(app_installed)} approvals={confirmations}',flush=True)
+
+
 def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
     assert scenario in ('standalone','split')
     files=inventory['files'];base=files['base_v1.apk' if scenario=='standalone' else 'base_v2.apk']
@@ -163,12 +201,26 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
           '--dart-define=OX_R02_SPLIT_SHA='+split['sha256']]
     logfile=out/('flutter-'+scenario+'.log')
     tap_count=0
-    deadline=time.monotonic()+330
+    started=time.monotonic()
+    # Cold hosted Gradle builds can exceed the original 330s ceiling.
+    # Once the Dart installer call starts, allow at most 240s for Android UI.
+    deadline=started+900
+    saw_installer_call=False
+    last_progress=0.0
     with logfile.open('wb') as log:
         p=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT)
         installed_app=False
         try:
             while p.poll() is None and time.monotonic()<deadline:
+                now=time.monotonic()
+                phase=flutter_phase(logfile)
+                if phase=='STOCK_INSTALLER_CALL' and not saw_installer_call:
+                    saw_installer_call=True
+                    deadline=min(deadline,now+240)
+                if now-last_progress>=25 or not last_progress:
+                    record_flutter_progress(out,scenario,phase,int(now-started),
+                                            installed_app,tap_count)
+                    last_progress=now
                 # Flutter installs the test runner APK itself. Explicit app-op
                 # grants only install-from-source eligibility, not final install.
                 if not installed_app:
@@ -180,10 +232,18 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
                     if _tap_confirmed_install_dialog():tap_count+=1
                 time.sleep(2)
             if p.poll() is None:
-                raise Refused('Flutter real installer integration test exceeded bounded execution')
+                phase=flutter_phase(logfile)
+                record_flutter_progress(out,scenario,phase,int(time.monotonic()-started),
+                                        installed_app,tap_count)
+                raise Refused('RT02_FLUTTER_TIMEOUT: scenario='+scenario+' phase='+phase+
+                              ' app_present='+str(installed_app)+
+                              ' approvals='+str(tap_count))
             text=logfile.read_text('utf-8','replace')
+            record_flutter_progress(out,scenario,flutter_phase(logfile),
+                                    int(time.monotonic()-started),installed_app,tap_count)
             need(p.returncode==0 and 'All tests passed!' in text,
-                 'Flutter real installer test failed ('+scenario+'): '+text[-650:])
+                 'Flutter real installer test failed ('+scenario+') phase='+flutter_phase(logfile)+
+                 ' rc='+str(p.returncode))
             need(installed_app,'Flutter test APK not installed on emulator')
             need(tap_count==1,'Android system installation confirmation was not observed exactly once')
             actual=installed_state(1 if scenario=='standalone' else 2,scenario=='split',out/'fixtures')
@@ -262,6 +322,13 @@ def main()->int:
             if receipt.is_file():
                 try:
                     v=json.loads(receipt.read_text());v['status']='FAILED';v['failure_category']=type(ex).__name__
+                    progress=a.out/'progress.json'
+                    if progress.is_file():
+                        detail=json.loads(progress.read_text())
+                        if detail.get('flutter_phase') in PHASES:
+                            v['failure_phase']=detail['flutter_phase']
+                        if detail.get('scenario') in ('standalone','split'):
+                            v['failure_scenario']=detail['scenario']
                     receipt.write_text(json.dumps(v,sort_keys=True,indent=2)+'\n')
                 except (OSError,ValueError):pass
         print('OX_R02_RT02_REFUSED: '+str(ex),file=sys.stderr,flush=True)

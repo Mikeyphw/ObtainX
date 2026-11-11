@@ -162,22 +162,68 @@ def run(out: Path) -> int:
                            'obb_device_qualified':False,'release_qualified':False})
     fixtures=out/'fixtures'
     artifact_inventory(fixtures,head)
-    # Original seven-case acceptance must have passed before any session action.
+    # RT02C deliberately removes its v1 fixture in its finally block. P02
+    # must establish a NEW, source-bound baseline; never skip RT02C's teardown.
+    # This is only the already-verified disposable API36 emulator, never a user
+    # device. No v2 install-commit is allowed in either abandonment scenario.
     rt02c.verify(out)
-    print('OX_RT02F_P02_ANDROID_PHASE=CHECK_INITIAL_V1_BASELINE',flush=True)
-    before=rt02c.baseline_v1(fixtures)
-    results=[]
-    for kind,names in CASES:
-        results.append(run_case(fixtures,kind,names,run_id))
-    print('OX_RT02F_P02_ANDROID_PHASE=CHECK_FINAL_V1_BASELINE',flush=True)
-    need(rt02c.baseline_v1(fixtures)==before,'final Android package baseline changed')
-    body={'schema':1,'status':'PASS_TWO_ABANDONED_ANDROID_SESSIONS',
-          'source_sha':head,'run_id':run_id,'hosted_emulator_only':True,
-          'physical_device_qualified':False,'app_ui_cancel_qualified':False,
-          'other_installer_backends_qualified':False,'obb_device_qualified':False,
-          'release_qualified':False,'cases':results,
-          'original_base_sha256':before['base_sha256'],
-          'original_version_code':1}
+    inv=json.loads((fixtures/'fixture_inventory.json').read_text('utf8'))
+    v1=fixtures/'base_v1.apk'
+    row=inv.get('files',{}).get('base_v1.apk',{})
+    need(inv.get('schema')==1 and inv.get('source_sha')==head and
+         inv.get('fixture_package')==base.FIXTURE and
+         inv.get('signed_with_ephemeral_ci_key') is True and
+         inv.get('never_released') is True and
+         v1.is_file() and not v1.is_symlink() and
+         250<v1.stat().st_size<16*1024*1024 and
+         row.get('sha256')==sha(v1) and row.get('size')==v1.stat().st_size and
+         row.get('version_code')==1,
+         'signed v1 baseline inventory invalid or source drift')
+    print('OX_RT02F_P02_ANDROID_PHASE=CHECK_RT02C_TEARDOWN',flush=True)
+    need(base.empty_or_expected_package() is True,
+         'RT02C must leave its fixture absent before P02 independent staging')
+    staged=False
+    try:
+        print('OX_RT02F_P02_ANDROID_PHASE=STAGE_FRESH_V1_BASELINE',flush=True)
+        staged=True  # also clean up if Android install partially succeeds.
+        install=adb_phase('STAGE_FRESH_V1_BASELINE','install','-t',str(v1),timeout=90)
+        need(install.splitlines() and install.splitlines()[-1].strip()=='Success',
+             'Android did not confirm disposable signed v1 fixture staging')
+        print('OX_RT02F_P02_ANDROID_PHASE=CHECK_INITIAL_V1_BASELINE',flush=True)
+        before=rt02c.baseline_v1(fixtures)
+        results=[]
+        for kind,names in CASES:
+            results.append(run_case(fixtures,kind,names,run_id))
+        print('OX_RT02F_P02_ANDROID_PHASE=CHECK_FINAL_V1_BASELINE',flush=True)
+        need(rt02c.baseline_v1(fixtures)==before,'final Android package baseline changed')
+        body={'schema':1,'status':'PASS_TWO_ABANDONED_ANDROID_SESSIONS',
+              'source_sha':head,'run_id':run_id,'hosted_emulator_only':True,
+              'physical_device_qualified':False,'app_ui_cancel_qualified':False,
+              'other_installer_backends_qualified':False,'obb_device_qualified':False,
+              'release_qualified':False,'cases':results,
+              'original_base_sha256':before['base_sha256'],
+              'original_version_code':1}
+    finally:
+        if staged:
+            # Never leave even a disposable test package behind on a failed case.
+            # Keep receipt NOT_RUN on any failure, including cleanup failure.
+            print('OX_RT02F_P02_ANDROID_PHASE=CLEANUP_FRESH_V1_BASELINE',flush=True)
+            try:
+                cleanup=adb_phase('CLEANUP_FRESH_V1_BASELINE',
+                                  'shell','pm','uninstall',base.FIXTURE,timeout=60)
+                need(cleanup.splitlines() and cleanup.splitlines()[-1].strip()=='Success',
+                     'P02 disposable v1 fixture uninstall did not confirm success')
+            except base.Refused as error:
+                # A failed/partial staging may already have left no package.
+                # We may accept ONLY proven absence, never ambiguous leftovers.
+                try:
+                    need(base.empty_or_expected_package() is True,
+                         'P02 fixture cleanup absence could not be proven')
+                except base.Refused as check_error:
+                    raise base.Refused('RT02F P02 fixture cleanup refused') from check_error
+            need(base.empty_or_expected_package() is True,
+                 'P02 v1 fixture remained after cleanup')
+    # Publish PASS only after both sessions AND teardown were independently checked.
     write_receipt(receipt,body)
     print('OX_RT02F_P02_SOURCE_BOUND_ANDROID_ABANDON_PASS 2/2',flush=True)
     return 0

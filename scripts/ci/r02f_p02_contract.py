@@ -27,6 +27,13 @@ def inspect(root:Path=ROOT)->list[str]:
               "('split', ('base_v2.apk', 'config.x86_64.apk'))",
               'base.host_check()', 'rt02c.verify(out)',
               'rt02c.baseline_v1(fixtures)',
+              'base.empty_or_expected_package()',
+              "'install','-t',str(v1),timeout=90",
+              "'shell','pm','uninstall',base.FIXTURE,timeout=60",
+              'P02 v1 fixture remained after cleanup',
+              'if staged:',
+              "'base_v1.apk',{}",
+              'signed_with_ephemeral_ci_key',
               "'shell','cmd','package',operation,*args",
               "package_session('CREATE_",
               "package_session('WRITE_",
@@ -86,6 +93,21 @@ def inspect(root:Path=ROOT)->list[str]:
         errors.append('successful abandon plus failure cleanup both mandatory')
     if "'shell','pm','install-" in host or "'install-commit'" in host:
         errors.append('legacy/commit package session interface is forbidden')
+    # RT02C already uninstalls its fixture. Reinstall only a verified v1 fixture
+    # in P02, and require cleanup before a PASS receipt can be produced.
+    if host.find('rt02c.verify(out)')<0 or host.find('base.empty_or_expected_package()') < host.find('rt02c.verify(out)'):
+        errors.append('P02 fresh baseline cannot precede RT02C source-bound proof')
+    if host.find('STAGE_FRESH_V1_BASELINE') > host.find('run_case(fixtures,kind,names,run_id)'):
+        errors.append('P02 must establish fresh v1 before cancellation scenarios')
+    if host.find('write_receipt(receipt,body)') < host.find('CLEANUP_FRESH_V1_BASELINE'):
+        errors.append('P02 success receipt written before required fixture cleanup')
+    if host.count("'shell','pm','uninstall',base.FIXTURE,timeout=60") != 1:
+        errors.append('P02 must independently uninstall its disposable test fixture')
+    if host.count('base.empty_or_expected_package()') != 3:
+        errors.append('P02 must prove absence before install and after cleanup')
+    if "inv.get('signed_with_ephemeral_ci_key') is True" not in host or \
+       "row.get('version_code')==1" not in host:
+        errors.append('P02 baseline fixture must be source-bound and ephemeral-signed v1')
     if 'except (base.Refused, OSError, TimeoutError) as exc:' not in host:
         errors.append('missing phase-specific fail-closed ADB errors')
     if "if session is not None and not abandoned:" not in host or \

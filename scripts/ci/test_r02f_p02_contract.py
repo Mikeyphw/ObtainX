@@ -96,6 +96,21 @@ class RT02FP02Contracts(unittest.TestCase):
         self.mutation(C.HOST,'if session is not None and not abandoned:',
                       'if False:')
 
+    def test_fresh_baseline_install_cannot_be_skipped(self):
+        self.mutation(C.HOST,"'install','-t',str(v1),timeout=90",
+                      "'install','-t',str(fixtures/'fake.apk'),timeout=90")
+
+    def test_cleanup_cannot_be_skipped(self):
+        self.mutation(C.HOST,"'shell','pm','uninstall',base.FIXTURE,timeout=60",
+                      "'shell','echo','skip-uninstall',timeout=60")
+
+    def test_refuse_missing_clean_rt02c_handoff(self):
+        self.mutation(C.HOST,'base.empty_or_expected_package()', 'True')
+
+    def test_refuse_unbound_v1_signer(self):
+        self.mutation(C.HOST,"inv.get('signed_with_ephemeral_ci_key') is True",
+                      "inv.get('signed_with_ephemeral_ci_key') is False")
+
     def test_refuse_skipped_p02_retrigger(self):
         self.mutation(C.WORKFLOW,"      - 'scripts/ci/r02f_p02_*'",
                       "      - 'docs/**'")

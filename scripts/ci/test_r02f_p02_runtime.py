@@ -61,7 +61,7 @@ class RT02FP02Runtime(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory(prefix='ox-p02-fake-')
         self.addCleanup(self.temp.cleanup)
         self.fixtures=Path(self.temp.name)
-        for name in ('base_v2.apk','config.x86_64.apk'):
+        for name in ('base_v1.apk','base_v2.apk','config.x86_64.apk'):
             (self.fixtures/name).write_bytes(b'SIGNED-DISPOSABLE-FIXTURE'*15)
         self.android=FakeAndroid()
         self.probes=[]
@@ -115,6 +115,71 @@ class RT02FP02Runtime(unittest.TestCase):
             M.run_case(self.fixtures,'standalone',M.CASES[0][1],'123456')
         self.assertEqual(self.android.active,set())
         self.assertEqual(self.android.paths,{})
+
+    def _fake_run_host(self, *, stale=False, stage_failure=False, cleanup_failure=False, case_failure=False):
+        inv={'schema':1,'source_sha':'a'*40,'fixture_package':M.base.FIXTURE,
+             'signed_with_ephemeral_ci_key':True,'never_released':True,
+             'files':{'base_v1.apk':{'sha256':M.sha(self.fixtures/'base_v1.apk'),
+                                    'size':(self.fixtures/'base_v1.apk').stat().st_size,
+                                    'version_code':1}}}
+        import json
+        (self.fixtures/'fixtures').mkdir(exist_ok=True)
+        (self.fixtures/'fixtures'/'base_v1.apk').write_bytes((self.fixtures/'base_v1.apk').read_bytes())
+        (self.fixtures/'fixtures'/'fixture_inventory.json').write_text(json.dumps(inv))
+        calls=[]
+        state={'installed':stale}
+        def absent():
+            calls.append('CHECK_ABSENT')
+            if state['installed']:raise M.base.Refused('package unexpectedly present')
+            return True
+        def stage(phase,*args,**kwargs):
+            calls.append(phase)
+            if phase=='STAGE_FRESH_V1_BASELINE':
+                if stage_failure:raise M.base.Refused('adb install error')
+                state['installed']=True
+                return 'Performing Streamed Install\nSuccess'
+            if phase=='CLEANUP_FRESH_V1_BASELINE':
+                if cleanup_failure:raise M.base.Refused('adb uninstall error')
+                state['installed']=False
+                return 'Success'
+            raise AssertionError('unexpected ADB phase '+phase)
+        def case(*args):
+            calls.append('ABANDON_CASE')
+            if case_failure:raise M.base.Refused('abandon refused')
+            return {'scenario':args[1],'original_version_code':1}
+        saved=[]
+        def receipt(path,body):saved.append(body)
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(M.base,'host_check',return_value=('a'*40,'1234')))
+            stack.enter_context(patch.object(M.base,'empty_or_expected_package',side_effect=absent))
+            stack.enter_context(patch.object(M.rt02c,'verify',return_value=0))
+            stack.enter_context(patch.object(M,'artifact_inventory',return_value=inv))
+            stack.enter_context(patch.object(M,'adb_phase',side_effect=stage))
+            stack.enter_context(patch.object(M,'run_case',side_effect=case))
+            stack.enter_context(patch.object(M,'write_receipt',side_effect=receipt))
+            M.run(self.fixtures)
+        return calls,saved,state
+
+    def test_restage_exact_v1_after_rt02c_cleanup(self):
+        calls,saved,state=self._fake_run_host()
+        self.assertEqual(calls.count('STAGE_FRESH_V1_BASELINE'),1)
+        self.assertEqual(calls.count('CLEANUP_FRESH_V1_BASELINE'),1)
+        self.assertEqual(calls.count('ABANDON_CASE'),2)
+        self.assertFalse(state['installed'])
+        self.assertEqual(saved[-1]['status'],'PASS_TWO_ABANDONED_ANDROID_SESSIONS')
+
+    def test_stale_fixture_refused_before_restage(self):
+        with self.assertRaises(M.base.Refused):self._fake_run_host(stale=True)
+
+    def test_failed_stage_cleans_and_refuses(self):
+        with self.assertRaises(M.base.Refused):self._fake_run_host(stage_failure=True)
+
+    def test_failed_abandon_cleans_and_refuses(self):
+        with self.assertRaises(M.base.Refused):self._fake_run_host(case_failure=True)
+
+    def test_unproven_cleanup_refuses(self):
+        with self.assertRaises(M.base.Refused):self._fake_run_host(cleanup_failure=True)
 
     def test_reject_session_id_injection(self):
         self.assertEqual(M.parse_session_id('Success: created install session [18]'),'18')

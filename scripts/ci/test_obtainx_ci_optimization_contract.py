@@ -53,6 +53,19 @@ class CIOptimizationSafety(unittest.TestCase):
     def test_source_contracts_cannot_be_skipped(self):
         self.mutation(M.SOURCE,"python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v",'echo skip')
 
+    def test_guard_must_share_source_runner(self):
+        self.mutation(M.SOURCE,'Development-only cannot qualify (same runner)',
+                      'Development-only guard moved outside source runner')
+
+    def test_guard_must_stay_red(self):
+        self.mutation(M.SOURCE,'          exit 1\n','          exit 0\n')
+
+    def test_guard_requires_label(self):
+        self.mutation(M.SOURCE,
+            '        if: ${{ '+M.REFUSE_EXPR+' }}',
+            '        if: ${{ false }}')
+
+
     def test_artifact_upload_timeout_bounded(self):
         self.mutation(M.HEAVY[0],'timeout-minutes: 3\n        uses: '+M.UPLOAD,
                       'timeout-minutes: 120\n        uses: '+M.UPLOAD)

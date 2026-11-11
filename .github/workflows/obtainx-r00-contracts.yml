@@ -51,13 +51,9 @@ jobs:
         run: python3 scripts/ci/r02_rt02c_contract.py --check
       - name: Enforce bounded CI optimization and dev-only qualification guard
         run: python3 -B scripts/ci/obtainx_ci_optimization_contract.py --check
-
-  development-only-not-qualified:
-    if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:development-only') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 2
-    steps:
-      - name: Development-only is not a qualification result
+      - name: Development-only cannot qualify (same runner)
+        if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:development-only') }}
+        shell: bash
         run: |
           echo 'OX_CI_DEVELOPMENT_ONLY_NOT_QUALIFIED: remove ci:development-only to force the full Android/Flutter matrix' >&2
           echo 'Development-only mode. All Android runtime and full Flutter gates are NOT QUALIFIED.' >> "$GITHUB_STEP_SUMMARY"

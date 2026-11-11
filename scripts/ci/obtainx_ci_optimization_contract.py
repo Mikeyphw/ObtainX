@@ -50,10 +50,22 @@ def inspect(root: Path = ROOT) -> list[str]:
             errors.append('manual full gate or read-only permission missing: '+rel)
         if 'cancel-in-progress: true' not in content:
             errors.append('obsolete PR run cancellation missing: '+rel)
-    if '  development-only-not-qualified:' not in source or REFUSE_EXPR not in source or \
-            'OX_CI_DEVELOPMENT_ONLY_NOT_QUALIFIED' not in source or \
-            'exit 1' not in source or '  source-contracts:' not in source:
-        errors.append('explicit development mode must keep a hard RED qualification guard')
+    # Keep the RED development-only guard on the SAME source-contracts runner.
+    # A separate runner-only refusal job can remain indefinitely queued.
+    guard_name='      - name: Development-only cannot qualify (same runner)\n'
+    contract_step=('      - name: Enforce bounded CI optimization and dev-only qualification guard\n'
+                   '        run: python3 -B scripts/ci/obtainx_ci_optimization_contract.py --check\n')
+    guarded=source.split(guard_name,1)[1] if source.count(guard_name)==1 else ''
+    if (source.count('  source-contracts:')!=1 or
+            '  development-only-not-qualified:' in source or
+            source.count(guard_name)!=1 or
+            source.count(contract_step)!=1 or
+            source.find(guard_name)<source.find(contract_step) or
+            '        if: ${{ '+REFUSE_EXPR+' }}\n' not in guarded or
+            'OX_CI_DEVELOPMENT_ONLY_NOT_QUALIFIED' not in guarded or
+            '          exit 1\n' not in guarded or
+            '  runs-on: ubuntu-24.04' not in source):
+        errors.append('development-only guard must be RED at end of source-contracts on same runner')
     if 'python3 -B scripts/ci/obtainx_ci_optimization_contract.py --check' not in source or \
             "python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v" not in source:
         errors.append('optimization/security source tests must be mandatory')

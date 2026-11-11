@@ -16,8 +16,9 @@ This is **CI infrastructure optimization only**. It does not repair the pending 
 
 - Source and security/mutation tests continue to execute on each code push.
 - High-cost full Flutter and four Android emulator jobs defer; no emulator session is run for that push.
-- **The source workflow exposes a deliberately FAILED `development-only-not-qualified` job.** A skipped Android workflow is NEVER qualification or acceptance evidence. Do not merge or release from this state.
+- **The existing source-contracts job ends with a deliberately FAILED development-only qualification guard on the SAME runner.** A skipped Android workflow is NEVER qualification or acceptance evidence. Do not merge or release from this state.
 - `labeled` / `unlabeled` events are added to every involved workflow so label changes reevaluate gates.
+- No second runner is allocated merely to report development-only refusal; this avoids a stuck `development-only-not-qualified` job.
 - Use this only during iterative work, never when asserting a milestone complete.
 
 **Qualification**, remove `ci:development-only`:

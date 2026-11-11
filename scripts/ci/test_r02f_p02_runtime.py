@@ -116,7 +116,7 @@ class RT02FP02Runtime(unittest.TestCase):
         self.assertEqual(self.android.active,set())
         self.assertEqual(self.android.paths,{})
 
-    def _fake_run_host(self, *, stale=False, stage_failure=False, cleanup_failure=False, case_failure=False):
+    def _fake_run_host(self, *, stale=False, stage_failure=False, cleanup_failure=False, case_failure=False, install_stdout='Performing Streamed Install\nSuccess', pretend_install=False):
         inv={'schema':1,'source_sha':'a'*40,'fixture_package':M.base.FIXTURE,
              'signed_with_ephemeral_ci_key':True,'never_released':True,
              'files':{'base_v1.apk':{'sha256':M.sha(self.fixtures/'base_v1.apk'),
@@ -136,8 +136,8 @@ class RT02FP02Runtime(unittest.TestCase):
             calls.append(phase)
             if phase=='STAGE_FRESH_V1_BASELINE':
                 if stage_failure:raise M.base.Refused('adb install error')
-                state['installed']=True
-                return 'Performing Streamed Install\nSuccess'
+                if not pretend_install:state['installed']=True
+                return install_stdout
             if phase=='CLEANUP_FRESH_V1_BASELINE':
                 if cleanup_failure:raise M.base.Refused('adb uninstall error')
                 state['installed']=False
@@ -150,7 +150,14 @@ class RT02FP02Runtime(unittest.TestCase):
         saved=[]
         def receipt(path,body):saved.append(body)
         from contextlib import ExitStack
+        # Fake Android proof is deliberately stricter than an ADB return code:
+        # an installation that did not happen must never pass the acceptance test.
+        def installed_state(fixtures):
+            if not state['installed']:
+                raise M.base.Refused('installed v1 baseline absent after ADB returned 0')
+            return self._baseline(fixtures)
         with ExitStack() as stack:
+            stack.enter_context(patch.object(M.rt02c,'baseline_v1',side_effect=installed_state))
             stack.enter_context(patch.object(M.base,'host_check',return_value=('a'*40,'1234')))
             stack.enter_context(patch.object(M.base,'empty_or_expected_package',side_effect=absent))
             stack.enter_context(patch.object(M.rt02c,'verify',return_value=0))
@@ -168,6 +175,21 @@ class RT02FP02Runtime(unittest.TestCase):
         self.assertEqual(calls.count('ABANDON_CASE'),2)
         self.assertFalse(state['installed'])
         self.assertEqual(saved[-1]['status'],'PASS_TWO_ABANDONED_ANDROID_SESSIONS')
+
+    def test_rc0_empty_stdout_still_checks_exact_installed_state(self):
+        calls,saved,state=self._fake_run_host(install_stdout='')
+        self.assertIn('STAGE_FRESH_V1_BASELINE',calls)
+        self.assertFalse(state['installed'])
+        self.assertEqual(saved[-1]['status'],'PASS_TWO_ABANDONED_ANDROID_SESSIONS')
+
+    def test_rc0_nonstandard_stdout_still_checks_real_state(self):
+        calls,saved,state=self._fake_run_host(install_stdout='Performing Streamed Install')
+        self.assertEqual(calls.count('ABANDON_CASE'),2)
+        self.assertFalse(state['installed'])
+
+    def test_rc0_without_installed_package_never_passes(self):
+        with self.assertRaises(M.base.Refused):
+            self._fake_run_host(install_stdout='Success',pretend_install=True)
 
     def test_stale_fixture_refused_before_restage(self):
         with self.assertRaises(M.base.Refused):self._fake_run_host(stale=True)

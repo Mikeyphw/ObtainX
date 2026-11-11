@@ -186,9 +186,11 @@ def run(out: Path) -> int:
     try:
         print('OX_RT02F_P02_ANDROID_PHASE=STAGE_FRESH_V1_BASELINE',flush=True)
         staged=True  # also clean up if Android install partially succeeds.
-        install=adb_phase('STAGE_FRESH_V1_BASELINE','install','-t',str(v1),timeout=90)
-        need(install.splitlines() and install.splitlines()[-1].strip()=='Success',
-             'Android did not confirm disposable signed v1 fixture staging')
+        # ADB's human-readable stdout can vary across platform-tools releases.
+        # base.adb already refuses a non-zero exit. Do not grant acceptance
+        # from stdout: the immediately following installed-state proof verifies
+        # exact signed v1 APK bytes, version and package path on real Android.
+        adb_phase('STAGE_FRESH_V1_BASELINE','install','-t',str(v1),timeout=90)
         print('OX_RT02F_P02_ANDROID_PHASE=CHECK_INITIAL_V1_BASELINE',flush=True)
         before=rt02c.baseline_v1(fixtures)
         results=[]

@@ -104,6 +104,17 @@ class RT02FP02Contracts(unittest.TestCase):
         self.mutation(C.HOST,"'shell','pm','uninstall',base.FIXTURE,timeout=60",
                       "'shell','echo','skip-uninstall',timeout=60")
 
+    def test_installed_state_proof_cannot_be_removed(self):
+        self.mutation(C.HOST,
+                      '        before=rt02c.baseline_v1(fixtures)\n        results=[]',
+                      "        before={'installed_original_intact':True}\n        results=[]")
+
+    def test_adb_stdout_must_not_replace_installed_state(self):
+        self.mutation(C.HOST,
+                      "adb_phase('STAGE_FRESH_V1_BASELINE','install','-t',str(v1),timeout=90)",
+                      "install=adb_phase('STAGE_FRESH_V1_BASELINE','install','-t',str(v1),timeout=90)\n        need(install.splitlines()[-1]=='Success','stdout')")
+
+
     def test_refuse_missing_clean_rt02c_handoff(self):
         self.mutation(C.HOST,'base.empty_or_expected_package()', 'True')
 

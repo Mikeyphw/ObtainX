@@ -101,6 +101,16 @@ def inspect(root:Path=ROOT)->list[str]:
         errors.append('P02 must establish fresh v1 before cancellation scenarios')
     if host.find('write_receipt(receipt,body)') < host.find('CLEANUP_FRESH_V1_BASELINE'):
         errors.append('P02 success receipt written before required fixture cleanup')
+    # A successful ADB exit is NOT device proof. Enforce actual installed v1
+    # bytes/version after staging instead of depending on CLI wording.
+    install_gate="adb_phase('STAGE_FRESH_V1_BASELINE','install','-t',str(v1),timeout=90)"
+    if host.count(install_gate)!=1 or 'install.splitlines()' in host:
+        errors.append('P02 must use ADB exit + verified package state, not brittle stdout')
+    start=host.find(install_gate)
+    proof=host.find('before=rt02c.baseline_v1(fixtures)',start)
+    cases=host.find('for kind,names in CASES:',start)
+    if start<0 or proof<start or cases<proof:
+        errors.append('P02 signed baseline not proven on Android before test sessions')
     if host.count("'shell','pm','uninstall',base.FIXTURE,timeout=60") != 1:
         errors.append('P02 must independently uninstall its disposable test fixture')
     if host.count('base.empty_or_expected_package()') != 3:

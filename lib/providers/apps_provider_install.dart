@@ -31,6 +31,7 @@ import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/providers/virustotal_provider.dart';
 import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
+import 'package:obtainium/services/verified_obb_delivery.dart';
 import 'package:obtainium/theme/app_dialog_theme.dart';
 import 'package:obtainium/widgets/app_toast.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -1088,6 +1089,13 @@ extension AppsProviderInstall on AppsProvider {
             'OBB payload cannot be installed by this backend on Android 11+',
           );
         }
+        // Ask before APK installation, not after a successful Android session.
+        final permission = await Permission.storage.request();
+        if (!permission.isGranted) {
+          throw const FormatException(
+            'OBB write permission denied before Android installation',
+          );
+        }
       }
 
       if (installer.wantsContainerHandoff) {
@@ -1412,47 +1420,35 @@ extension AppsProviderInstall on AppsProvider {
   }
 
   Future<void> moveObbFile(File file, String appId) async {
-    if (!file.path.toLowerCase().endsWith('.obb')) return;
-
+    // Only call after Android confirms the APK session. No best-effort success
+    // return: unavailable storage or a mismatched copy is an installation error.
+    if (!file.path.toLowerCase().endsWith('.obb')) {
+      throw const FormatException('Unsupported expansion file type');
+    }
     final sdkInt = (await DeviceInfoPlugin().androidInfo).version.sdkInt;
     if (sdkInt >= _androidApiLevelR) {
-      try {
-        final obbDir = await saf.openDocumentTree(
-          initialUri: Uri.parse('${await getStorageRootPath()}/Android/obb'),
-        );
-        if (obbDir == null) return;
-        final appSpecificObbDoc = await saf.child(obbDir, appId);
-        if (appSpecificObbDoc == null) return;
-        final obbFileName = file.path.split('/').last;
-        final obbDestPath =
-            '${await getStorageRootPath()}/Android/obb/$appId/$obbFileName';
-        await Directory(
-          '${await getStorageRootPath()}/Android/obb/$appId',
-        ).create(recursive: true);
-        await file.copy(obbDestPath);
-        unawaited(
-          logs.add(
-            'Copied OBB file $obbFileName for $appId via direct file access',
-          ),
-        );
-      } catch (e) {
-        unawaited(
-          logs.add('Failed to place OBB file for $appId: ${e.toString()}'),
-        );
-      }
-    } else {
-      await Permission.storage.request();
-      final String obbDirPath =
-          '${await getStorageRootPath()}/Android/obb/$appId';
-      Directory(obbDirPath).createSync(recursive: true);
-      final String obbFileName = file.path.split('/').last;
-      await file.copy('$obbDirPath/$obbFileName');
-      unawaited(
-        logs.add(
-          'Copied OBB file $obbFileName for $appId via direct file access',
-        ),
+      throw const FormatException(
+        'OBB payload cannot be installed by this backend on Android 11+',
       );
     }
+    // The preinstall gate requests permission before the APK transaction.
+    // Rechecking catches revocation while Android's installer UI is open.
+    final permission = await Permission.storage.status;
+    if (!permission.isGranted) {
+      throw const FormatException('OBB storage permission revoked after APK install');
+    }
+    final target = Directory(
+      '${await getStorageRootPath()}/Android/obb/$appId',
+    );
+    final receipt = await copyVerifiedObbFile(
+      source: file,
+      packageName: appId,
+      destinationFolder: target,
+    );
+    unawaited(logs.add(
+      'Verified OBB delivery ${receipt.fileName} '
+      'bytes=${receipt.length} sha256=${receipt.sha256}',
+    ));
   }
 
   Future<void> uninstallApp(String appId) async {

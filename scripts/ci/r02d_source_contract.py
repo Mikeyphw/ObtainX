@@ -66,6 +66,34 @@ def inspect(root:Path=ROOT)->list[str]:
     problems.append('legacy lower-API OBB code unexpectedly removed')
   if re.search(r'\b(?:gh release create|flutter build apk --release)\b',data[CONTRACTS]):
     problems.append('release side effects forbidden')
+  # The installer-branch refusal must be executable *before* installApk.
+  # A second matching error message in moveObbFile is not sufficient proof.
+  provider=data[PROVIDER]
+  enter=provider.find('Future<bool> installApkDir(')
+  preflight=provider.find(
+      'if (obbFiles.isNotEmpty && !installer.wantsContainerHandoff)', enter)
+  handoff=provider.find('if (installer.wantsContainerHandoff)', enter)
+  before_install=provider.find('final wasInstalled = await installApk(', enter)
+  sdk_refusal=re.compile(
+      r"if\s*\(\s*sdk\s*>=\s*30\s*\)\s*\{\s*"
+      r"throw\s+const\s+FormatException\s*\(\s*"
+      r"'OBB payload cannot be installed by this backend on Android 11\+'\s*,?\s*\)\s*;\s*\}"
+  )
+  if (enter < 0 or preflight < enter or handoff <= preflight or
+      before_install <= handoff or
+      sdk_refusal.search(provider[preflight:handoff]) is None):
+    problems.append('Android 11+ OBB refusal must execute in preinstall guard')
+  # The later fail-closed check remains required even if preflight succeeds.
+  begin_runtime=provider.find('Future<void> moveObbFile(', enter)
+  end_runtime=provider.find('Future<void> uninstallApp(', begin_runtime)
+  runtime_guard=re.compile(
+      r"if\s*\(\s*sdkInt\s*>=\s*_androidApiLevelR\s*\)\s*\{\s*"
+      r"throw\s+const\s+FormatException\s*\(\s*"
+      r"'OBB payload cannot be installed by this backend on Android 11\+'\s*,?\s*\)\s*;\s*\}"
+  )
+  if (begin_runtime < 0 or end_runtime <= begin_runtime or
+      runtime_guard.search(provider[begin_runtime:end_runtime]) is None):
+    problems.append('Android 11+ OBB runtime fallback refusal missing')
   return problems
 
 def main()->int:

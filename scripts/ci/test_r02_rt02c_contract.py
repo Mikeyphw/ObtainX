@@ -85,14 +85,26 @@ class SourceMutations(unittest.TestCase):
     def test_no_false_release(self):
         self.mutation(C.HOST,"'release_qualified':False","'release_qualified':True")
     def test_no_skip_actual_installed_bytes(self):
-        self.mutation(C.HOST,'base.installed_state(2,True,fixtures)','dict()')
+        self.mutation(C.SINGLE, 'self.base.installed_state(2, True, self.fixtures)', 'dict()')
     def test_no_skip_negative_proof(self):
-        self.mutation(C.HOST,'not called and taps==0','True')
+        self.mutation(C.SINGLE, 'not self.called and self.taps == 0', 'True')
     def test_stale_r00_fixture_test(self):
         self.mutation(C.R00_TEST,"'obtainx-r02-rt02c.yml'","'obtainx-r02-old.yml'")
     def test_no_unbounded_pre_dart_retry(self):
-        self.mutation(C.HOST,'if attempt!=1 or not eligible_pre_dart_retry(out,fixtures,case,exc):',
-                      'if False:')
+        self.mutation(C.SINGLE, 'self.launches = 1',
+                      'self.launches = 1\n        for attempt in (1, 2): break')
+    def test_no_bypass_single_session_installer_proof(self):
+        self.mutation(C.SINGLE, 'self.base.installed_state(2, True, self.fixtures)', 'dict()')
+    def test_no_bypass_single_session_negative_baseline(self):
+        self.mutation(C.SINGLE, 'self.H.baseline_v1(self.fixtures)', 'dict()')
+    def test_no_session_handshake_bypass(self):
+        self.mutation(C.DART, "await control('prepare', name)", "await fakePrepare(name)")
+    def test_no_second_flutter_launch(self):
+        self.mutation(C.SINGLE, 'self.launches = 1', 'self.launches = 2')
+    def test_no_skip_live_signed_v1_staging(self):
+        self.mutation(C.SINGLE,
+                      "self.base.adb('install', '-t', str(self.fixtures / 'base_v1.apk')",
+                      "self.base.adb('install', '-t', str(self.fixtures / 'fake_v1.apk')")
     def test_no_skip_dart_case_evidence(self):
         self.mutation(C.DART,'OX_R02C_DART_STAGE=PREINSTALL_REFUSED','SKIPPED_VALIDATION')
 
@@ -176,7 +188,7 @@ class RuntimeReceipts(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory(prefix='ox-rt02c-receipt-');self.out=Path(self.tmp.name)
         self.commit='a'*40;self.run='123456'
         cases=[]
-        for case in H.CASES:
+        for index,case in enumerate(H.CASES):
             digest=hashlib.sha256(case.encode()).hexdigest()
             if case in F.POSITIVE:
                 cases.append({'case':case,'archive_sha256':digest,'flutter_log_sha256':digest,
@@ -186,7 +198,11 @@ class RuntimeReceipts(unittest.TestCase):
                 cases.append({'case':case,'archive_sha256':digest,'flutter_log_sha256':digest,
                   'preinstall_refused':True,'installed_original_intact':True,'version_code':1,
                   'installed_path_count':1,'android_confirmations':0})
+        for index,item in enumerate(cases):
+            item['process_launch']=1
+            item['boundary_index']=index
         self.data={'schema':1,'status':'PASS_FIVE_ARCHIVES_TWO_PREINSTALL_REFUSALS',
+                   'flutter_launches':1,'session_log_sha256':hashlib.sha256(b'session').hexdigest(),
                    'source_sha':self.commit,'run_id':self.run,'hosted_emulator_only':True,
                    'physical_device_qualified':False,'full_r02_matrix_qualified':False,
                    'user_facing_import_qualified':False,'release_qualified':False,
@@ -198,6 +214,12 @@ class RuntimeReceipts(unittest.TestCase):
         with patch.object(H.base,'identity_check',return_value=(self.commit,self.run)):
             return H.verify(self.out)
     def test_valid_receipt(self):self.assertEqual(self.verify(),0)
+    def test_missing_single_process_proof(self):
+        self.data['flutter_launches']=2;self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_repeated_boundary_index(self):
+        self.data['cases'][2]['boundary_index']=1;self.write()
+        with self.assertRaises(H.Refused):self.verify()
     def test_missing_case(self):
         self.data['cases'].pop();self.write()
         with self.assertRaises(H.Refused):self.verify()

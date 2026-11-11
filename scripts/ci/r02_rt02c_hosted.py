@@ -188,28 +188,15 @@ def execute(out:Path)->int:
     for name,data in inv['files'].items():
         need(data['sha256']==sha(fixtures/name),'archive fixture digest mismatch: '+name)
     base.empty_or_expected_package()
+    from r02_rt02c_single_session import ControlHandler,SingleSession
+    controller=SingleSession(out,fixtures,inv,receipt,rp,sys.modules[__name__],base)
     base.FixtureServer.fixtures={name:fixtures/name for name in inv['files']}
-    server=ThreadingHTTPServer(('127.0.0.1',base.PORT),base.FixtureServer)
+    ControlHandler.controller=controller
+    server=ThreadingHTTPServer(('127.0.0.1',base.PORT),ControlHandler)
     threading.Thread(target=server.serve_forever,daemon=True).start()
     try:
         base.adb('reverse','tcp:'+str(base.PORT),'tcp:'+str(base.PORT))
-        for case in CASES:
-            # Reset the fixture before each case. ADB only provisions a v1 precondition.
-            base.adb('shell','pm','uninstall',base.FIXTURE,allow_failure=True)
-            base.empty_or_expected_package()
-            base.adb('install','-t',str(fixtures/'base_v1.apk'),timeout=180)
-            baseline_v1(fixtures)
-            for attempt in (1,2):
-                try:
-                    data=run_case(out,fixtures,inv,case)
-                    break
-                except Refused as exc:
-                    if attempt!=1 or not eligible_pre_dart_retry(out,fixtures,case,exc):
-                        raise
-                    print('OX_R02_RT02C_PRE_DART_RETRY case='+case+
-                          ' attempt=2 source_bound_v1_intact=1',flush=True)
-            receipt['cases'].append(data)
-            rp.write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
+        controller.run()  # Exactly one Flutter process for seven verified boundaries.
         receipt['status']='PASS_FIVE_ARCHIVES_TWO_PREINSTALL_REFUSALS'
         rp.write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
         print('OX_R02_RT02C_FIVE_REAL_ARCHIVES_TWO_REJECTIONS_PASS',flush=True)
@@ -228,10 +215,15 @@ def verify(out:Path)->int:
         'user_facing_import_qualified':False,'release_qualified':False,
         'publication_allowed':False,'backend':'production StockInstaller'}
     for key,value in expected.items():need(obj.get(key)==value,'source-bound receipt invalid: '+key)
+    need(obj.get('flutter_launches')==1,'exactly one Flutter test launch required')
+    need(re.fullmatch(r'[0-9a-f]{64}',obj.get('session_log_sha256','')) is not None,
+         'missing single-session log digest')
     cases=obj.get('cases')
     need(isinstance(cases,list) and len(cases)==7,'seven distinct archive scenarios required')
-    for actual,case in zip(cases,CASES):
+    for index,(actual,case) in enumerate(zip(cases,CASES)):
         need(isinstance(actual,dict) and actual.get('case')==case,'missing or reordered scenario')
+        need(actual.get('process_launch')==1 and actual.get('boundary_index')==index,
+             'missing sequential same-process Android boundaries')
         for field in ('archive_sha256','flutter_log_sha256'):
             need(isinstance(actual.get(field),str) and re.fullmatch(r'[0-9a-f]{64}',actual[field]) is not None,
                  'missing file digest: '+field)

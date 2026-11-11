@@ -1,6 +1,7 @@
 // RT02C API36 source-bound archive-to-StockInstaller acceptance.
 // This is NOT the complete user-facing download/import/OBB experience.
 import 'dart:io';
+import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,8 +12,8 @@ import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
 
 const packageName = 'dev.bikram.obtainx.rt02.fixture';
-const caseName = String.fromEnvironment('OX_R02C_CASE');
-const archiveSha = String.fromEnvironment('OX_R02C_ARCHIVE_SHA');
+const controlToken = String.fromEnvironment('OX_R02C_CONTROL_TOKEN');
+const scenarios = ['apks', 'apkm', 'xapk', 'zip', 'tar.gz', 'traversal', 'ambiguous'];
 const baseSha = String.fromEnvironment('OX_R02C_BASE_SHA');
 const splitSha = String.fromEnvironment('OX_R02C_SPLIT_SHA');
 const fixturePort = 18782;
@@ -39,7 +40,7 @@ String fixtureName(String name) {
   }
 }
 
-Future<File> downloadVerifiedArchive(String fileName, Directory folder) async {
+Future<File> downloadVerifiedArchive(String fileName, Directory folder, String archiveSha) async {
   if (![archiveSha, baseSha, splitSha].every(
     (value) => RegExp(r'^[a-f0-9]{64}$').hasMatch(value),
   )) {
@@ -63,15 +64,35 @@ Future<File> downloadVerifiedArchive(String fileName, Directory folder) async {
   }
 }
 
-void main() {
-  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-  testWidgets('RT02C real archive extraction, planning and stock install', (tester) async {
-    debugPrint('OX_R02C_DART_STAGE=SCENARIO_STARTED');
-    if (!Platform.isAndroid) throw StateError('RT02C Android-only');
+Future<Map<String, dynamic>> control(String route, String name, {String? result}) async {
+  if (!scenarios.contains(name) || controlToken.length != 48) {
+    throw StateError('Unauthenticated RT02C boundary request');
+  }
+  final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+  try {
+    final request = await client.postUrl(Uri.parse('http://127.0.0.1:$fixturePort/rt02c/$route'));
+    request.headers.contentType = ContentType.json;
+    request.headers.set('X-RT02C-Token', controlToken);
+    request.write(jsonEncode({'case': name, if (result != null) 'result': result}));
+    final response = await request.close().timeout(const Duration(minutes: 4));
+    final text = await utf8.decoder.bind(response).join();
+    if (response.statusCode != HttpStatus.ok) {
+      throw StateError('Host refused the exact Android scenario boundary');
+    }
+    final decoded = jsonDecode(text);
+    if (decoded is! Map<String, dynamic>) throw StateError('Invalid host receipt');
+    return decoded;
+  } finally {
+    client.close(force: true);
+  }
+}
+
+Future<void> runScenario(String caseName, String archiveSha) async {
+    debugPrint('OX_R02C_DART_STAGE=SCENARIO_STARTED case=$caseName');
     final fileName = fixtureName(caseName);
     final temp = await Directory.systemTemp.createTemp('ox-rt02c-');
     try {
-      final input = await downloadVerifiedArchive(fileName, temp);
+      final input = await downloadVerifiedArchive(fileName, temp, archiveSha);
       final destination = '${temp.path}/extracted';
       if (caseName == 'traversal') {
         await expectLater(extractZipOffIsolate(input.path, destination, limits: limits),
@@ -119,6 +140,7 @@ void main() {
       expect(plan.versionCode, 2);
       expect(plan.sessionPaths.length, 2);
       expect(plan.requiresSplitSession, isTrue);
+      await control('call', caseName); // Authorize real installer only for positive cases.
       debugPrint('OX_R02C_DART_STAGE=INSTALL_CALL');
       final result = await StockInstaller(SettingsProvider()).installApk(
           plan.sessionPaths, appId: packageName).timeout(const Duration(minutes: 3));
@@ -128,5 +150,21 @@ void main() {
     } finally {
       if (temp.existsSync()) await temp.delete(recursive: true);
     }
-  });
+}
+
+void main() {
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets('RT02C seven real independently attested archive cases', (tester) async {
+    if (!Platform.isAndroid) throw StateError('RT02C Android-only');
+    for (final name in scenarios) {
+      final prepared = await control('prepare', name);
+      if (prepared['case'] != name || prepared['archive_sha256'] is! String) {
+        throw StateError('Host preparation receipt missing');
+      }
+      await runScenario(name, prepared['archive_sha256'] as String);
+      final result = await control('finish', name,
+          result: name == 'traversal' || name == 'ambiguous' ? 'refused' : 'installed');
+      if (result['verified'] != true) throw StateError('Android attestation missing');
+    }
+  }, timeout: const Timeout(Duration(minutes: 100)));
 }

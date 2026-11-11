@@ -121,6 +121,28 @@ String? _apkAbi(String path) {
   return seen.isEmpty ? null : seen.single;
 }
 
+const _densityDpis = <String, int>{
+  'ldpi': 120, 'mdpi': 160, 'tvdpi': 213, 'hdpi': 240,
+  'xhdpi': 320, 'xxhdpi': 480, 'xxxhdpi': 640,
+};
+
+String _configQualifier(String path) {
+  final name = _apkName(path).toLowerCase();
+  return RegExp(r'^(?:split_)?config[._-](.+)\.apk$')
+          .firstMatch(name)?.group(1) ?? '';
+}
+
+String _canonicalLocale(String text) {
+  return text.toLowerCase().replaceAll('_', '-')
+      .replaceAllMapped(
+        RegExp(r'-r([a-z]{2})$'),
+        (match) => '-${match.group(1)!}',
+      );
+}
+
+bool _isLanguageQualifier(String qualifier) =>
+    RegExp(r'^[a-z]{2,3}(?:[-_]r[a-z]{2})?$').hasMatch(qualifier);
+
 /// Exactly one parseable base APK is mandatory. Package/version mismatches,
 /// multiple standalone variants, unknown split roles and incompatible ABIs
 /// fail closed; never silently install the first APK in archive enumeration.
@@ -130,6 +152,8 @@ InstallBundlePlan resolveInstallBundlePlan({
   required List<String> supportedAbis,
   String? expectedPackageName,
   int? deviceSdkVersion,
+  List<String> deviceLocales = const <String>[],
+  int? deviceDensityDpi,
 }) {
   if (members.isEmpty) {
     throw const FormatException('Archive contains no APKs');
@@ -182,16 +206,39 @@ InstallBundlePlan resolveInstallBundlePlan({
       throw const FormatException('Split requires a newer Android SDK');
     }
   }
+  if (deviceDensityDpi != null && deviceDensityDpi <= 0) {
+    throw const FormatException('Invalid device display density');
+  }
   final byAbi = <String, InstallApkMember>{};
+  final byLocale = <String, InstallApkMember>{};
+  final byDensity = <int, InstallApkMember>{};
   final nonAbi = <InstallApkMember>[];
   for (final member in config) {
     final abi = _apkAbi(member.path);
-    if (abi == null) {
-      nonAbi.add(member);
-    } else if (byAbi.containsKey(abi)) {
-      throw const FormatException('Multiple APK splits for the same ABI');
-    } else {
+    final qualifier = _configQualifier(member.path);
+    if (abi != null) {
+      if (byAbi.containsKey(abi)) {
+        throw const FormatException('Multiple APK splits for the same ABI');
+      }
       byAbi[abi] = member;
+    } else if (qualifier == 'nodpi' || qualifier == 'anydpi') {
+      nonAbi.add(member);
+    } else if (_densityDpis.containsKey(qualifier)) {
+      final dpi = _densityDpis[qualifier]!;
+      if (byDensity.containsKey(dpi)) {
+        throw const FormatException('Multiple APK splits for the same density');
+      }
+      byDensity[dpi] = member;
+    } else if (_isLanguageQualifier(qualifier)) {
+      final locale = _canonicalLocale(qualifier);
+      if (byLocale.containsKey(locale)) {
+        throw const FormatException('Multiple APK splits for the same locale');
+      }
+      byLocale[locale] = member;
+    } else {
+      // Keep non-ABI, non-locale, non-density config splits as independent
+      // resources; do not guess new split roles or silently drop them.
+      nonAbi.add(member);
     }
   }
   InstallApkMember? abiMember;
@@ -206,7 +253,51 @@ InstallBundlePlan resolveInstallBundlePlan({
       throw const FormatException('No compatible ABI configuration split');
     }
   }
-  final selectedConfig = [...nonAbi, ?abiMember]
+  final selectedLocales = <InstallApkMember>[];
+  if (byLocale.isNotEmpty) {
+    if (deviceLocales.isEmpty && byLocale.length > 1) {
+      throw const FormatException('Ambiguous language splits require locale evidence');
+    }
+    if (deviceLocales.isEmpty) {
+      selectedLocales.add(byLocale.values.single);
+    } else {
+      for (final preferred in deviceLocales) {
+        final locale = _canonicalLocale(preferred);
+        if (byLocale.containsKey(locale)) {
+          final match = byLocale[locale]!;
+          if (!selectedLocales.contains(match)) selectedLocales.add(match);
+          continue;
+        }
+        final language = locale.split('-').first;
+        if (byLocale.containsKey(language)) {
+          final match = byLocale[language]!;
+          if (!selectedLocales.contains(match)) selectedLocales.add(match);
+        }
+      }
+      if (selectedLocales.isEmpty) {
+        throw const FormatException('No compatible language configuration split');
+      }
+    }
+  }
+  InstallApkMember? densityMember;
+  if (byDensity.isNotEmpty) {
+    if (deviceDensityDpi == null && byDensity.length > 1) {
+      throw const FormatException('Ambiguous density splits require display evidence');
+    }
+    if (deviceDensityDpi == null) {
+      densityMember = byDensity.values.single;
+    } else {
+      final choices = byDensity.keys.toList()
+        ..sort((a, b) {
+          final diffA = (a - deviceDensityDpi).abs();
+          final diffB = (b - deviceDensityDpi).abs();
+          final distance = diffA.compareTo(diffB);
+          return distance != 0 ? distance : b.compareTo(a);
+        });
+      densityMember = byDensity[choices.first];
+    }
+  }
+  final selectedConfig = [...nonAbi, ?abiMember, ...selectedLocales, ?densityMember]
     ..sort((a, b) => a.path.compareTo(b.path));
   return InstallBundlePlan(
     packageName: packageName,
@@ -231,6 +322,29 @@ void validateObbFileNames(List<String> paths, String packageName) {
     final name = _apkName(path);
     if (!expected.hasMatch(name) || !seen.add(name.toLowerCase())) {
       throw const FormatException('OBB file does not belong to planned package');
+    }
+  }
+}
+
+/// A lexical containment check only. The caller must independently refuse
+/// symlink/non-regular entries and verify the real bytes before any OBB move.
+void validateStagedObbPaths(List<String> paths, String packageName, {
+  required String extractionRoot,
+}) {
+  validateObbFileNames(paths, packageName);
+  final root = extractionRoot.endsWith('/') && extractionRoot.length > 1
+      ? extractionRoot.substring(0, extractionRoot.length - 1)
+      : extractionRoot;
+  if (root == '/' || !root.startsWith('/') || root.contains('\\') ||
+      root.contains('//') || root.contains('\u0000') ||
+      root.split('/').contains('..') || root.split('/').contains('.')) {
+    throw const FormatException('Untrusted OBB extraction root');
+  }
+  for (final path in paths) {
+    if (!path.startsWith('$root/') || path.contains('\\') ||
+        path.contains('//') || path.contains('\u0000') ||
+        path.split('/').contains('..') || path.split('/').contains('.')) {
+      throw const FormatException('OBB member escapes validated staging root');
     }
   }
 }

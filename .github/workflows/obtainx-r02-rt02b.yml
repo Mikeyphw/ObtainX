@@ -2,6 +2,24 @@ name: ObtainX R02 / RT02B Negative Installer API36
 
 on:
   pull_request:
+    paths:
+      - 'lib/installers/**'
+      - 'lib/providers/apps_provider_install.dart'
+      - 'lib/providers/apps_provider_updates.dart'
+      - 'lib/providers/installer_provider.dart'
+      - 'lib/providers/external_install_bridge.dart'
+      - 'lib/services/install_bundle_plan.dart'
+      - 'lib/services/verified_obb_delivery.dart'
+      - 'lib/services/artifact_file_work.dart'
+      - 'integration_test/**'
+      - 'android/**'
+      - '.github/workflows/**'
+      - 'scripts/ci/r02_rt02**'
+      - 'scripts/ci/obtainx_ci_policy.py'
+      - 'scripts/ci/r00_source_contract.py'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'docs/SECURITY_RELEASE_POLICY.md'
   workflow_dispatch:
 
 permissions:

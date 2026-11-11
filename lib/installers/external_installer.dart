@@ -7,6 +7,7 @@ import 'package:obtainium/installers/installer.dart';
 import 'package:obtainium/providers/installer_provider.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
+import 'package:obtainium/services/third_party_install_evidence.dart';
 
 /// Installs by handing the downloaded file to a user-chosen installer app
 /// (Settings → Third-Party mode). This delegates to the existing native
@@ -61,16 +62,15 @@ class ExternalInstaller extends Installer {
     // Hand off to the chosen installer via the existing, working native
     // `launchInstallIntent` path. The comma-joined convention lets split /
     // bundle installs be handed off whole (matches fork main).
-    final bool ok = await installApkViaThirdParty(
+    final bool changed = await installApkViaThirdParty(
       apkFilePaths.join(','),
       targetPackage: targetPackage,
       targetActivity: targetActivity,
       expectedPackageName: appId,
     );
-    // A false here only means "not confirmed yet" - the installer never reports
-    // its own result, and it may still be installing in the background. Treating
-    // that as cancelled would drop the pending receipt the package broadcast
-    // needs to match against later (#301).
-    return ok ? InstallResult.success() : InstallResult.handedOff();
+    // The native boolean is a package-change signal, not independent proof
+    // that the planned version/bytes were installed. Reconciliation owns
+    // confirmation, and a timeout cannot be called cancellation (#301).
+    return classifyUnverifiedThirdPartyHandoff(changed);
   }
 }

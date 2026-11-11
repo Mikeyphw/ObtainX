@@ -1117,7 +1117,15 @@ extension AppsProviderInstall on AppsProvider {
             await _clearPendingInstall(dir.appId, release);
           }
           if (result.isHandedOff) {
-            _awaitThirdPartyInstallConfirmation(dir.appId);
+            // The native callback might already have confirmed the pending
+            // snapshot while we awaited the external installer. Never show a
+            // stale pending indicator after that evidence has been consumed.
+            final pending = InstallReleaseSnapshot.fromJson(
+              apps[dir.appId]?.app.additionalSettings[pendingInstallReleaseKey],
+            );
+            if (pending != null) {
+              _awaitThirdPartyInstallConfirmation(dir.appId);
+            }
           }
           if (result.isError) {
             await _throwRecordedInstallError(dir.appId, result.errorCode ?? -1);

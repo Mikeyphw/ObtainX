@@ -100,8 +100,32 @@ def inspect(root:Path=ROOT)->list[str]:
                   "'physical_device_qualified':False", "'publication_allowed':False"):
         if host.count(label) != 2:
             errors.append('runtime gate false admission flag missing in initial receipt: '+label)
-    if host.count('phase=flutter_phase(logfile)') != 2:
+    if host.count('phase=flutter_phase(logfile)') != 3:
         errors.append('runtime progress phase probes missing or duplicated')
+    scenario_functions=_functions(host) if host.strip() else {}
+    run_body=scenario_functions.get('one_scenario','')
+    for required in ("phase in ('STOCK_INSTALLER_CALL','STOCK_INSTALLER_RETURNED')",
+                     'and tap_count<2', 'empty_or_expected_package()',
+                     'attempt==1 and not dart_started and tap_count==0',
+                     'record_flutter_failure(', 'return actual'):
+        if required not in run_body:
+            errors.append('HF06 pre-Dart/no-UI-interference control missing: '+required)
+    for required in ('def classify_flutter_failure(logfile:Path)',
+                     "'ANDROID_APK_INSTALL_REJECTED'",
+                     "'PRE_DART_FAILURE_UNCLASSIFIED'",
+                     'ephemeral_flutter_log_sha256',
+                     'contains_raw_device_logs=False',
+                     'flutter_error_category=category'):
+        if required not in host:
+            errors.append('HF06 bounded Flutter diagnostic proof missing: '+required)
+    if 'RT02A HF06' not in docs:
+        errors.append('HF06 qualification scope documentation absent')
+    for regression in ('test_hf06_no_uiautomator_before_installer',
+                       'test_hf06_pre_dart_recovery_requires_fixture_absent',
+                       'test_hf06_flutter_categories_are_allowlisted',
+                       'test_hf06_flutter_logs_are_not_exposed'):
+        if regression not in files[TEST]:
+            errors.append('HF06 regression missing: '+regression)
     # The verification must be source-bound and require both distinct scenarios.
     if "for scenario in ('standalone','split')" not in host:
         errors.append('real installer host must execute both actual Android sessions')

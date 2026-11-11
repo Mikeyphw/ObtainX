@@ -72,6 +72,51 @@ class SourceMutations(unittest.TestCase):
     def test_ci_source_gate(self):self.mutation(C.SOURCE_GATE,'run: python3 scripts/ci/r02_rt02_contract.py --check','run: true')
     def test_missing_dart_dep(self):self.mutation(C.PUBSPEC,'integration_test:', 'ignored_integration_test:')
 
+class HF06FlutterPreDartRecovery(unittest.TestCase):
+    def test_hf06_flutter_categories_are_allowlisted(self):
+        with tempfile.TemporaryDirectory(prefix='ox-hf06-diagnostic-') as td:
+            log=Path(td)/'flutter.log'
+            log.write_text('Installing APK...\nError: INSTALL_FAILED_TEST_ONLY\n'
+                           'secret_token_01234567890=should-never-be-emitted')
+            category,started,digest=H.classify_flutter_failure(log)
+            self.assertEqual(category,'ANDROID_APK_INSTALL_REJECTED')
+            self.assertFalse(started)
+            self.assertRegex(digest,r'^[0-9a-f]{64}$')
+
+    def test_hf06_flutter_logs_are_not_exposed(self):
+        with tempfile.TemporaryDirectory(prefix='ox-hf06-redacted-') as td:
+            out=Path(td)
+            log=out/'flutter.log'
+            log.write_text('Error installing APK: failure\nprivate_token=aFakeSecret\n')
+            H.record_flutter_progress(out,'standalone','TEST_APK_INSTALL',22,True,0)
+            category,started=H.record_flutter_failure(out,'standalone',1,'TEST_APK_INSTALL',log,1)
+            self.assertEqual(category,'FLUTTER_INSTALL_BRIDGE_FAILED')
+            data=(out/'progress.json').read_text()
+            self.assertNotIn('private_token',data)
+            self.assertNotIn('aFakeSecret',data)
+            self.assertIn('flutter_error_category',data)
+            self.assertFalse(started)
+
+    def test_hf06_no_uiautomator_before_installer(self):
+        import inspect
+        source=inspect.getsource(H.one_scenario)
+        self.assertIn("phase in ('STOCK_INSTALLER_CALL','STOCK_INSTALLER_RETURNED')",source)
+        self.assertNotIn('if installed_app and tap_count<2:',source)
+        self.assertLess(source.index('phase in'),source.index('if _tap_confirmed_install_dialog()'))
+
+    def test_hf06_pre_dart_recovery_requires_fixture_absent(self):
+        import inspect
+        source=inspect.getsource(H.one_scenario)
+        self.assertIn('attempt==1 and not dart_started and tap_count==0',source)
+        self.assertLess(source.index('empty_or_expected_package()'),source.index('continue'))
+        self.assertIn("phase in ('FLUTTER_STARTING','GRADLE_BUILD','TEST_APK_INSTALL')",source)
+
+    def test_hf06_failure_does_not_mark_installer_pass(self):
+        import inspect
+        source=inspect.getsource(H.one_scenario)
+        self.assertLess(source.index('if not test_success:'), source.index('actual=installed_state('))
+        self.assertLess(source.index('actual=installed_state('),source.index('approval_path=classify_android_approval('))
+
 class ReceiptAndPackageProof(unittest.TestCase):
     def setUp(self):
         self.t=tempfile.TemporaryDirectory(prefix='ox-rt02-proof-');self.out=Path(self.t.name)

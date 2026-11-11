@@ -96,3 +96,24 @@ signature divergence, wrong version, missing split, invalid test completion,
 non-emulator or wrong source remains a failure. Source and receipt mutation
 regressions protect both paths. This remains scoped RT02A only; no complete R02
 acceptance, physical device or release qualification.
+
+### RT02A HF06 — Pre-Dart test APK bootstrap recovery and redacted diagnostics
+
+Run 42943176403 (PR #4 source `c0d6617c868af91a3034a1c824477d205f9b3e49`)
+failed in standalone scenario at `TEST_APK_INSTALL` with Flutter return code 1.
+The run did **not** reach the Dart StockInstaller call; a Flutter run-time
+log was kept locally on the hosted runner, so its precise diagnostic was
+unavailable. This is not proof of an APK or split-session defect.
+
+HF06 restricts `uiautomator dump` to the real `STOCK_INSTALLER_CALL` phase,
+so UI inspection cannot disturb Flutter application installation or startup.
+If, and **only if**, the Flutter test fails before Dart starts, no Android
+confirmation occurred, and the exact disposable fixture package is proven
+absent through independent Android package inventory, one bounded retry is
+permitted. Real installer errors and ambiguous device state are never retried.
+The test-runner output remains ephemeral; a source-bound, allowlisted category
+and SHA-256 of the local log are recorded in `progress.json`, with no raw
+Flutter/ADB/device logs, tokens, signing keys, or screenshots exported.
+The existing independent receipt still requires both real scenarios, actual
+Android package-state/installed-byte proofs and the correct Android approval
+classification. No merge, release or full R02 acceptance claims are made.

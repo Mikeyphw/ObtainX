@@ -215,6 +215,55 @@ def classify_android_approval(scenario:str,tap_count:int,actual:dict)->str:
     return 'explicit_dialog' if tap_count==1 else 'platform_committed_no_dialog'
 
 
+
+# Explicitly allowlisted, bounded log diagnostics. Never emit, upload or store
+# raw Flutter output, device identifiers, environment variables or stack traces.
+FAILURE_RULES=(
+    ('ANDROID_APK_INSTALL_REJECTED', r'INSTALL_(?:FAILED|PARSE_FAILED)_[A-Z_]+'),
+    ('FLUTTER_INSTALL_BRIDGE_FAILED', r'(?:adb: failed to install|Error installing APK|Unable to install APK)'),
+    ('GRADLE_BUILD_FAILED', r'(?:FAILURE: Build failed with an exception|Gradle task .* failed)'),
+    ('FLUTTER_COMPILATION_FAILED', r'(?:Error: .* failed to compile|Compilation failed|Target kernel_snapshot_program failed)'),
+    ('ANDROID_INSTRUMENTATION_FAILED', r'(?:INSTRUMENTATION_FAILED|INSTRUMENTATION_RESULT: shortMsg=|Test runner failed)'),
+    ('VM_SERVICE_UNAVAILABLE', r'(?:Dart VM Service.*not found|Unable to connect to the VM service|Error connecting to the service protocol)'),
+    ('TEST_RUNNER_START_FAILED', r'(?:Error waiting for a debug connection|Could not start the Dart VM|The application could not be started)'),
+    ('FLUTTER_TEST_ASSERTION_FAILED', r'(?:Some tests failed|Test failed\.|Expected:|TestFailure)'),
+)
+
+
+def classify_flutter_failure(logfile:Path)->tuple[str,bool,str]:
+    """Report only known diagnostic *categories* and SHA, never device logs."""
+    data=logfile.read_bytes() if logfile.is_file() else b''
+    # Reading is ephemeral; neither bytes nor extracted fragments leave runner.
+    text=data.decode('utf-8','replace')
+    dart_started=bool(re.search(r'OX_R02_RT02_DART_STAGE=(?:SCENARIO_STARTED|INSTALL_CALL|INSTALL_RETURNED)',text))
+    for code,pattern in FAILURE_RULES:
+        if re.search(pattern,text,re.IGNORECASE):
+            return code,dart_started,hashlib.sha256(data).hexdigest()
+    return ('DART_TEST_FAILED_UNCLASSIFIED' if dart_started else 'PRE_DART_FAILURE_UNCLASSIFIED',
+            dart_started,hashlib.sha256(data).hexdigest())
+
+
+def record_flutter_failure(out:Path,scenario:str,attempt:int,phase:str,
+                           logfile:Path,returncode:int)->tuple[str,bool]:
+    category,dart_started,checksum=classify_flutter_failure(logfile)
+    need(category in {code for code,_ in FAILURE_RULES} |
+         {'DART_TEST_FAILED_UNCLASSIFIED','PRE_DART_FAILURE_UNCLASSIFIED'},
+         'unexpected Flutter failure category')
+    evidence=json.loads((out/'progress.json').read_text())
+    need(evidence.get('scenario')==scenario and evidence.get('flutter_phase') in PHASES,
+         'missing bounded progress evidence')
+    evidence.update(status='FAILED',flutter_error_category=category,
+                    flutter_return_code=returncode,
+                    dart_test_started=dart_started,
+                    ephemeral_flutter_log_sha256=checksum,
+                    flutter_attempt=attempt,
+                    contains_raw_device_logs=False)
+    (out/'progress.json').write_text(json.dumps(evidence,sort_keys=True,indent=2)+'\n')
+    print(f'OX_R02_RT02_FLUTTER_FAILURE scenario={scenario} attempt={attempt} '
+          f'phase={phase} category={category} dart_started={int(dart_started)} rc={returncode}',flush=True)
+    return category,dart_started
+
+
 def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
     assert scenario in ('standalone','split')
     files=inventory['files'];base=files['base_v1.apk' if scenario=='standalone' else 'base_v2.apk']
@@ -224,73 +273,90 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
           '--dart-define=OX_R02_SCENARIO='+scenario,
           '--dart-define=OX_R02_BASE_SHA='+base['sha256'],
           '--dart-define=OX_R02_SPLIT_SHA='+split['sha256']]
-    logfile=out/('flutter-'+scenario+'.log')
     tap_count=0
-    started=time.monotonic()
-    # Cold hosted Gradle builds can exceed the original 330s ceiling.
-    # Once the Dart installer call starts, allow at most 240s for Android UI.
-    deadline=started+900
-    saw_installer_call=False
-    last_progress=0.0
-    with logfile.open('wb') as log:
-        p=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT)
-        installed_app=False
-        try:
-            while p.poll() is None and time.monotonic()<deadline:
-                now=time.monotonic()
-                phase=flutter_phase(logfile)
-                if phase=='STOCK_INSTALLER_CALL' and not saw_installer_call:
-                    saw_installer_call=True
-                    deadline=min(deadline,now+240)
-                if now-last_progress>=25 or not last_progress:
-                    record_flutter_progress(out,scenario,phase,int(now-started),
+    # A second attempt is permitted only when the first Flutter test failed
+    # BEFORE Dart executed, the fixture remains absent, and no approval occurred.
+    # It never retries a failed actual install or a failed Android package check.
+    for attempt in (1,2):
+        logfile=out/('flutter-'+scenario+'-attempt'+str(attempt)+'.log')
+        started=time.monotonic()
+        deadline=started+900
+        saw_installer_call=False
+        last_progress=0.0
+        tap_count=0
+        with logfile.open('wb') as log:
+            p=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT)
+            installed_app=False
+            try:
+                while p.poll() is None and time.monotonic()<deadline:
+                    now=time.monotonic()
+                    phase=flutter_phase(logfile)
+                    if phase=='STOCK_INSTALLER_CALL' and not saw_installer_call:
+                        saw_installer_call=True
+                        deadline=min(deadline,now+240)
+                    if now-last_progress>=25 or not last_progress:
+                        record_flutter_progress(out,scenario,phase,int(now-started),
+                                                installed_app,tap_count)
+                        last_progress=now
+                    # This is only app-op eligibility, not Android approval.
+                    if not installed_app:
+                        r=command(['adb','-s',SERIAL,'shell','pm','path',APP],allow_failure=True)
+                        if r.returncode==0 and r.stdout.strip().startswith(b'package:'):
+                            adb('shell','appops','set',APP,'REQUEST_INSTALL_PACKAGES','allow')
+                            installed_app=True
+                    # CRITICAL: uiautomator.dump can disrupt Flutter startup. Do
+                    # not probe Android UI during Gradle/test APK installation.
+                    # Probe only after Dart has reached the real installer call.
+                    if (installed_app and phase in ('STOCK_INSTALLER_CALL','STOCK_INSTALLER_RETURNED')
+                            and tap_count<2):
+                        if _tap_confirmed_install_dialog():tap_count+=1
+                    time.sleep(2)
+                if p.poll() is None:
+                    phase=flutter_phase(logfile)
+                    record_flutter_progress(out,scenario,phase,int(time.monotonic()-started),
                                             installed_app,tap_count)
-                    last_progress=now
-                # Flutter installs the test runner APK itself. Explicit app-op
-                # grants only install-from-source eligibility, not final install.
-                if not installed_app:
-                    r=command(['adb','-s',SERIAL,'shell','pm','path',APP],allow_failure=True)
-                    if r.returncode==0 and r.stdout.strip().startswith(b'package:'):
-                        adb('shell','appops','set',APP,'REQUEST_INSTALL_PACKAGES','allow')
-                        installed_app=True
-                if installed_app and tap_count<2:
-                    if _tap_confirmed_install_dialog():tap_count+=1
-                time.sleep(2)
-            if p.poll() is None:
+                    record_flutter_failure(out,scenario,attempt,phase,logfile,-1)
+                    raise Refused('RT02_FLUTTER_TIMEOUT: scenario='+scenario+' phase='+phase+
+                                  ' app_present='+str(installed_app)+' approvals='+str(tap_count))
+                text=logfile.read_text('utf-8','replace')
                 phase=flutter_phase(logfile)
                 record_flutter_progress(out,scenario,phase,int(time.monotonic()-started),
                                         installed_app,tap_count)
-                raise Refused('RT02_FLUTTER_TIMEOUT: scenario='+scenario+' phase='+phase+
-                              ' app_present='+str(installed_app)+
-                              ' approvals='+str(tap_count))
-            text=logfile.read_text('utf-8','replace')
-            record_flutter_progress(out,scenario,flutter_phase(logfile),
-                                    int(time.monotonic()-started),installed_app,tap_count)
-            need(p.returncode==0 and 'All tests passed!' in text,
-                 'Flutter real installer test failed ('+scenario+') phase='+flutter_phase(logfile)+
-                 ' rc='+str(p.returncode))
-            need(installed_app,'Flutter test APK not installed on emulator')
-            # Android can complete an update without a second user prompt. The
-            # real production installer must report success (Dart test above),
-            # AND Android's package manager must prove the exact version,
-            # base/split counts, and SHA256 of every installed APK BEFORE any
-            # no-dialog result can be admitted. Never fabricate a UI tap.
-            actual=installed_state(1 if scenario=='standalone' else 2,
-                                   scenario=='split',out/'fixtures')
-            approval_path=classify_android_approval(scenario,tap_count,actual)
-            record_flutter_progress(out,scenario,'ANDROID_PACKAGE_STATE_VERIFIED',
-                                    int(time.monotonic()-started),installed_app,tap_count)
-            actual['scenario']=scenario
-            actual['android_confirmations']=tap_count
-            actual['approval_path']=approval_path
-            print('OX_R02_RT02_ANDROID_APPROVAL_PATH='+scenario+':'+approval_path,flush=True)
-            print('OX_R02_RT02_REAL_'+scenario.upper()+'_PASS',flush=True)
-            return actual
-        finally:
-            if p.poll() is None:
-                p.terminate()
-                try:p.wait(timeout=6)
-                except subprocess.TimeoutExpired:p.kill()
+                test_success=p.returncode==0 and 'All tests passed!' in text
+                if not test_success:
+                    category,dart_started=record_flutter_failure(
+                        out,scenario,attempt,phase,logfile,p.returncode)
+                    if (attempt==1 and not dart_started and tap_count==0 and
+                            phase in ('FLUTTER_STARTING','GRADLE_BUILD','TEST_APK_INSTALL')):
+                        # Confirm the real fixture is absent before restarting a
+                        # test-runner/bootstrap failure. An installed fixture or
+                        # ambiguous package query prevents a retry.
+                        empty_or_expected_package()
+                        print('OX_R02_RT02_PRE_DART_RETRY scenario='+scenario+
+                              ' category='+category,flush=True)
+                        continue
+                    raise Refused('Flutter real installer test failed ('+scenario+') phase='+phase+
+                                  ' category='+category+' rc='+str(p.returncode))
+                need(installed_app,'Flutter test APK not installed on emulator')
+                # Android's immutable package state is mandatory proof. No
+                # approvals are fabricated to turn an update green.
+                actual=installed_state(1 if scenario=='standalone' else 2,
+                                       scenario=='split',out/'fixtures')
+                approval_path=classify_android_approval(scenario,tap_count,actual)
+                record_flutter_progress(out,scenario,'ANDROID_PACKAGE_STATE_VERIFIED',
+                                        int(time.monotonic()-started),installed_app,tap_count)
+                actual['scenario']=scenario
+                actual['android_confirmations']=tap_count
+                actual['approval_path']=approval_path
+                print('OX_R02_RT02_ANDROID_APPROVAL_PATH='+scenario+':'+approval_path,flush=True)
+                print('OX_R02_RT02_REAL_'+scenario.upper()+'_PASS',flush=True)
+                return actual
+            finally:
+                if p.poll() is None:
+                    p.terminate()
+                    try:p.wait(timeout=6)
+                    except subprocess.TimeoutExpired:p.kill()
+    raise Refused('both Flutter attempts failed without runtime installation')
 
 def execute(out:Path)->int:
     source,run=host_check()

@@ -3,6 +3,8 @@
 /// This handles one expansion file transactionally. It cannot make a
 /// multi-file OBB set atomic across a power loss, and does not grant Android
 /// 11+ scoped-storage access. Those paths remain unsupported by stock install.
+library;
+
 import 'dart:io';
 import 'dart:math';
 

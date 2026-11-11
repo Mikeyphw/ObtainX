@@ -29,6 +29,8 @@ class RT02EContracts(unittest.TestCase):
     p.write_text(text.replace(old,new,1),'utf8')
     self.assertTrue(C.inspect(self.root),'RT02E security/CI mutation escaped: '+path)
   def test_valid_source(self):self.assertEqual(C.inspect(self.root),[])
+  def test_dangling_obb_doc_comment_rejected(self):
+    self.mutation(C.SERVICE, 'library;\n\nimport \'dart:io\';', 'import \'dart:io\';')
   def test_actual_cli_supports_check(self):
     result=subprocess.run([sys.executable,'-B',str(ROOT/'scripts/ci/r02e_source_contract.py'),'--check'],cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=False,timeout=40)
     self.assertEqual(result.returncode,0,result.stdout+'\n'+result.stderr)

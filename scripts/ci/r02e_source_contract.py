@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse
 from pathlib import Path
+import re
 
 ROOT=Path(__file__).resolve().parents[2]
 SERVICE='lib/services/verified_obb_delivery.dart'
@@ -56,6 +57,10 @@ def inspect(root:Path=ROOT)->list[str]:
   for rel,anchors in ANCHORS.items():
     for anchor in anchors:
       if anchor not in data[rel]:errors.append(rel+': RT02E protected anchor missing '+anchor)
+  # A doc comment ahead of imports is dangling without a Dart library directive.
+  # Anchor it at file start so a decoy `library;` elsewhere cannot pass.
+  if not re.match(r'\A(?:///[^\n]*\n)+library;\n', data[SERVICE]):
+    errors.append('OBB service library documentation must precede library directive')
   provider=data[PROVIDER]
   start=provider.find('Future<bool> installApkDir(')
   install=provider.find('await installApk(\n',start)

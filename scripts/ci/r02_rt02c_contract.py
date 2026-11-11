@@ -13,12 +13,13 @@ SOURCE_WF='.github/workflows/obtainx-r00-contracts.yml'
 WF='.github/workflows/obtainx-r02-rt02c.yml'
 FIX='scripts/ci/r02_rt02c_fixture.py'
 HOST='scripts/ci/r02_rt02c_hosted.py'
+SINGLE='scripts/ci/r02_rt02c_single_session.py'
 TEST='scripts/ci/test_r02_rt02c_contract.py'
 DART='integration_test/r02c_archive_install_test.dart'
 DOC='docs/R02_RT02C_ARCHIVE_RUNTIME_ACCEPTANCE.md'
 BASE_HOST='scripts/ci/r02_rt02_hosted.py'
 BASE_FIX='scripts/ci/r02_rt02_fixture.py'
-PATHS=(R00,R00_TEST,SOURCE_WF,WF,FIX,HOST,TEST,DART,DOC,BASE_HOST,BASE_FIX)
+PATHS=(R00,R00_TEST,SOURCE_WF,WF,FIX,HOST,SINGLE,TEST,DART,DOC,BASE_HOST,BASE_FIX)
 CASES=('apks','apkm','xapk','zip','tar.gz','traversal','ambiguous')
 
 def inspect(root:Path=ROOT)->list[str]:
@@ -59,8 +60,18 @@ def inspect(root:Path=ROOT)->list[str]:
             "'publication_allowed':False", 'sha(fixtures/name)',
             'not called and taps==0', 'installed_signed_members_verified',
             'len(cases)==7', 'rt02c-progress.json',
-            'eligible_pre_dart_retry(out,fixtures,case,exc)',
-            'baseline_v1(fixtures)  # Raises/refuses'),
+            'controller.run()', "obj.get('flutter_launches')==1",
+            'from r02_rt02c_single_session import ControlHandler,SingleSession',
+            "obj.get('flutter_launches')==1"),
+      SINGLE:('class SingleSession:', 'class ControlHandler(FixtureServer):',
+              "self.base.adb('install', '-t', str(self.fixtures / 'base_v1.apk')",
+              'not self.called and self.taps == 0',
+              'subprocess.Popen(args', 'self.next_index += 1', 'self.launches = 1',
+              'self.base.installed_state(2, True, self.fixtures)',
+              'self.H.baseline_v1(self.fixtures)',
+              'self.base._tap_confirmed_install_dialog()',
+              'self.need(self.next_index == len(CASES)',
+              "self.headers.get('X-RT02C-Token')"),
       DART:('IntegrationTestWidgetsFlutterBinding.ensureInitialized()',
             'extractZipOffIsolate(', 'extractTarballOffIsolate(',
             'resolveInstallBundlePlan(', 'installArtifactFormat(fileName)',
@@ -70,7 +81,12 @@ def inspect(root:Path=ROOT)->list[str]:
             "caseName == 'traversal'", "caseName == 'ambiguous'",
             'OX_R02C_DART_STAGE=PREINSTALL_REFUSED',
             'OX_R02C_DART_STAGE=INSTALL_CALL',
-            'OX_R02C_DART_STAGE=INSTALL_RETURNED'),
+            'OX_R02C_DART_STAGE=INSTALL_RETURNED',
+            "await control('prepare', name)",
+            "await control('finish', name",
+            "await control('call', caseName)",
+            'request.contentLength = payload.length;',
+            'request.add(payload);'),
       BASE_HOST:('def installed_state(', 'def _tap_confirmed_install_dialog(',
                  "APP='dev.bikram.obtainx.debug'"),
       BASE_FIX:("PKG = 'dev.bikram.obtainx.rt02.fixture'",'key.unlink(missing_ok=True)'),
@@ -104,16 +120,28 @@ def inspect(root:Path=ROOT)->list[str]:
         t="'"+key+"':False"
         if h.count(t)!=2 or "'"+key+"':True" in h:
             errors.append('unverified scope admission: '+key)
-    if ('for case in CASES:' not in h or 'not called and taps==0' not in h or
-            'base.installed_state(2,True,fixtures)' not in h):
+    if ('controller.run()' not in h or
+            'not self.called and self.taps == 0' not in docs[SINGLE] or
+            'self.base.installed_state(2, True, self.fixtures)' not in docs[SINGLE]):
         errors.append('negative/positive acceptance distinction bypassed')
-    if 'base.adb(\'install\',\'-t\',str(fixtures/\'base_v1.apk\')' not in h:
+    if "self.base.adb('install', '-t', str(self.fixtures / 'base_v1.apk')" not in docs[SINGLE]:
         errors.append('known v1 signed baseline absent')
     if 'raw_device_logs_uploaded' not in h or 'private.log' not in h:
         errors.append('private Flutter logs must stay ephemeral')
     if "'../escape.apk'" not in f or 'payload/another-base.apk' not in f:
         errors.append('adversarial archive fixtures missing')
-    try:ast.parse(h);ast.parse(f)
+    if re.search(r'\bfor\s+attempt\s+in\s*\(', docs[SINGLE]):
+        errors.append('HF02 single-session retry loop forbidden')
+    if docs[SINGLE].count('subprocess.Popen(')!=1:
+        errors.append('HF01 must launch exactly one Flutter process')
+    if docs[SINGLE].count('self.H.baseline_v1(self.fixtures)')!=2:
+        errors.append('HF01 must verify v1 before and after negative')
+    if docs[SINGLE].count('self.next_index += 1')!=1:
+        errors.append('HF01 must independently advance every Android boundary')
+    if docs[DART].count("await control('prepare', name)")!=1 or \
+            docs[DART].count("await control('finish', name")!=1:
+        errors.append('HF01 must use host handshake before and after every scenario')
+    try:ast.parse(h);ast.parse(f);ast.parse(docs[SINGLE])
     except SyntaxError:errors.append('fixture or host Python syntax invalid')
     return errors
 

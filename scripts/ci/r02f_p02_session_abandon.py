@@ -47,6 +47,23 @@ def require_success(text: str, action: str) -> None:
          'Android '+action+' did not confirm success')
 
 
+def adb_phase(phase: str, *args: str, timeout: int = 45) -> str:
+    """Expose the failing ADB operation, never a private device log or file."""
+    print('OX_RT02F_P02_ANDROID_PHASE='+phase,flush=True)
+    try:
+        return base.adb(*args,timeout=timeout)
+    except (base.Refused, OSError, TimeoutError) as exc:
+        raise base.Refused('RT02F P02 ADB phase='+phase+
+                           ' failed ('+type(exc).__name__+'); no acceptance') from exc
+
+
+def package_session(phase: str, operation: str, *args: str, timeout: int = 45) -> str:
+    """Android 16 canonical package manager shell, no retry of session writes."""
+    need(operation in ('install-create','install-write','install-abandon'),
+         'disallowed package session operation')
+    return adb_phase(phase,'shell','cmd','package',operation,*args,timeout=timeout)
+
+
 def artifact_inventory(fixtures: Path, head: str) -> dict:
     doc=json.loads((fixtures/'fixture_inventory.json').read_text('utf8'))
     need(doc.get('schema')==1 and doc.get('source_sha')==head and
@@ -73,6 +90,7 @@ def write_receipt(path: Path, body: dict) -> None:
 def run_case(fixtures: Path, kind: str, names: tuple[str,...], run_id: str) -> dict:
     need(kind in ('standalone','split') and names in (CASES[0][1],CASES[1][1]),
          'unexpected cancellation scenario')
+    print('OX_RT02F_P02_ANDROID_PHASE=CHECK_V1_BEFORE_'+kind.upper(),flush=True)
     before=rt02c.baseline_v1(fixtures)
     need(before['installed_original_intact'] is True,'unverified baseline')
     total=sum((fixtures/n).stat().st_size for n in names)
@@ -82,26 +100,29 @@ def run_case(fixtures: Path, kind: str, names: tuple[str,...], run_id: str) -> d
     abandoned=False
     try:
         # No UI tap, install-commit, or successful update is permitted.
-        session=parse_session_id(base.adb('shell','pm','install-create',
-                                          '-r','-t','--user','0','-S',str(total),timeout=40))
+        session=parse_session_id(package_session('CREATE_'+kind.upper(),
+            'install-create','-r','-t','--user','0','-S',str(total),timeout=40))
         for name in names:
             source=fixtures/name
             remote_path=REMOTE_PREFIX+run_id+'-'+kind+'-'+name
             need(re.fullmatch(r'/data/local/tmp/ox-rt02f-p02-[0-9]+-(?:standalone|split)-[a-zA-Z0-9_.-]+\.apk',remote_path)
                  is not None,'untrusted remote filename')
             remote.append(remote_path)
-            base.adb('push',str(source),remote_path,timeout=90)
-            digest=base.adb('shell','sha256sum',remote_path,timeout=30).split()
+            adb_phase('STAGE_'+kind.upper()+'_'+name,'push',str(source),remote_path,timeout=90)
+            digest=adb_phase('HASH_'+kind.upper()+'_'+name,
+                             'shell','sha256sum',remote_path,timeout=30).split()
             need(len(digest)==2 and digest[0]==sha(source) and digest[1]==remote_path,
                  'staged APK bytes differ from CI fixture')
             part='base' if name=='base_v2.apk' else 'config.x86_64'
-            result=base.adb('shell','pm','install-write','-S',str(source.stat().st_size),
-                            session,part,remote_path,timeout=80)
+            result=package_session('WRITE_'+kind.upper()+'_'+name,
+                        'install-write','-S',str(source.stat().st_size),
+                        session,part,remote_path,timeout=80)
             require_success(result,'session install-write')
         # Explicit cancellation: do NOT execute pm install-commit.
-        require_success(base.adb('shell','pm','install-abandon',session,timeout=50),
-                        'install-abandon')
+        require_success(package_session('ABANDON_'+kind.upper(),
+                         'install-abandon',session,timeout=50), 'install-abandon')
         abandoned=True
+        print('OX_RT02F_P02_ANDROID_PHASE=CHECK_V1_AFTER_'+kind.upper(),flush=True)
         after=rt02c.baseline_v1(fixtures)
         need(after==before,'cancelled session modified installed v1 APK or version')
         print(f'OX_RT02F_P02_ANDROID_ABANDON_PASS scenario={kind} count={len(names)}',flush=True)
@@ -115,12 +136,14 @@ def run_case(fixtures: Path, kind: str, names: tuple[str,...], run_id: str) -> d
         errors=[]
         if session is not None and not abandoned:
             try:
-                base.adb('shell','pm','install-abandon',session,timeout=40)
+                package_session('CLEANUP_ABANDON_'+kind.upper(),
+                                'install-abandon',session,timeout=40)
             except Exception as exc:
                 errors.append('session cleanup: '+type(exc).__name__)
         for path in remote:
             try:
-                base.adb('shell','rm','-f',path,timeout=20)
+                adb_phase('CLEANUP_STAGED_'+kind.upper(),
+                          'shell','rm','-f',path,timeout=20)
             except Exception as exc:
                 errors.append('staged fixture cleanup: '+type(exc).__name__)
         if errors:
@@ -141,10 +164,12 @@ def run(out: Path) -> int:
     artifact_inventory(fixtures,head)
     # Original seven-case acceptance must have passed before any session action.
     rt02c.verify(out)
+    print('OX_RT02F_P02_ANDROID_PHASE=CHECK_INITIAL_V1_BASELINE',flush=True)
     before=rt02c.baseline_v1(fixtures)
     results=[]
     for kind,names in CASES:
         results.append(run_case(fixtures,kind,names,run_id))
+    print('OX_RT02F_P02_ANDROID_PHASE=CHECK_FINAL_V1_BASELINE',flush=True)
     need(rt02c.baseline_v1(fixtures)==before,'final Android package baseline changed')
     body={'schema':1,'status':'PASS_TWO_ABANDONED_ANDROID_SESSIONS',
           'source_sha':head,'run_id':run_id,'hosted_emulator_only':True,

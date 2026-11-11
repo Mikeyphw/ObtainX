@@ -27,10 +27,15 @@ def inspect(root:Path=ROOT)->list[str]:
               "('split', ('base_v2.apk', 'config.x86_64.apk'))",
               'base.host_check()', 'rt02c.verify(out)',
               'rt02c.baseline_v1(fixtures)',
-              "base.adb('shell','pm','install-create'",
-              "base.adb('shell','pm','install-write'",
-              "base.adb('shell','pm','install-abandon'",
-              "base.adb('shell','sha256sum'",
+              "'shell','cmd','package',operation,*args",
+              "package_session('CREATE_",
+              "package_session('WRITE_",
+              "package_session('ABANDON_",
+              "package_session('CLEANUP_ABANDON_",
+              "'install-create','install-write','install-abandon'",
+              "print('OX_RT02F_P02_ANDROID_PHASE='+phase,flush=True)",
+              'RT02F P02 ADB phase=',
+              "'shell','sha256sum',remote_path",
               'after==before', '0<total<16*1024*1024',
               "'installer_session_abandoned':True",
               "'install_commit_called':False",
@@ -43,7 +48,8 @@ def inspect(root:Path=ROOT)->list[str]:
               'if __name__==\'__main__\':raise SystemExit(main())'),
         TEST:('test_contract_accepts_exact_source','test_cancel_session_parsing_negative',
               'test_source_mutation_rejected','test_contract_refuses_missing_emulator_script'),
-        WORKFLOW:('python3 -B scripts/ci/r02_rt02c_hosted.py run --out',
+        WORKFLOW:("      - 'scripts/ci/r02f_p02_*'",
+                  'python3 -B scripts/ci/r02_rt02c_hosted.py run --out',
                   'python3 -B scripts/ci/r02f_p02_session_abandon.py run --out',
                   'python3 -B scripts/ci/r02_rt02c_hosted.py verify --out',
                   'python3 -B scripts/ci/r02f_p02_session_abandon.py verify --out',
@@ -76,8 +82,12 @@ def inspect(root:Path=ROOT)->list[str]:
         errors.append('P02 must not commit Android installation sessions')
     if host.count("'install_commit_called':False")!=2 or host.count("'installer_session_abandoned':True")!=2:
         errors.append('uncommitted/abandoned exact receipt asserts must exist in producer and verifier')
-    if host.count("base.adb('shell','pm','install-abandon'")!=2:
+    if host.count("package_session('ABANDON_")!=1 or host.count("package_session('CLEANUP_ABANDON_")!=1:
         errors.append('successful abandon plus failure cleanup both mandatory')
+    if "'shell','pm','install-" in host or "'install-commit'" in host:
+        errors.append('legacy/commit package session interface is forbidden')
+    if 'except (base.Refused, OSError, TimeoutError) as exc:' not in host:
+        errors.append('missing phase-specific fail-closed ADB errors')
     if "if session is not None and not abandoned:" not in host or \
        'for path in remote:' not in host or 'raise base.Refused' not in host:
         errors.append('abandoned session and remote staging cleanup unguarded')

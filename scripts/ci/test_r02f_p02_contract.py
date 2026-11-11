@@ -60,8 +60,16 @@ class RT02FP02Contracts(unittest.TestCase):
             self.assertIsNone(re.fullmatch(expression,bad))
 
     def test_source_mutation_rejected(self):
-        self.mutation(C.HOST,"base.adb('shell','pm','install-abandon',session,timeout=50)",
-                      "base.adb('shell','pm','install-commit',session,timeout=50)")
+        self.mutation(C.HOST,"package_session('ABANDON_'+kind.upper(),",
+                      "package_session('COMMIT_'+kind.upper(),")
+
+    def test_cmd_package_not_legacy_pm(self):
+        self.mutation(C.HOST,"'shell','cmd','package',operation,*args",
+                      "'shell','pm',operation,*args")
+
+    def test_failure_phase_required(self):
+        self.mutation(C.HOST,"print('OX_RT02F_P02_ANDROID_PHASE='+phase,flush=True)",
+                      "print('DIAGNOSTICS_SILENCED='+phase,flush=True)")
 
     def test_contract_refuses_missing_emulator_script(self):
         self.mutation(C.WORKFLOW,'python3 -B scripts/ci/r02f_p02_session_abandon.py run --out',
@@ -87,6 +95,10 @@ class RT02FP02Contracts(unittest.TestCase):
     def test_refuse_missing_cleanup(self):
         self.mutation(C.HOST,'if session is not None and not abandoned:',
                       'if False:')
+
+    def test_refuse_skipped_p02_retrigger(self):
+        self.mutation(C.WORKFLOW,"      - 'scripts/ci/r02f_p02_*'",
+                      "      - 'docs/**'")
 
     def test_refuse_missing_preceding_rt02c(self):
         self.mutation(C.WORKFLOW,'python3 -B scripts/ci/r02_rt02c_hosted.py run --out',

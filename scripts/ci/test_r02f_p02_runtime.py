@@ -24,21 +24,25 @@ class FakeAndroid:
         self.counter=110
         self.wrong_digest=False
         self.fail_abandon=False
+        self.fail_create=False
+        self.fail_write=False
 
     def adb(self,*args,**kwargs):
         self.commands.append(args)
-        if args[:2]==('shell','pm'):
-            if args[2]=='install-create':
+        if args[:3]==('shell','cmd','package'):
+            if args[3]=='install-create':
+                if self.fail_create:raise M.base.Refused('command failed adb rc=1')
                 self.counter+=1
                 sid=str(self.counter)
                 self.active.add(sid)
                 return 'Success: created install session ['+sid+']'
-            if args[2]=='install-write':
-                if args[5] not in self.active:raise RuntimeError('bad session')
+            if args[3]=='install-write':
+                if self.fail_write:raise M.base.Refused('command failed adb rc=1')
+                if args[6] not in self.active:raise RuntimeError('bad session')
                 return 'Success: streamed 300 bytes'
-            if args[2]=='install-abandon':
-                if self.fail_abandon:raise RuntimeError('abandon failed')
-                self.active.discard(args[3])
+            if args[3]=='install-abandon':
+                if self.fail_abandon:raise M.base.Refused('command failed adb rc=1')
+                self.active.discard(args[4])
                 return 'Success'
         if args[0]=='push':
             self.paths[args[2]]=Path(args[1]).read_bytes()
@@ -82,7 +86,7 @@ class RT02FP02Runtime(unittest.TestCase):
         self.assertEqual(self.android.active,set())
         self.assertEqual(self.android.paths,{})
         self.assertEqual(len(self.probes),4)
-        self.assertEqual(len([v for v in self.android.commands if v[:3]==('shell','pm','install-write')]),3)
+        self.assertEqual(len([v for v in self.android.commands if v[:4]==('shell','cmd','package','install-write')]),3)
         self.assertFalse(any('install-commit' in v for args in self.android.commands for v in args))
 
     def test_wrong_staged_digest_abandons_and_cleans(self):
@@ -96,6 +100,21 @@ class RT02FP02Runtime(unittest.TestCase):
         self.android.fail_abandon=True
         with self.assertRaises(M.base.Refused):
             M.run_case(self.fixtures,'standalone',M.CASES[0][1],'123456')
+
+    def test_create_failure_reveals_phase_without_retry(self):
+        self.android.fail_create=True
+        with self.assertRaisesRegex(M.base.Refused,'phase=CREATE_STANDALONE'):
+            M.run_case(self.fixtures,'standalone',M.CASES[0][1],'123456')
+        self.assertEqual(self.android.active,set())
+        self.assertEqual(len([v for v in self.android.commands if
+            v[:4]==('shell','cmd','package','install-create')]),1)
+
+    def test_write_failure_abandons_and_reveals_phase(self):
+        self.android.fail_write=True
+        with self.assertRaisesRegex(M.base.Refused,'phase=WRITE_STANDALONE_base_v2.apk'):
+            M.run_case(self.fixtures,'standalone',M.CASES[0][1],'123456')
+        self.assertEqual(self.android.active,set())
+        self.assertEqual(self.android.paths,{})
 
     def test_reject_session_id_injection(self):
         self.assertEqual(M.parse_session_id('Success: created install session [18]'),'18')

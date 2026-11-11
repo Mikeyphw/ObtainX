@@ -15,6 +15,7 @@ on:
       - 'android/**'
       - '.github/workflows/**'
       - 'scripts/ci/r02_rt02**'
+      - 'scripts/ci/r02f_p02_*'
       - 'scripts/ci/obtainx_ci_policy.py'
       - 'scripts/ci/r00_source_contract.py'
       - 'pubspec.yaml'

@@ -155,7 +155,8 @@ def _tap_confirmed_install_dialog()->bool:
 # Only allowlisted progress phases are emitted or retained; raw Flutter logs remain
 # local to the ephemeral runner and are deliberately excluded from artifacts.
 PHASES=('FLUTTER_STARTING','GRADLE_BUILD','TEST_APK_INSTALL',
-        'DART_TEST_STARTED','STOCK_INSTALLER_CALL','STOCK_INSTALLER_RETURNED')
+        'DART_TEST_STARTED','STOCK_INSTALLER_CALL','STOCK_INSTALLER_RETURNED',
+        'ANDROID_PACKAGE_STATE_VERIFIED')
 
 
 def flutter_phase(logfile:Path)->str:
@@ -188,6 +189,30 @@ def record_flutter_progress(out:Path,scenario:str,phase:str,elapsed:int,
     (out/'progress.json').write_text(json.dumps(evidence,sort_keys=True,indent=2)+'\n')
     print(f'OX_R02_RT02_PROGRESS scenario={scenario} phase={phase} elapsed={int(elapsed)}s '
           f'app_installed={int(app_installed)} approvals={confirmations}',flush=True)
+
+
+def classify_android_approval(scenario:str,tap_count:int,actual:dict)->str:
+    """Distinguish a real UI approval from an Android-committed update.
+
+    Android may complete an update of a package installed by the same installer
+    without presenting a second approval dialog. A missing click is NEVER used
+    as proof of installation. For split upgrades, the caller MUST first verify
+    version 2, base and config split paths, and exact signed bytes using
+    installed_state(). A first-time install still requires observed UI approval.
+    """
+    need(scenario in ('standalone','split') and type(tap_count) is int,
+         'invalid approval classification request')
+    need(tap_count in (0,1),'unexpected number of Android system approvals')
+    if scenario == 'standalone':
+        need(tap_count==1,'fresh standalone install requires observed Android approval')
+        need(actual.get('version_code')==1 and actual.get('installed_path_count')==1
+             and actual.get('config_x86_64_present') is False,
+             'first-install package-state proof absent')
+        return 'explicit_dialog'
+    need(actual.get('version_code')==2 and actual.get('installed_path_count')==2
+         and actual.get('config_x86_64_present') is True,
+         'no verified Android-committed split update')
+    return 'explicit_dialog' if tap_count==1 else 'platform_committed_no_dialog'
 
 
 def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
@@ -245,9 +270,20 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
                  'Flutter real installer test failed ('+scenario+') phase='+flutter_phase(logfile)+
                  ' rc='+str(p.returncode))
             need(installed_app,'Flutter test APK not installed on emulator')
-            need(tap_count==1,'Android system installation confirmation was not observed exactly once')
-            actual=installed_state(1 if scenario=='standalone' else 2,scenario=='split',out/'fixtures')
-            actual['scenario']=scenario;actual['android_confirmations']=tap_count
+            # Android can complete an update without a second user prompt. The
+            # real production installer must report success (Dart test above),
+            # AND Android's package manager must prove the exact version,
+            # base/split counts, and SHA256 of every installed APK BEFORE any
+            # no-dialog result can be admitted. Never fabricate a UI tap.
+            actual=installed_state(1 if scenario=='standalone' else 2,
+                                   scenario=='split',out/'fixtures')
+            approval_path=classify_android_approval(scenario,tap_count,actual)
+            record_flutter_progress(out,scenario,'ANDROID_PACKAGE_STATE_VERIFIED',
+                                    int(time.monotonic()-started),installed_app,tap_count)
+            actual['scenario']=scenario
+            actual['android_confirmations']=tap_count
+            actual['approval_path']=approval_path
+            print('OX_R02_RT02_ANDROID_APPROVAL_PATH='+scenario+':'+approval_path,flush=True)
             print('OX_R02_RT02_REAL_'+scenario.upper()+'_PASS',flush=True)
             return actual
         finally:
@@ -301,11 +337,19 @@ def verify(out:Path)->int:
         'release_qualified':False,'publication_allowed':False,
         'installer_backend':'production StockInstaller'}.items():
         need(v.get(k)==expected,'invalid device receipt: '+k)
-    need(v.get('scenarios')==[
-        {'scenario':'standalone','version_code':1,'installed_path_count':1,
-         'config_x86_64_present':False,'android_confirmations':1},
-        {'scenario':'split','version_code':2,'installed_path_count':2,
-         'config_x86_64_present':True,'android_confirmations':1}],
+    # Exact receipt alternatives: standalone MUST prove its approval, while
+    # an update can be confirmed either by a real dialog or by a platform-
+    # committed no-dialog upgrade. Never synthesize android_confirmations=1.
+    standalone={'scenario':'standalone','version_code':1,'installed_path_count':1,
+        'config_x86_64_present':False,'android_confirmations':1,
+        'approval_path':'explicit_dialog'}
+    split_common={'scenario':'split','version_code':2,'installed_path_count':2,
+        'config_x86_64_present':True}
+    valid_scenarios=[]
+    for count,path in ((0,'platform_committed_no_dialog'),(1,'explicit_dialog')):
+        valid_scenarios.append([standalone,
+            {**split_common,'android_confirmations':count,'approval_path':path}])
+    need(v.get('scenarios') in valid_scenarios,
         'incomplete or forged real system-installation scenario proof')
     print('OX_R02_RT02_SOURCE_BOUND_EMULATOR_ONLY_VERIFIED',flush=True)
     return 0

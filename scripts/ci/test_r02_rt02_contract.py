@@ -82,9 +82,11 @@ class ReceiptAndPackageProof(unittest.TestCase):
                     'release_qualified':False,'publication_allowed':False,
                     'installer_backend':'production StockInstaller',
                     'scenarios':[{'scenario':'standalone','version_code':1,'installed_path_count':1,
-                        'config_x86_64_present':False,'android_confirmations':1},
+                        'config_x86_64_present':False,'android_confirmations':1,
+                        'approval_path':'explicit_dialog'},
                         {'scenario':'split','version_code':2,'installed_path_count':2,
-                        'config_x86_64_present':True,'android_confirmations':1}]}
+                        'config_x86_64_present':True,'android_confirmations':1,
+                        'approval_path':'explicit_dialog'}]}
         self.write()
     def tearDown(self):self.t.cleanup()
     def write(self):(self.out/'rt02-receipt.json').write_text(json.dumps(self.valid))
@@ -113,6 +115,41 @@ class ReceiptAndPackageProof(unittest.TestCase):
     def test_no_approval_refused(self):
         self.valid['scenarios'][0]['android_confirmations']=0;self.write()
         with self.assertRaises(H.Refused):self.verify()
+    def test_split_zero_dialog_valid_only_when_exact_platform_proof_recorded(self):
+        self.valid['scenarios'][1]['android_confirmations']=0
+        self.valid['scenarios'][1]['approval_path']='platform_committed_no_dialog'
+        self.write()
+        self.verify()
+
+    def test_split_zero_dialog_with_false_approval_path_refused(self):
+        self.valid['scenarios'][1]['android_confirmations']=0
+        self.write()
+        with self.assertRaises(H.Refused):self.verify()
+
+    def test_split_no_dialog_missing_base_refused(self):
+        self.valid['scenarios'][1]['android_confirmations']=0
+        self.valid['scenarios'][1]['approval_path']='platform_committed_no_dialog'
+        self.valid['scenarios'][1]['installed_path_count']=1
+        self.write()
+        with self.assertRaises(H.Refused):self.verify()
+
+    def test_split_no_dialog_wrong_version_refused(self):
+        self.valid['scenarios'][1]['android_confirmations']=0
+        self.valid['scenarios'][1]['approval_path']='platform_committed_no_dialog'
+        self.valid['scenarios'][1]['version_code']=1
+        self.write()
+        with self.assertRaises(H.Refused):self.verify()
+
+    def test_split_fake_extra_approval_refused(self):
+        self.valid['scenarios'][1]['android_confirmations']=2
+        self.write()
+        with self.assertRaises(H.Refused):self.verify()
+
+    def test_split_wrong_approval_path_refused(self):
+        self.valid['scenarios'][1]['approval_path']='platform_committed_no_dialog'
+        self.write()
+        with self.assertRaises(H.Refused):self.verify()
+
     def test_wrong_version_refused(self):
         self.valid['scenarios'][1]['version_code']=1;self.write()
         with self.assertRaises(H.Refused):self.verify()
@@ -122,6 +159,51 @@ class ReceiptAndPackageProof(unittest.TestCase):
     def test_fixture_names_are_isolated(self):
         self.assertEqual(F.PKG,H.FIXTURE)
         self.assertEqual(set(F.NAMES),{'base_v1.apk','base_v2.apk','config.x86_64.apk'})
+
+
+class RT02AndroidApprovalClassification(unittest.TestCase):
+    def good_state(self,scenario):
+        if scenario=='standalone':
+            return {'version_code':1,'installed_path_count':1,'config_x86_64_present':False}
+        return {'version_code':2,'installed_path_count':2,'config_x86_64_present':True}
+
+    def test_standalone_first_install_approval_required(self):
+        self.assertEqual(H.classify_android_approval('standalone',1,self.good_state('standalone')),
+                         'explicit_dialog')
+        with self.assertRaises(H.Refused):
+            H.classify_android_approval('standalone',0,self.good_state('standalone'))
+
+    def test_split_exact_platform_committed_without_dialog(self):
+        self.assertEqual(H.classify_android_approval('split',0,self.good_state('split')),
+                         'platform_committed_no_dialog')
+        self.assertEqual(H.classify_android_approval('split',1,self.good_state('split')),
+                         'explicit_dialog')
+
+    def test_split_no_dialog_requires_verified_split_and_version(self):
+        for wrong in ({'version_code':1,'installed_path_count':2,'config_x86_64_present':True},
+                      {'version_code':2,'installed_path_count':1,'config_x86_64_present':True},
+                      {'version_code':2,'installed_path_count':2,'config_x86_64_present':False},
+                      {}):
+            with self.assertRaises(H.Refused):
+                H.classify_android_approval('split',0,wrong)
+
+    def test_no_double_or_negative_approval(self):
+        for count in (-1,2,False,True):
+            with self.assertRaises(H.Refused):
+                H.classify_android_approval('split',count,self.good_state('split'))
+
+    def test_no_dialog_classification_source_cannot_bypass_installed_state(self):
+        with tempfile.TemporaryDirectory(prefix='ox-rt02-hf05-mut-') as td:
+            root=Path(td)
+            for rel in C.PATHS:
+                src=ROOT/rel;dst=root/rel;dst.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(src,dst)
+            p=root/C.HOST
+            source=p.read_text()
+            anchor="actual=installed_state(1 if scenario=='standalone' else 2,"
+            self.assertIn(anchor,source)
+            p.write_text(source.replace(anchor,"actual=installed_state(1 if scenario=='split' else 2,",1))
+            self.assertTrue(C.inspect(root))
 
 
 class RT02FixtureManifestRegression(unittest.TestCase):

@@ -105,7 +105,7 @@ def inspect(root:Path=ROOT)->list[str]:
     # The verification must be source-bound and require both distinct scenarios.
     if "for scenario in ('standalone','split')" not in host:
         errors.append('real installer host must execute both actual Android sessions')
-    if "need(v.get('scenarios')==[" not in host:
+    if 'valid_scenarios' not in host:
         errors.append('independent receipt verification lacks exact two-session proof')
     if "'status':'NOT_RUN'" not in host or "v['status']='FAILED'" not in host:
         errors.append('no fail-closed RT02 status lifecycle')
@@ -123,6 +123,14 @@ def inspect(root:Path=ROOT)->list[str]:
                  'test_fixture_preflight_is_mandatory'):
         if name not in files[TEST]:
             errors.append('stale RT02 fixture regression missing: ' + name)
+    for name in ('test_split_zero_dialog_valid_only_when_exact_platform_proof_recorded',
+                 'test_split_no_dialog_requires_verified_split_and_version',
+                 'test_standalone_first_install_approval_required',
+                 'test_split_no_dialog_wrong_version_refused'):
+        if name not in files[TEST]:
+            errors.append('HF05 approval regression missing: '+name)
+    if 'RT02A HF05' not in docs:
+        errors.append('HF05 approval-scope docs missing')
     if ('- name: Compile and validate disposable APK fixtures before emulator boot' not in w
             or 'test -s "$RUNNER_TEMP/obtainx-rt02/fixtures/fixture_inventory.json"' not in w):
         errors.append('RT02 fixture build must be a separate pre-emulator hard gate')
@@ -139,15 +147,30 @@ def inspect(root:Path=ROOT)->list[str]:
         hf=_functions(host);ff=_functions(fixture)
         for name,needles in {
             'installed_state': ('sha_file(fixture_dir/', "'shell','sha256sum'", "digest[0]==expected[name]", "str(expected_version) in matches", "'shell','dumpsys','package'"),
-            'one_scenario': ('flutter', "tap_count==1", "'All tests passed!' in text",
+            'one_scenario': ('flutter', "classify_android_approval(scenario,tap_count,actual)", "'All tests passed!' in text",
                              'flutter_phase(logfile)', 'record_flutter_progress(out,scenario,phase'),
             '_tap_confirmed_install_dialog': ('APPROVERS',"NAME in", "label in ('Install','Update'"),
             'execute': ("for scenario in ('standalone','split')", "'status']='PASS_TWO_ANDROID_SYSTEM_SESSIONS'"),
-            'verify': ("'status':'PASS_TWO_ANDROID_SYSTEM_SESSIONS'", "'scenarios')==["),
+            'verify': ("'status':'PASS_TWO_ANDROID_SYSTEM_SESSIONS'", "valid_scenarios"),
         }.items():
             body=hf.get(name,'')
             for needle in needles:
                 if needle not in body:errors.append('host proof bypassed: '+name+' / '+needle)
+        approval=hf.get('classify_android_approval','')
+        for needle in ("tap_count in (0,1)", "need(tap_count==1,",
+                       "'platform_committed_no_dialog'", "actual.get('version_code')==2",
+                       "actual.get('installed_path_count')==2",
+                       "actual.get('config_x86_64_present') is True"):
+            if needle not in approval:
+                errors.append('Android platform approval classifier bypassed: '+needle)
+        scenario_body=hf.get('one_scenario','')
+        verify_pos=scenario_body.find("actual=installed_state(1 if scenario=='standalone' else 2,")
+        admission_pos=scenario_body.find('approval_path=classify_android_approval(scenario,tap_count,actual)')
+        if verify_pos<0 or admission_pos<0 or verify_pos>=admission_pos:
+            errors.append('installed version/hash must precede approval classification')
+        checker=hf.get('verify','')
+        if "(0,'platform_committed_no_dialog')" not in checker or "(1,'explicit_dialog')" not in checker:
+            errors.append('independent receipt must verify both exact update approval modes')
         if 'key.unlink(missing_ok=True)' not in ff.get('signed_fixture',''):
             errors.append('ephemeral signing key deletion bypassed')
     except SyntaxError:

@@ -74,3 +74,25 @@ and the package approval count. Failures upload `progress.json` and a fail-close
 receipt, never raw Flutter logs, device logs or signing secrets. The cold-build
 ceiling is enlarged, but installer approvals still have their own short limit.
 Passing this scoped lane does **not** qualify all APK/APKM/APKS/XAPK cases.
+
+### RT02A HF05 — Verified Android update approval modes
+
+Run 42939838138 passed the fresh standalone v1 install with an observed Android
+confirmation and exact installed APK SHA-256. Its split update finished the
+production StockInstaller call but the runner refused **before checking v2**
+because no second UI dialog was observed. Android may allow an upgrade from the
+existing installer without showing a second dialog. This is NOT proof the split
+update succeeded.
+
+HF05 moves actual Android package state and exact installed APK byte verification
+**ahead of** approval classification. First installation still requires exactly
+one observed Android approval. The split upgrade accepts one of two explicitly
+recorded outcomes only after production StockInstaller returns success **and**
+Android proves versionCode 2, base APK plus x86_64 split, and both SHA-256 hashes:
+`explicit_dialog` (one observed Android approval) or
+`platform_committed_no_dialog` (zero observed dialogs). The latter never
+pretends the user clicked a button. Missing/ambiguous Android package proof,
+signature divergence, wrong version, missing split, invalid test completion,
+non-emulator or wrong source remains a failure. Source and receipt mutation
+regressions protect both paths. This remains scoped RT02A only; no complete R02
+acceptance, physical device or release qualification.

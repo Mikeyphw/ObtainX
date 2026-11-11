@@ -35,7 +35,7 @@ def inspect(root: Path = ROOT) -> list[str]:
           'icon extraction must still use the parsed APK path')
     check('if (parsedArchivePath != null &&' not in app,
           'obsolete nullable path assertion reintroduced')
-    check('final selectedConfig = [...nonAbi, ?abiMember]' in planner,
+    check('final selectedConfig = [...nonAbi, ?abiMember, ...selectedLocales, ?densityMember]' in planner,
           'null-aware split selection marker missing')
     check('if (abiMember != null) abiMember' not in planner,
           'stale Dart collection-if source reintroduced')

@@ -30,6 +30,8 @@ jobs:
         run: python3 scripts/ci/r01_security_contract.py --check
       - name: Enforce R02 package plan/source staleness contracts
         run: python3 scripts/ci/r02_install_contract.py --check
+      - name: Enforce RT02D device profile and OBB path contracts
+        run: python3 scripts/ci/r02d_source_contract.py --check
       - name: Enforce R02 HF02 analyzer and golden-triage contracts
         run: python3 scripts/ci/r02_hf02_contract.py --check
       - name: Enforce R02 API36 emulator source/evidence staleness contracts

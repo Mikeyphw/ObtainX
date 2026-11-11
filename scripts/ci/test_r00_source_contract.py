@@ -45,14 +45,14 @@ class R00ContractTests(unittest.TestCase):
     def test_valid_strict_workflows(self):
         files = {name: EXAMPLE_WORKFLOW for name in (
             'obtainx-r00-contracts.yml', 'obtainx-r00-flutter.yml',
-            'obtainx-r02-api36.yml', 'obtainx-r02-rt02.yml', 'obtainx-r02-rt02b.yml')}
+            'obtainx-r02-api36.yml', 'obtainx-r02-rt02.yml', 'obtainx-r02-rt02b.yml', 'obtainx-r02-rt02c.yml')}
         self.assertEqual(check_workflows(files), [])
 
 
     def test_reviewed_api36_required_and_no_unknown_workflows(self):
         reviewed = {name: EXAMPLE_WORKFLOW for name in (
             'obtainx-r00-contracts.yml', 'obtainx-r00-flutter.yml',
-            'obtainx-r02-api36.yml', 'obtainx-r02-rt02.yml', 'obtainx-r02-rt02b.yml')}
+            'obtainx-r02-api36.yml', 'obtainx-r02-rt02.yml', 'obtainx-r02-rt02b.yml', 'obtainx-r02-rt02c.yml')}
         self.assertEqual(check_workflows(reviewed), [])
         removed = dict(reviewed)
         del removed['obtainx-r02-api36.yml']
@@ -66,7 +66,7 @@ class R00ContractTests(unittest.TestCase):
     def test_reviewed_emulator_still_read_only_and_no_release(self):
         reviewed = {name: EXAMPLE_WORKFLOW for name in (
             'obtainx-r00-contracts.yml', 'obtainx-r00-flutter.yml',
-            'obtainx-r02-api36.yml', 'obtainx-r02-rt02.yml', 'obtainx-r02-rt02b.yml')}
+            'obtainx-r02-api36.yml', 'obtainx-r02-rt02.yml', 'obtainx-r02-rt02b.yml', 'obtainx-r02-rt02c.yml')}
         changed = dict(reviewed)
         changed['obtainx-r02-api36.yml'] = EXAMPLE_WORKFLOW.replace('contents: read', 'contents: write')
         self.assertTrue(any('write access' in msg for msg in check_workflows(changed)))
@@ -80,7 +80,7 @@ class R00ContractTests(unittest.TestCase):
     def test_reviewed_rt02_required_and_release_is_still_prohibited(self):
         reviewed = {name: EXAMPLE_WORKFLOW for name in (
             'obtainx-r00-contracts.yml', 'obtainx-r00-flutter.yml',
-            'obtainx-r02-api36.yml', 'obtainx-r02-rt02.yml', 'obtainx-r02-rt02b.yml')}
+            'obtainx-r02-api36.yml', 'obtainx-r02-rt02.yml', 'obtainx-r02-rt02b.yml', 'obtainx-r02-rt02c.yml')}
         self.assertEqual(check_workflows(reviewed), [])
         omitted = dict(reviewed); del omitted['obtainx-r02-rt02.yml']
         self.assertTrue(any('missing workflow(s)' in msg and 'obtainx-r02-rt02.yml' in msg
@@ -109,7 +109,7 @@ class R00ContractTests(unittest.TestCase):
                 'fork_repo': 'Mikeyphw/ObtainX', 'roadmap_sha256':'0'*64,
             }), encoding='utf-8')
             for name in ('obtainx-r00-contracts.yml', 'obtainx-r00-flutter.yml',
-                         'obtainx-r02-api36.yml', 'obtainx-r02-rt02.yml', 'obtainx-r02-rt02b.yml'):
+                         'obtainx-r02-api36.yml', 'obtainx-r02-rt02.yml', 'obtainx-r02-rt02b.yml', 'obtainx-r02-rt02c.yml'):
                 (root / '.github/workflows'/name).write_text(EXAMPLE_WORKFLOW, encoding='utf-8')
             self.assertTrue(any('roadmap digest drift' in i for i in inspect(root, validate_git=False)))
 

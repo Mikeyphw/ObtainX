@@ -38,3 +38,5 @@ jobs:
         run: python3 scripts/ci/r02_rt02_contract.py --check
       - name: Enforce RT02B Android rejection matrix source contract
         run: python3 scripts/ci/r02_rt02b_contract.py --check
+      - name: Enforce RT02C archive-to-session source and mutation contracts
+        run: python3 scripts/ci/r02_rt02c_contract.py --check

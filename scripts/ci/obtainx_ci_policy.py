@@ -30,6 +30,7 @@ RISK_GLOBS = (
     '.github/workflows/**',
     'scripts/ci/r02_rt02**',
     'scripts/ci/obtainx_ci_policy.py',
+    'scripts/ci/*optimization*',
     'scripts/ci/r00_source_contract.py',
     'pubspec.yaml',
     'pubspec.lock',

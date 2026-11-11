@@ -77,7 +77,11 @@ Future<Map<String, dynamic>> control(String route, String name, {String? result}
     if (result != null) {
       body['result'] = result;
     }
-    request.write(jsonEncode(body));
+    // The hosted controller intentionally rejects unbounded/chunked POST bodies.
+    // HttpClientRequest defaults contentLength to -1, so send exact UTF-8 bytes.
+    final payload = utf8.encode(jsonEncode(body));
+    request.contentLength = payload.length;
+    request.add(payload);
     final response = await request.close().timeout(const Duration(minutes: 4));
     final text = await utf8.decoder.bind(response).join();
     if (response.statusCode != HttpStatus.ok) {

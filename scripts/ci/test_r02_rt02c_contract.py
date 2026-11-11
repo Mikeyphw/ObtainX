@@ -66,6 +66,12 @@ class SourceMutations(unittest.TestCase):
         self.mutation(C.DART,'extractTarballOffIsolate(','fakeExtractor(')
     def test_archive_digest_required(self):
         self.mutation(C.DART,'sha256.convert(bytes).toString() != archiveSha','false')
+    def test_single_session_control_body_must_have_explicit_length(self):
+        self.mutation(C.DART, 'request.contentLength = payload.length;',
+                      'request.contentLength = -1;')
+    def test_single_session_control_body_must_send_verified_bytes(self):
+        self.mutation(C.DART, 'request.add(payload);',
+                      'request.write(jsonEncode(body));')
     def test_extracted_apk_digest_required(self):
         self.mutation(C.DART,'actual.toString() != expected','false')
     def test_resolver_required(self):

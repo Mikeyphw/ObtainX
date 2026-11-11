@@ -12,7 +12,70 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    name: Exact-SHA scope classifier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      full_flutter: ${{ steps.scope.outputs.full_flutter }}
+      targeted_flutter: ${{ steps.scope.outputs.targeted_flutter }}
+    steps:
+      - name: Checkout PR HEAD, not GitHub synthetic merge commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify exact base HEAD risk
+        id: scope
+        shell: bash
+        env:
+          OX_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          OX_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          OX_MANUAL_EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
+          if [[ -z "$OX_BASE_SHA" ]]; then OX_BASE_SHA="$(git rev-parse HEAD^)"; fi
+          args=()
+          if [[ "$OX_MANUAL_EVENT" == 'workflow_dispatch' ]]; then args+=(--manual); fi
+          python3 -B scripts/ci/obtainx_ci_policy.py plan --head "$OX_EXPECTED_SHA" \
+            --base "$OX_BASE_SHA" --github-output "$GITHUB_OUTPUT" "${args[@]}"
+
+  targeted-flutter:
+    name: Scoped Flutter analysis and changed regression tests (NOT full)
+    needs: scope
+    if: needs.scope.outputs.targeted_flutter == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact PR HEAD
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Flutter 3.47.6
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # pinned v2
+        with:
+          flutter-version: '3.47.6'
+          cache: true
+      - name: Resolve dependencies
+        run: flutter pub get
+      - name: Run only impacted Flutter checks
+        shell: bash
+        env:
+          OX_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          OX_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
+          python3 -B scripts/ci/obtainx_ci_policy.py run-flutter \
+            --head "$OX_EXPECTED_SHA" --base "$OX_BASE_SHA"
+
   flutter-and-android-debug:
+    needs: scope
+    if: needs.scope.outputs.full_flutter == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -42,6 +105,8 @@ jobs:
         run: flutter test --no-pub test/r02d_device_compatibility_test.dart
       - name: Execute RT02E verified OBB delivery and cancellation contracts
         run: flutter test --no-pub test/r02e_verified_obb_delivery_test.dart
+      - name: Execute RT02F external handoff and cancelled-platform outcomes
+        run: flutter test --no-pub test/r02f_external_handoff_test.dart
       - name: Execute full Flutter test suite
         id: full_flutter_tests
         run: |

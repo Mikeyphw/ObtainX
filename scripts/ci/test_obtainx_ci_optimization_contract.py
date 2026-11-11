@@ -66,6 +66,30 @@ class CIOptimizationSafety(unittest.TestCase):
             '        if: ${{ false }}')
 
 
+    def test_api36_cache_mandatory(self):
+        self.mutation(M.HEAVY[0],'          cache: gradle\n',
+                      '          cache: none\n')
+
+    def test_rt02_cache_wrapper_dependency_mandatory(self):
+        self.mutation(M.HEAVY[1],
+                      '            android/gradle/wrapper/gradle-wrapper.properties',
+                      '            arbitrary/untrusted.gradle')
+
+    def test_rt02b_cache_jdk_pin_mandatory(self):
+        self.mutation(M.HEAVY[2],
+                      'actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3',
+                      'actions/setup-java@main')
+
+    def test_rt02c_existing_gradle_cache_mandatory(self):
+        self.mutation(M.HEAVY[3],
+                      '            android/**/*.gradle*',
+                      '            some/irrelevant/path')
+
+    def test_cache_must_be_inside_java_step(self):
+        self.mutation(M.HEAVY[0],
+                      '      - name: Set up Java 21',
+                      '      - name: Cache moved outside Java setup')
+
     def test_artifact_upload_timeout_bounded(self):
         self.mutation(M.HEAVY[0],'timeout-minutes: 3\n        uses: '+M.UPLOAD,
                       'timeout-minutes: 120\n        uses: '+M.UPLOAD)

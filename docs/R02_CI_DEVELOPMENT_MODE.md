@@ -50,6 +50,14 @@ gh pr edit 11 -R Mikeyphw/ObtainX --remove-label ci:development-only
 
 The label removal itself triggers new full workflows. Check exact SHA and all required CI lanes; absence of a workflow or missing evidence remains unqualified. Do not count a fast development run as qualification.
 
+## OPT02 — Gradle dependency cache parity
+
+- The three API36 jobs that previously lacked Gradle caching (bootstrap, RT02 and RT02B) now reuse the **same source-pinned Java 21 setup-java Gradle dependency cache** already present in RT02C.
+- Cache keys are built from the Gradle wrapper and Android Gradle build configuration. Only dependency artifacts are cached, **not** signed test fixtures, runtime Android state, or acceptance receipts.
+- This does **not** remove separate emulator launches, signature/rollback tests, KVM checks, independent source-bound receipts or mandatory artifact uploads.
+- The cache change is a potential optimization for warm qualification runs, **not a measured speedup**. Compare hosted before/after steps and failed cache restores; keep qualification fail-closed.
+- The `ci:development-only` label still skips all four Android lanes. Caches can only be evaluated during an authorized qualification run.
+
 ## Performance claims
 
 The runtime savings from development-only runs are structural (heavy jobs are omitted) and can be verified by job lists. No warm-cache speedup is claimed. Three-minute artifact timeouts cap the upload step cost but do not cure upload service failures. Compare cold/warm builds, caches and actual CI results before claiming additional gains.

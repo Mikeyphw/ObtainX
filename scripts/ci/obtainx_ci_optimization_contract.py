@@ -96,6 +96,21 @@ def inspect(root: Path = ROOT) -> list[str]:
                 'GITHUB_STEP_SUMMARY' not in content or 'sha256sum' not in content or \
                 'if: always()' not in content:
             errors.append('bounded evidence fallback summary missing: '+rel)
+        # Source-pinned Java 21 Gradle cache parity is an optimization ONLY;
+        # keep fresh disposable emulator, APK fixtures and independent receipts.
+        java_start='      - name: Set up Java 21\n'
+        java=(content.split(java_start,1)[1].split('\n      - name:',1)[0]
+              if content.count(java_start)==1 else '')
+        cache_parts=(
+            'actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3',
+            "java-version: '21'",
+            '          cache: gradle\n',
+            '          cache-dependency-path: |\n',
+            '            android/gradle/wrapper/gradle-wrapper.properties\n',
+            '            android/**/*.gradle*',
+        )
+        if not java or any(java.count(k)!=1 for k in cache_parts):
+            errors.append('pinned Gradle cache parity missing or altered: '+rel)
         if 'continue-on-error: true' in content:
             errors.append('unsafe Android CI failure suppression detected: '+rel)
     return errors

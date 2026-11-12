@@ -66,7 +66,8 @@ class SourceMutationTests(unittest.TestCase):
     def test_runtime_version_changed_without_refusal(self):
         self.mutate(C.HOST,"need('2' in versions and '3' not in versions and '1' not in versions","need(True or '2' in versions and '3' not in versions and '1' not in versions")
     def test_device_ui_not_sampled_before_installer_call(self):
-        self.mutate(C.HOST,"if installed and phase=='STOCK_INSTALLER_CALL' and taps==0:","if installed and taps==0:")
+        self.mutate(C.HOST,"if installed and phase=='STOCK_INSTALLER_CALL' and taps[pending]==0:",
+                    "if installed and taps[pending]==0:")
     def test_new_workflow_allowlist_required(self):
         self.mutate(C.R00,"'obtainx-r02-rt02b.yml'","'other.yml'")
     def test_source_contract_step_required(self):
@@ -76,7 +77,21 @@ class SourceMutationTests(unittest.TestCase):
     def test_no_release(self):
         self.mutate(C.HOST,"'release_qualified':False","'release_qualified':True")
     def test_both_cases_must_be_attempted(self):
-        self.mutate(C.HOST,'for case in CASES:','for case in CASES[:1]:')
+        self.mutate(C.HOST,"for step in ('START','INSTALL_CALL','REJECTED','ACKED')",
+                    "for step in ('START','INSTALL_CALL','REJECTED')")
+    def test_single_flutter_process_required(self):
+        self.mutate(C.HOST,'subprocess.Popen(args', 'subprocess.run(args')
+    def test_host_ack_barrier_required(self):
+        self.mutate(C.HOST,'state.acks[pending].set()', 'pass  # skip ack')
+    def test_exact_independent_android_proof_required(self):
+        self.mutate(C.HOST,'proof=baseline_unchanged(fixtures)',
+                    "proof={'installed_original_intact':True}")
+    def test_ordered_dart_events_required(self):
+        self.mutate(C.HOST,'events==EVENTS[:len(events)]','True')
+    def test_dart_ack_required(self):
+        self.mutate(C.DART,'await awaitHostAck(testCase)','await Future<void>.delayed(Duration.zero)')
+    def test_both_compile_time_sha_required(self):
+        self.mutate(C.DART,'OX_R02B_DOWNGRADE_SHA256', 'OX_R02B_SINGLE_SHA256')
 
 class ReceiptTests(unittest.TestCase):
     def setUp(self):
@@ -88,11 +103,13 @@ class ReceiptTests(unittest.TestCase):
                     'installed_original_intact':True,'version_code':2,
                     'installed_path_count':1,'base_sha256':'c'*64,
                     'flutter_log_sha256':'d'*64,'android_confirmation_count':taps}
-        self.record={'schema':1,'status':'PASS_TWO_REAL_ANDROID_REJECTIONS',
+        self.record={'schema':2,'status':'PASS_TWO_REAL_ANDROID_REJECTIONS',
             'source_sha':self.source,'run_id':self.run,'hosted_emulator_only':True,
             'physical_device_qualified':False,'full_r02_matrix_qualified':False,
             'release_qualified':False,'publication_allowed':False,
             'backend':'production StockInstaller',
+            'flutter_launches':1, 'host_acknowledgement_order':list(H.CASES),
+            'session_log_sha256':'d'*64,
             'android_negative_cases':[case('signature_mismatch'),case('downgrade',1)]}
         self.write()
     def tearDown(self):self.tmp.cleanup()
@@ -133,6 +150,24 @@ class ReceiptTests(unittest.TestCase):
         with self.assertRaises(H.Refused):self.verify()
     def test_wrong_installed_path_count(self):
         self.record['android_negative_cases'][0]['installed_path_count']=2;self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_more_than_one_flutter_launch_refused(self):
+        self.record['flutter_launches']=2;self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_reordered_host_ack_refused(self):
+        self.record['host_acknowledgement_order'].reverse();self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_missing_host_ack_refused(self):
+        self.record['host_acknowledgement_order'].pop();self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_wrong_session_log_hash_refused(self):
+        self.record['android_negative_cases'][1]['flutter_log_sha256']='e'*64;self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_missing_session_hash_refused(self):
+        self.record.pop('session_log_sha256');self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_bad_receipt_schema_refused(self):
+        self.record['schema']=1;self.write()
         with self.assertRaises(H.Refused):self.verify()
 
 class FixtureSafety(unittest.TestCase):

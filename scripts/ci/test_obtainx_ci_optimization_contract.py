@@ -181,5 +181,33 @@ class CIOptimizationSafety(unittest.TestCase):
                       '    env:\n      GRADLE_OPTS: -Dorg.gradle.caching=true',
                       '      env:\n        GRADLE_OPTS: -Dorg.gradle.caching=true')
 
+    def test_opt06_p03_parallel_gradle_mandatory_on_all_five_jobs(self):
+        for rel in (M.FLUTTER,*M.HEAVY):
+            with self.subTest(rel=rel):
+                self.mutation(rel, '-Dorg.gradle.parallel=true',
+                              '-Dorg.gradle.parallel=false')
+                copyfile(ROOT/rel,self.root/rel)
+
+    def test_opt06_p03_worker_cap_mandatory_on_all_five_jobs(self):
+        for rel in (M.FLUTTER,*M.HEAVY):
+            with self.subTest(rel=rel):
+                self.mutation(rel, '-Dorg.gradle.workers.max=2',
+                              '-Dorg.gradle.workers.max=64')
+                copyfile(ROOT/rel,self.root/rel)
+
+    def test_opt06_p03_prevent_snapshot_reuse_on_all_android_jobs(self):
+        for rel in M.HEAVY:
+            with self.subTest(rel=rel):
+                self.mutation(rel, 'emulator-options: -no-snapshot -no-window',
+                              'emulator-options: -no-window')
+                copyfile(ROOT/rel,self.root/rel)
+
+    def test_opt06_p03_no_snapshot_cache_injection(self):
+        for rel in M.HEAVY:
+            with self.subTest(rel=rel):
+                self.mutation(rel, 'emulator-options: -no-snapshot -no-window',
+                              'emulator-options: -snapshot cached-state -no-window')
+                copyfile(ROOT/rel,self.root/rel)
+
 if __name__ == '__main__':
     unittest.main()

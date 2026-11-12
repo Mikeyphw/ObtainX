@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      GRADLE_OPTS: -Dorg.gradle.caching=true
+      GRADLE_OPTS: -Dorg.gradle.caching=true -Dorg.gradle.parallel=true -Dorg.gradle.workers.max=2
     steps:
       - name: Checkout exact source commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
@@ -109,7 +109,7 @@ jobs:
           ram-size: 2048M
           disk-size: 3072M
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           script: bash -c 'set -euo pipefail; python3 -B scripts/ci/r02_rt02_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02"'
       - name: Independently verify exact source-bound RT02 receipts
         shell: bash

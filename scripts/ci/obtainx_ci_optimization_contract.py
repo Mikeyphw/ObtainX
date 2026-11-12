@@ -187,7 +187,7 @@ def inspect(root: Path = ROOT) -> list[str]:
         anchor = '  '+job_name+':\n'
         body = wf.split(anchor,1)[1] if wf.count(anchor)==1 else ''
         header = body.split('    steps:\n',1)[0]
-        expected = '    env:\n      GRADLE_OPTS: -Dorg.gradle.caching=true\n'
+        expected = '    env:\n      GRADLE_OPTS: -Dorg.gradle.caching=true -Dorg.gradle.parallel=true -Dorg.gradle.workers.max=2\n'
         if (not body or '    steps:\n' not in body or
                 header.count(expected)!=1 or wf.count('GRADLE_OPTS:')!=1):
             errors.append('OPT04 exact hosted Gradle task-output cache missing: '+rel)
@@ -201,6 +201,14 @@ def inspect(root: Path = ROOT) -> list[str]:
                      '            android/**/*.gradle*'):
         if not setup_java or setup_java.count(required)!=1:
             errors.append('OPT04 Flutter Gradle cache parity missing: '+required)
+    # OPT06 P03: the disposable emulator must never load or save a prior state.
+    # Every existing API36, KVM, installer and independent receipt proof remains.
+    for rel in HEAVY:
+        options = ('          emulator-options: -no-snapshot -no-window '
+                   '-gpu swiftshader_indirect -noaudio -no-boot-anim '
+                   '-camera-back none -camera-front none\n')
+        if files[rel].count(options) != 1:
+            errors.append('OPT06 P03 cold, nonpersistent emulator requirement missing: '+rel)
     return errors
 
 

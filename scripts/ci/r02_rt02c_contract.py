@@ -14,12 +14,13 @@ WF='.github/workflows/obtainx-r02-rt02c.yml'
 FIX='scripts/ci/r02_rt02c_fixture.py'
 HOST='scripts/ci/r02_rt02c_hosted.py'
 SINGLE='scripts/ci/r02_rt02c_single_session.py'
+POLL='scripts/ci/obtainx_ci_optimization_opt06_rt02c_polling.py'
 TEST='scripts/ci/test_r02_rt02c_contract.py'
 DART='integration_test/r02c_archive_install_test.dart'
 DOC='docs/R02_RT02C_ARCHIVE_RUNTIME_ACCEPTANCE.md'
 BASE_HOST='scripts/ci/r02_rt02_hosted.py'
 BASE_FIX='scripts/ci/r02_rt02_fixture.py'
-PATHS=(R00,R00_TEST,SOURCE_WF,WF,FIX,HOST,SINGLE,TEST,DART,DOC,BASE_HOST,BASE_FIX)
+PATHS=(R00,R00_TEST,SOURCE_WF,WF,FIX,HOST,SINGLE,POLL,TEST,DART,DOC,BASE_HOST,BASE_FIX)
 CASES=('apks','apkm','xapk','zip','tar.gz','traversal','ambiguous')
 
 def inspect(root:Path=ROOT)->list[str]:
@@ -60,6 +61,8 @@ def inspect(root:Path=ROOT)->list[str]:
             "'publication_allowed':False", 'sha(fixtures/name)',
             'not called and taps==0', 'installed_signed_members_verified',
             'len(cases)==7', 'rt02c-progress.json',
+            "obj.get('runner_probe_count')",
+            "obj.get('runner_probe_skipped')",
             'controller.run()', "obj.get('flutter_launches')==1",
             'from r02_rt02c_single_session import ControlHandler,SingleSession',
             "obj.get('flutter_launches')==1"),
@@ -71,7 +74,13 @@ def inspect(root:Path=ROOT)->list[str]:
               'self.H.baseline_v1(self.fixtures)',
               'self.base._tap_confirmed_install_dialog()',
               'self.need(self.next_index == len(CASES)',
-              "self.headers.get('X-RT02C-Token')"),
+              "self.headers.get('X-RT02C-Token')",
+              'from obtainx_ci_optimization_opt06_rt02c_polling import should_probe_runner',
+              'should_probe_runner(now, self.runner_probe_last, runner_stage)',
+              'self.runner_probe_skipped += 1',
+              "self.receipt['runner_probe_count'] = self.runner_probe_count"),
+      POLL:('GRADLE_PROBE_INTERVAL_SECONDS = 8.0',
+            'def should_probe_runner(', "phase != 'GRADLE_BUILD'"),
       DART:('IntegrationTestWidgetsFlutterBinding.ensureInitialized()',
             'extractZipOffIsolate(', 'extractTarballOffIsolate(',
             'resolveInstallBundlePlan(', 'installArtifactFormat(fileName)',
@@ -93,7 +102,11 @@ def inspect(root:Path=ROOT)->list[str]:
       DOC:('NOT full R02', 'five archive formats', 'Production StockInstaller',
            'No releases','No merges','source-bound'),
       TEST:('test_valid_source','test_preinstall_rejects_traversal',
-            'test_exact_seven_archive_cases','test_no_mock_installer'),
+            'test_exact_seven_archive_cases','test_no_mock_installer',
+            'test_opt06_missing_probe_count_refused',
+            'test_opt06_missing_skipped_count_refused',
+            'test_opt06_boolean_probe_count_refused',
+            'test_opt06_excessive_skipped_count_refused'),
     }
     for p,markers in anchors.items():
         for m in markers:

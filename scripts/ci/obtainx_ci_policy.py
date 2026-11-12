@@ -29,6 +29,7 @@ RISK_GLOBS = (
     'android/**',
     '.github/workflows/**',
     'scripts/ci/r02_rt02**',
+    'scripts/ci/r02_sdk_retry.py',
     'scripts/ci/obtainx_ci_policy.py',
     'scripts/ci/*optimization*',
     'scripts/ci/r00_source_contract.py',

@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -216,6 +217,39 @@ def classify_android_approval(scenario:str,tap_count:int,actual:dict)->str:
 
 
 
+def split_pre_dart_recovery_allowed(scenario:str,attempt:int,phase:str,
+                                    dart_started:bool,tap_count:int)->bool:
+    """Only recover from a failed *test harness*, never from an installer attempt."""
+    return (scenario=='split' and type(attempt) is int and attempt==1 and
+            phase in ('FLUTTER_STARTING','GRADLE_BUILD','TEST_APK_INSTALL') and
+            dart_started is False and type(tap_count) is int and tap_count==0)
+
+
+def split_pre_dart_stalled(scenario:str,attempt:int,phase:str,
+                           elapsed:float,idle:float)->bool:
+    """No timed restart after Dart, StockInstaller, or Android approval."""
+    return (scenario=='split' and attempt==1 and phase=='TEST_APK_INSTALL' and
+            elapsed>=360 and idle>=180)
+
+
+def terminate_flutter_process_group(p:subprocess.Popen)->None:
+    """Stop only this invocation's isolated process group; reap its parent."""
+    try:
+        os.killpg(p.pid,signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        p.wait(timeout=6)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid,signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:p.wait(timeout=6)
+        except subprocess.TimeoutExpired as ex:
+            raise Refused('Flutter process group did not terminate') from ex
+
+
 # Explicitly allowlisted, bounded log diagnostics. Never emit, upload or store
 # raw Flutter output, device identifiers, environment variables or stack traces.
 FAILURE_RULES=(
@@ -283,14 +317,28 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
         deadline=started+900
         saw_installer_call=False
         last_progress=0.0
+        last_log_size=0
+        last_log_growth=started
         tap_count=0
         with logfile.open('wb') as log:
-            p=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT)
+            p=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,
+                               start_new_session=True)
             installed_app=False
             try:
                 while p.poll() is None and time.monotonic()<deadline:
                     now=time.monotonic()
                     phase=flutter_phase(logfile)
+                    log_size=logfile.stat().st_size
+                    if log_size != last_log_size:
+                        last_log_growth=now
+                        last_log_size=log_size
+                    # A stalled second Flutter test has already installed its
+                    # harness APK but has not reached Dart or StockInstaller.
+                    # Abort only this pre-Dart bootstrap, never an install call.
+                    if split_pre_dart_stalled(scenario,attempt,phase,
+                                              now-started,now-last_log_growth):
+                        print('OX_R02_RT02_SPLIT_BOOTSTRAP_STALL_DETECTED',flush=True)
+                        break
                     if phase=='STOCK_INSTALLER_CALL' and not saw_installer_call:
                         saw_installer_call=True
                         deadline=min(deadline,now+240)
@@ -315,7 +363,16 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
                     phase=flutter_phase(logfile)
                     record_flutter_progress(out,scenario,phase,int(time.monotonic()-started),
                                             installed_app,tap_count)
-                    record_flutter_failure(out,scenario,attempt,phase,logfile,-1)
+                    category,dart_started=record_flutter_failure(out,scenario,attempt,phase,logfile,-1)
+                    if split_pre_dart_recovery_allowed(scenario,attempt,phase,dart_started,tap_count):
+                        # Flutter's prior process must be fully stopped before
+                        # inspecting/reusing the exact v1 Android baseline.
+                        terminate_flutter_process_group(p)
+                        installed_state(1,False,out/'fixtures')
+                        adb('shell','am','force-stop',APP,timeout=20)
+                        installed_state(1,False,out/'fixtures')
+                        print('OX_R02_RT02_SPLIT_PRE_DART_RETRY category='+category,flush=True)
+                        continue
                     raise Refused('RT02_FLUTTER_TIMEOUT: scenario='+scenario+' phase='+phase+
                                   ' app_present='+str(installed_app)+' approvals='+str(tap_count))
                 text=logfile.read_text('utf-8','replace')
@@ -331,7 +388,15 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
                         # Confirm the real fixture is absent before restarting a
                         # test-runner/bootstrap failure. An installed fixture or
                         # ambiguous package query prevents a retry.
-                        empty_or_expected_package()
+                        if scenario=='split':
+                            # V1 is a mandatory installed baseline for an update;
+                            # the old 'fixture absent' check was impossible here.
+                            terminate_flutter_process_group(p)
+                            installed_state(1,False,out/'fixtures')
+                            adb('shell','am','force-stop',APP,timeout=20)
+                            installed_state(1,False,out/'fixtures')
+                        else:
+                            empty_or_expected_package()
                         print('OX_R02_RT02_PRE_DART_RETRY scenario='+scenario+
                               ' category='+category,flush=True)
                         continue
@@ -353,9 +418,7 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
                 return actual
             finally:
                 if p.poll() is None:
-                    p.terminate()
-                    try:p.wait(timeout=6)
-                    except subprocess.TimeoutExpired:p.kill()
+                    terminate_flutter_process_group(p)
     raise Refused('both Flutter attempts failed without runtime installation')
 
 def execute(out:Path)->int:

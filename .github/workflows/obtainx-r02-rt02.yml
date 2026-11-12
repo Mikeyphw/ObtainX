@@ -15,6 +15,7 @@ on:
       - 'android/**'
       - '.github/workflows/**'
       - 'scripts/ci/r02_rt02**'
+      - 'scripts/ci/r02_sdk_retry.py'
       - 'scripts/ci/obtainx_ci_policy.py'
       - 'scripts/ci/*optimization*'
       - 'scripts/ci/r00_source_contract.py'
@@ -77,7 +78,7 @@ jobs:
           test -c /dev/kvm || { echo OX_R02_RT02_KVM_MISSING >&2; exit 1; }
           if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then sudo chmod a+rw /dev/kvm; fi
           test -r /dev/kvm && test -w /dev/kvm || { echo OX_R02_RT02_KVM_REFUSED >&2; exit 1; }
-          sdkmanager --install 'platforms;android-36' 'build-tools;35.0.0' 'system-images;android-36;google_apis;x86_64'
+          python3 -B scripts/ci/r02_sdk_retry.py 'platforms;android-36' 'build-tools;35.0.0' 'system-images;android-36;google_apis;x86_64'
           avd_root="${ANDROID_AVD_HOME:-$HOME/.android/avd}"
           mkdir -p "$avd_root"
           available_kib="$(df -Pk "$avd_root" | awk 'END {print $4}')"

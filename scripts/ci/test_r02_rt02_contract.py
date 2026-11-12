@@ -108,7 +108,9 @@ class HF06FlutterPreDartRecovery(unittest.TestCase):
         import inspect
         source=inspect.getsource(H.one_scenario)
         self.assertIn('attempt==1 and not dart_started and tap_count==0',source)
-        self.assertLess(source.index('empty_or_expected_package()'),source.index('continue'))
+        self.assertIn('empty_or_expected_package()',source)
+        self.assertIn("installed_state(1,False,out/'fixtures')",source)
+        self.assertIn("if scenario=='split':",source)
         self.assertIn("phase in ('FLUTTER_STARTING','GRADLE_BUILD','TEST_APK_INSTALL')",source)
 
     def test_hf06_failure_does_not_mark_installer_pass(self):

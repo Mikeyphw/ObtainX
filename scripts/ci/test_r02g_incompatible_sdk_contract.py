@@ -83,6 +83,44 @@ class InstallOutputTests(unittest.TestCase):
         self.assertEqual(H.classify_install(self.output(1,
             'Performing Streamed Install\nFailure [INSTALL_FAILED_OLDER_SDK: Requires newer sdk version #37]')),
             H.EXPECTED)
+    def test_adb_duplicate_wrappers_accepted(self):
+        # Some platform-tools revisions mirror the *same* PackageManager
+        # failure on both streams. This must not be confused with two codes.
+        result=subprocess.CompletedProcess(['adb'],1,
+            b'Failure [INSTALL_FAILED_OLDER_SDK: minSdk37 on API36]',
+            b'adb: failed to install test: Failure [INSTALL_FAILED_OLDER_SDK]')
+        self.assertEqual(H.classify_install(result),H.EXPECTED)
+
+    def test_adb_stdout_only_exact_code(self):
+        result=subprocess.CompletedProcess(['adb'],1,
+            b'Failure [INSTALL_FAILED_OLDER_SDK]', b'')
+        self.assertEqual(H.classify_install(result),H.EXPECTED)
+
+    def test_adb_mirror_conflicting_code_refused(self):
+        result=subprocess.CompletedProcess(['adb'],1,
+            b'Failure [INSTALL_FAILED_OLDER_SDK]',
+            b'Failure [INSTALL_FAILED_INVALID_APK]')
+        with self.assertRaises(H.Refused):H.classify_install(result)
+
+    def test_mirrored_code_twice_in_same_stream_refused(self):
+        result=subprocess.CompletedProcess(['adb'],1,
+            b'Failure [INSTALL_FAILED_OLDER_SDK] INSTALL_FAILED_OLDER_SDK',b'')
+        with self.assertRaises(H.Refused):H.classify_install(result)
+
+    def test_install_diagnostics_never_include_paths_or_logs(self):
+        result=subprocess.CompletedProcess(['adb'],1,b'',
+            b'adb: failed to install /private/secret.apk: '
+            b'Failure [INSTALL_FAILED_OLDER_SDK] auth-token=secret')
+        out=H.install_diagnostics(result)
+        self.assertEqual(out['codes'],[H.EXPECTED])
+        self.assertNotIn('secret',str(out))
+        self.assertNotIn('/private/',str(out))
+
+    def test_bounded_failure_phase_inventory(self):
+        self.assertEqual(len(H.PHASES),9)
+        self.assertEqual(len(set(H.PHASES)),9)
+        self.assertIn('POSTINSTALL_ABSENCE',H.PHASES)
+
     def test_unexpected_success_refused(self):
         with self.assertRaises(H.Refused):
             H.classify_install(self.output(0,'Success'))

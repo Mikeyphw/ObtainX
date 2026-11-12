@@ -21,6 +21,13 @@ import r02g_incompatible_sdk_fixture as fixture
 
 RECEIPT='r02g-incompatible-sdk.json'
 EXPECTED='INSTALL_FAILED_OLDER_SDK'
+# This is a mandatory failure to install a disposable fixture, never a successful install.
+DIAGNOSTIC_TAG='OX_R02G_ANDROID_DIAGNOSTIC'
+PHASES=('HOSTED_SOURCE_PREFLIGHT','PREREQUISITE_RECEIPTS','PREINSTALL_ABSENCE',
+        'INSTALL_MINSDK37_ON_API36','CLASSIFY_ANDROID_REFUSAL',
+        'POSTINSTALL_ABSENCE','PRIOR_FIXTURE_ABSENCE','RECEIPT_COMMIT',
+        'CLEANUP_CHECK')
+_current_phase=PHASES[0]
 
 class Refused(RuntimeError):pass
 
@@ -60,15 +67,51 @@ def absent()->bool:
          'incompatible fixture package unexpectedly installed')
     return True
 
+def install_diagnostics(result)->dict:
+    """Bounded, redacted ADB telemetry: never retain command paths or raw output."""
+    out=result.stdout.decode('utf8','replace')
+    err=result.stderr.decode('utf8','replace')
+    pieces=[out,err]
+    pattern=r'INSTALL_(?:FAILED|PARSE_FAILED)_[A-Z0-9_]+'
+    codes=[re.findall(pattern, part) for part in pieces]
+    observed=sorted(set(code for seq in codes for code in seq))
+    # Only enum-like Android rejection tokens escape the private stderr/stdout.
+    return {'exit_nonzero':result.returncode!=0,
+            'stdout_bytes':len(result.stdout),'stderr_bytes':len(result.stderr),
+            'codes':observed[:4], 'code_occurrences':sum(map(len,codes)),
+            'stdout_codes':len(codes[0]),'stderr_codes':len(codes[1])}
+
 def classify_install(result)->str:
-    """ADB nonzero AND one exact PackageManager older-SDK code mandatory."""
+    """Require a real nonzero ADB failure carrying *only* OLDER_SDK.
+
+    Platform-tools versions sometimes mirror one PackageManager Failure line in
+    both streams. Permit at most one canonical code in each stream, if the same
+    exact older-SDK code appears and at least one stream carries a Failure [...]
+    wrapper. Never accept a duplicated unframed string, two errors in the same
+    stream, any conflicting error, or text claiming success.
+    """
     payload=(result.stdout+b'\n'+result.stderr).decode('utf8','replace')
-    need(result.returncode!=0 and len(payload)<=65536,
-         'Android installation unexpectedly succeeded or had unsafe output')
+    diag=install_diagnostics(result)
+    print(DIAGNOSTIC_TAG+' phase=CLASSIFY_ANDROID_REFUSAL rc_nonzero='+
+          str(int(diag['exit_nonzero']))+' codes='+(','.join(diag['codes']) or 'none')+
+          ' code_occurrences='+str(diag['code_occurrences'])+
+          ' stdout_bytes='+str(diag['stdout_bytes'])+
+          ' stderr_bytes='+str(diag['stderr_bytes']),flush=True)
+    need(result.returncode!=0,'ADB_INSTALL_EXIT_ZERO_REFUSED')
+    need(len(result.stdout)+len(result.stderr)<=65536,'ADB_INSTALL_RESPONSE_UNBOUNDED')
+    need(re.search(r'\bSuccess\b',payload) is None,'ADB_INSTALL_SUCCESS_MARKER_REFUSED')
     codes=re.findall(r'INSTALL_(?:FAILED|PARSE_FAILED)_[A-Z0-9_]+',payload)
-    need(codes==[EXPECTED] and re.search(r'\bSuccess\b',payload) is None,
-         'Android refusal is not the exact incompatible-SDK error')
+    if codes==[EXPECTED]:
+        return EXPECTED
+    # ADB may echo the same canonical Android response to both output streams.
+    # This is NOT authorization to ignore an unrelated/second error category.
+    one_per_stream=(diag['stdout_codes']==1 and diag['stderr_codes']==1)
+    same_error=(codes==[EXPECTED,EXPECTED] and diag['codes']==[EXPECTED])
+    framed=('Failure ['+EXPECTED) in payload
+    need(same_error and one_per_stream and framed,
+         'ADB_INSTALL_ERROR_CATEGORY_MISMATCH')
     return EXPECTED
+
 
 def receipt_file(out:Path,body:dict)->None:
     (out/RECEIPT).write_text(json.dumps(body,indent=2,sort_keys=True)+'\n',encoding='utf8')
@@ -81,16 +124,22 @@ def baseline(source:str,run:str)->dict:
             'release_qualified':False,'publication_allowed':False}
 
 def run(out:Path)->int:
+    global _current_phase
+    _current_phase='HOSTED_SOURCE_PREFLIGHT'
     source,run_id=base.host_check()
     need(out.is_absolute() and out.is_dir(),'absolute existing CI evidence folder required')
     receipt_file(out,baseline(source,run_id))
     inv=inventory(out,source)
     # Both previous real Android acceptance phases are hard prerequisites.
+    _current_phase='PREREQUISITE_RECEIPTS'
     rt02c.verify(out)
     p02.verify(out)
+    _current_phase='PREINSTALL_ABSENCE'
     need(base.empty_or_expected_package() is True,
          'previous R02 disposable fixture was not uninstalled')
     absent()
+    print('OX_R02G_PREINSTALL_PACKAGE_ABSENT_PASS',flush=True)
+    _current_phase='INSTALL_MINSDK37_ON_API36'
     print('OX_R02G_ANDROID_PHASE=INSTALL_MINSDK37_ON_API36',flush=True)
     attempted=False
     try:
@@ -98,8 +147,13 @@ def run(out:Path)->int:
         result=base.command(['adb','-s',base.SERIAL,'install','-t','-r',
                              str(out/'fixtures'/fixture.NAME)],
                             timeout=90,allow_failure=True)
+        _current_phase='CLASSIFY_ANDROID_REFUSAL'
         category=classify_install(result)
+        print('OX_R02G_EXACT_OLDER_SDK_ERROR_PASS',flush=True)
+        _current_phase='POSTINSTALL_ABSENCE'
         absent()
+        print('OX_R02G_POSTINSTALL_PACKAGE_ABSENT_PASS',flush=True)
+        _current_phase='PRIOR_FIXTURE_ABSENCE'
         need(base.empty_or_expected_package() is True,
              'incompatible SDK attempt mutated the earlier test package')
         proof={**baseline(source,run_id),
@@ -111,11 +165,13 @@ def run(out:Path)->int:
                'install_backend':'Android PackageManager adb install',
                'installer_dialog_approvals':0}
         # Admit only after independent package absence is verified.
+        _current_phase='RECEIPT_COMMIT'
         receipt_file(out,proof)
         print('OX_R02G_ANDROID_REAL_INCOMPATIBLE_SDK_REJECTION_PASS',flush=True)
         return 0
     finally:
         if attempted:
+            # Preserve original failing phase, even if a cleanup probe follows.
             # Cleanup even after an unexpected install; no user package touched.
             p=base.command(['adb','-s',base.SERIAL,'shell','pm','path',fixture.PACKAGE],
                            timeout=30,allow_failure=True)
@@ -149,13 +205,22 @@ def main()->int:
     try:
         return run(args.out) if args.action=='run' else verify(args.out)
     except (OSError,ValueError,TypeError,Refused,base.Refused) as exc:
+        # Category + finite allowlisted phase only. Never print ADB text, paths,
+        # system output, signer data, or a raw exception message to public CI.
+        phase=_current_phase if _current_phase in PHASES else 'HOSTED_SOURCE_PREFLIGHT'
+        reason=str(exc) if isinstance(exc,Refused) else type(exc).__name__
+        category=(reason if re.fullmatch(r'[A-Z][A-Z0-9_]{2,70}',reason)
+                  else 'SOURCE_OR_ANDROID_STATE_REFUSED')
         if args.action=='run' and args.out.is_dir() and (args.out/RECEIPT).is_file():
             try:
                 obj=json.loads((args.out/RECEIPT).read_text('utf8'))
-                obj['status']='FAILED';obj['failure_category']=type(exc).__name__
+                obj['status']='FAILED'
+                obj['failure_category']=category
+                obj['failure_phase']=phase
                 receipt_file(args.out,obj)
             except (OSError,ValueError):pass
-        print('OX_R02G_ANDROID_REFUSED: '+type(exc).__name__,file=sys.stderr,flush=True)
+        print('OX_R02G_ANDROID_REFUSED phase='+phase+' category='+category,
+              file=sys.stderr,flush=True)
         return 1
 
 if __name__=='__main__':raise SystemExit(main())

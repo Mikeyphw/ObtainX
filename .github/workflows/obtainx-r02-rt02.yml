@@ -37,6 +37,8 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'ci:development-only') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
+      GRADLE_OPTS: -Dorg.gradle.caching=true
     steps:
       - name: Checkout exact source commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4

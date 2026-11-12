@@ -172,6 +172,35 @@ def inspect(root: Path = ROOT) -> list[str]:
             api36.index('python3 -B '+OPT03_HELPER+' verify-tools') <=
                 api36.index('      - name: Verify KVM and provision API 36 system image')):
         errors.append('OPT03 cache consumer must verify exact SHA and signature or perform a full local build')
+    # OPT04: keep a source-bound Gradle task-output cache on the hosted jobs.
+    # This is NOT cross-test APK reuse: only Gradle task outputs with identical
+    # inputs are eligible, and every Android/Flutter acceptance path remains.
+    opt04_jobs = (
+        (FLUTTER, 'flutter-and-android-debug'),
+        (HEAVY[0], 'emulator-api36'),
+        (HEAVY[1], 'rt02-real-install'),
+        (HEAVY[2], 'rt02b-negative-install'),
+        (HEAVY[3], 'rt02c-archive-install'),
+    )
+    for rel, job_name in opt04_jobs:
+        wf = files[rel]
+        anchor = '  '+job_name+':\n'
+        body = wf.split(anchor,1)[1] if wf.count(anchor)==1 else ''
+        header = body.split('    steps:\n',1)[0]
+        expected = '    env:\n      GRADLE_OPTS: -Dorg.gradle.caching=true\n'
+        if (not body or '    steps:\n' not in body or
+                header.count(expected)!=1 or wf.count('GRADLE_OPTS:')!=1):
+            errors.append('OPT04 exact hosted Gradle task-output cache missing: '+rel)
+    flutter_job = files[FLUTTER].split('  flutter-and-android-debug:\n',1)[-1]
+    setup_java = (flutter_job.split('      - name: Set up Java 21\n',1)[1].split('\n      - name:',1)[0]
+                  if flutter_job.count('      - name: Set up Java 21\n')==1 else '')
+    for required in ('actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3',
+                     "java-version: '21'", '          cache: gradle\n',
+                     '          cache-dependency-path: |\n',
+                     '            android/gradle/wrapper/gradle-wrapper.properties',
+                     '            android/**/*.gradle*'):
+        if not setup_java or setup_java.count(required)!=1:
+            errors.append('OPT04 Flutter Gradle cache parity missing: '+required)
     return errors
 
 

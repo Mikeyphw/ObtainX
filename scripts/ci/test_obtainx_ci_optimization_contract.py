@@ -158,5 +158,28 @@ class CIOptimizationSafety(unittest.TestCase):
                       '          fail-on-cache-miss: false',
                       '          restore-keys: obtainx-opt03-\n          fail-on-cache-miss: false')
 
+    def test_opt04_gradle_task_output_cache_cannot_be_disabled(self):
+        for rel in (M.FLUTTER,*M.HEAVY):
+            with self.subTest(rel=rel):
+                self.mutation(rel,'      GRADLE_OPTS: -Dorg.gradle.caching=true',
+                              '      GRADLE_OPTS: -Dorg.gradle.caching=false')
+                # Undo our temp fixture mutation before testing another lane.
+                from shutil import copyfile
+                copyfile(ROOT/rel,self.root/rel)
+
+    def test_opt04_flutter_gradle_dep_cache_cannot_be_dropped(self):
+        self.mutation(M.FLUTTER,'          cache: gradle\n',
+                      '          cache: none\n')
+
+    def test_opt04_flutter_gradle_cache_wrapper_pin_required(self):
+        self.mutation(M.FLUTTER,
+                      '            android/gradle/wrapper/gradle-wrapper.properties',
+                      '            changed/unsafe.gradle.properties')
+
+    def test_opt04_gradle_cache_must_be_job_level_not_a_step(self):
+        self.mutation(M.HEAVY[0],
+                      '    env:\n      GRADLE_OPTS: -Dorg.gradle.caching=true',
+                      '      env:\n        GRADLE_OPTS: -Dorg.gradle.caching=true')
+
 if __name__ == '__main__':
     unittest.main()

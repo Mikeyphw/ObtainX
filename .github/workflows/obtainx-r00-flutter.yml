@@ -79,6 +79,8 @@ jobs:
     if: needs.scope.outputs.full_flutter == 'true' && !contains(github.event.pull_request.labels.*.name, 'ci:development-only')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      GRADLE_OPTS: -Dorg.gradle.caching=true
     steps:
       - name: Checkout exact commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned tag v4
@@ -89,6 +91,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            android/gradle/wrapper/gradle-wrapper.properties
+            android/**/*.gradle*
       - name: Set up Flutter 3.47.6
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # pinned tag v2
         with:

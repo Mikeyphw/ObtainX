@@ -25,6 +25,12 @@ DEFER_EXPR = "github.event_name != 'pull_request' || !contains(github.event.pull
 REFUSE_EXPR = "github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:development-only')"
 UPLOAD = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
 EMULATOR = 'ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d'
+OPT03_HELPER = 'scripts/ci/obtainx_ci_optimization_opt03_apk_cache.py'
+OPT03_TEST = 'scripts/ci/test_obtainx_ci_optimization_opt03_cache.py'
+OPT03_CACHE_PIN = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
+OPT03_KEY = 'obtainx-opt03-v1-${{ runner.os }}-flutter3.47.6-java21-normal-debug-${{ github.sha }}'
+OPT03_APK_PATH = 'build/app/outputs/flutter-apk/app-normal-debug.apk'
+OPT03_RECEIPT_PATH = 'build/app/outputs/flutter-apk/obtainx-opt03-debug-apk.json'
 
 
 def inspect(root: Path = ROOT) -> list[str]:
@@ -113,6 +119,59 @@ def inspect(root: Path = ROOT) -> list[str]:
             errors.append('pinned Gradle cache parity missing or altered: '+rel)
         if 'continue-on-error: true' in content:
             errors.append('unsafe Android CI failure suppression detected: '+rel)
+    # OPT03: only the full Flutter job may *seed* the cache, after full tests
+    # and exact-SHA build. API36 may consume it only after validation, with
+    # a normal local compile on cache miss, and unchanged real Android proofs.
+    opt03 = (root/OPT03_HELPER)
+    opt03_tests = (root/OPT03_TEST)
+    if not opt03.is_file() or opt03.is_symlink() or not opt03_tests.is_file():
+        errors.append('missing OPT03 cache validation or mutation tests')
+    else:
+        cache_code = opt03.read_text(encoding='utf8')
+        for marker in ('def source_identity()', 'def inspect_apk(', 'def seal(',
+                       'def verify(', 'def verify_android_tools(',
+                       'zipfile.ZipFile', 'git', 'rev-parse', 'GITHUB_SHA',
+                       'sha256', 'source_sha', 'apksigner', 'aapt'):
+            if marker not in cache_code:
+                errors.append('OPT03 source-bound APK validation removed: '+marker)
+    if flutter.count('      - name: Seal exact-source debug APK for cache reuse')!=1 or \
+       flutter.count('      - name: Save optional OPT03 debug APK cache')!=1 or \
+       flutter.count('uses: actions/cache/save@'+OPT03_CACHE_PIN)!=1 or \
+       flutter.count('          key: '+OPT03_KEY)!=1 or \
+       flutter.count(OPT03_APK_PATH)!=1 or flutter.count(OPT03_RECEIPT_PATH)!=1 or \
+       flutter.index('      - name: Execute full Flutter test suite') >= flutter.index('      - name: Seal exact-source debug APK for cache reuse') or \
+       flutter.index('      - name: Compile unsigned debug Android APK') >= flutter.index('      - name: Seal exact-source debug APK for cache reuse') or \
+       'python3 -B '+OPT03_HELPER+' seal' not in flutter:
+        errors.append('OPT03 cache producer must follow full tests and exact normal-debug compilation')
+    api36 = files[HEAVY[0]]
+    # OPT03 HF01: `... verify` was a substring of `... verify-tools`.
+    # Require exactly one executable `verify` line IN the cache-hit branch.
+    build_step = '      - name: Verify exact-SHA cache or build normal debug APK\n'
+    hit_branch = "          if [[ '${{ steps.opt03_apk_restore.outputs.cache-hit }}' == 'true' ]]; then\n"
+    miss_branch = '          else\n'
+    segment = api36.split(build_step, 1)[1] if api36.count(build_step)==1 else ''
+    hit_body = (segment.split(hit_branch,1)[1].split(miss_branch,1)[0]
+                if segment.count(hit_branch)==1 and miss_branch in segment.split(hit_branch,1)[1]
+                else '')
+    verify_line = '            python3 -B '+OPT03_HELPER+' verify\n'
+    if hit_body.count(verify_line)!=1:
+        errors.append('OPT03 exact cache-hit verification command absent or duplicated')
+    if (api36.count('uses: actions/cache/restore@'+OPT03_CACHE_PIN)!=1 or
+            api36.count('          key: '+OPT03_KEY)!=1 or
+            api36.count(OPT03_APK_PATH)!=2 or
+            api36.count(OPT03_RECEIPT_PATH)!=1 or
+            '          fail-on-cache-miss: false' not in api36 or
+            'restore-keys:' in api36 or
+            "if: steps.opt03_apk_restore.outputs.cache-hit != 'true'" not in api36 or
+            "if [[ '${{ steps.opt03_apk_restore.outputs.cache-hit }}' == 'true' ]]; then" not in api36 or
+            'python3 -B '+OPT03_HELPER+' seal' not in api36 or
+            'python3 -B '+OPT03_HELPER+' verify-tools' not in api36 or
+            'flutter build apk --debug --flavor normal --no-pub' not in api36 or
+            api36.index('python3 -B '+OPT03_HELPER+' verify-tools') >=
+                api36.index('      - name: Install and launch ObtainX on disposable API 36 emulator') or
+            api36.index('python3 -B '+OPT03_HELPER+' verify-tools') <=
+                api36.index('      - name: Verify KVM and provision API 36 system image')):
+        errors.append('OPT03 cache consumer must verify exact SHA and signature or perform a full local build')
     return errors
 
 

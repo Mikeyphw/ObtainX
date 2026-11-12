@@ -58,7 +58,17 @@ jobs:
           cache-dependency-path: |
             android/gradle/wrapper/gradle-wrapper.properties
             android/**/*.gradle*
+      - name: Restore optional exact-SHA normal-debug APK
+        id: opt03_apk_restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # pinned v6.1.0
+        with:
+          path: |
+            build/app/outputs/flutter-apk/app-normal-debug.apk
+            build/app/outputs/flutter-apk/obtainx-opt03-debug-apk.json
+          key: obtainx-opt03-v1-${{ runner.os }}-flutter3.47.6-java21-normal-debug-${{ github.sha }}
+          fail-on-cache-miss: false
       - name: Set up Flutter 3.47.6
+        if: steps.opt03_apk_restore.outputs.cache-hit != 'true'
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # pinned v2
         with:
           flutter-version: '3.47.6'
@@ -74,13 +84,20 @@ jobs:
           test "$(uname -m)" = x86_64
           mkdir -p "$RUNNER_TEMP/obtainx-r02-api36"
           python3 -B scripts/ci/r02_api36_smoke.py init --out "$RUNNER_TEMP/obtainx-r02-api36"
-      - name: Build unsigned-for-release debug APK (normal flavor)
+      - name: Verify exact-SHA cache or build normal debug APK
         shell: bash
         run: |
           set -euo pipefail
-          flutter pub get
-          flutter build apk --debug --flavor normal --no-pub
-          test -s build/app/outputs/flutter-apk/app-normal-debug.apk
+          if [[ '${{ steps.opt03_apk_restore.outputs.cache-hit }}' == 'true' ]]; then
+            python3 -B scripts/ci/obtainx_ci_optimization_opt03_apk_cache.py verify
+            echo 'OX_OPT03_CACHE_HIT_EXACT_SOURCE_APK_VERIFIED'
+          else
+            flutter pub get
+            flutter build apk --debug --flavor normal --no-pub
+            test -s build/app/outputs/flutter-apk/app-normal-debug.apk
+            python3 -B scripts/ci/obtainx_ci_optimization_opt03_apk_cache.py seal
+            echo 'OX_OPT03_CACHE_MISS_BUILT_SOURCE_APK_LOCALLY'
+          fi
       - name: Verify KVM and provision API 36 system image
         shell: bash
         run: |
@@ -96,6 +113,11 @@ jobs:
           available_kib="$(df -Pk "$avd_root" | awk 'END {print $4}')"
           [[ "$available_kib" =~ ^[0-9]+$ ]] || { echo OX_R02_API36_DISK_QUERY_FAILED >&2; exit 1; }
           (( available_kib >= 4 * 1024 * 1024 )) || { echo OX_R02_API36_DISK_INSUFFICIENT >&2; exit 1; }
+      - name: Verify APK package, signature and debug mode before emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B scripts/ci/obtainx_ci_optimization_opt03_apk_cache.py verify-tools
       - name: Install and launch ObtainX on disposable API 36 emulator
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # pinned
         with:

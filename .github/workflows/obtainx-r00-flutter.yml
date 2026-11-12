@@ -130,3 +130,18 @@ jobs:
           retention-days: 7
       - name: Compile unsigned debug Android APK
         run: flutter build apk --debug --flavor normal --no-pub
+      - name: Seal exact-source debug APK for cache reuse
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B scripts/ci/obtainx_ci_optimization_opt03_apk_cache.py seal
+      - name: Save optional OPT03 debug APK cache
+        if: success()
+        timeout-minutes: 3
+        continue-on-error: true # cache upload is optional, build and source/security tests are not
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # pinned v6.1.0
+        with:
+          path: |
+            build/app/outputs/flutter-apk/app-normal-debug.apk
+            build/app/outputs/flutter-apk/obtainx-opt03-debug-apk.json
+          key: obtainx-opt03-v1-${{ runner.os }}-flutter3.47.6-java21-normal-debug-${{ github.sha }}

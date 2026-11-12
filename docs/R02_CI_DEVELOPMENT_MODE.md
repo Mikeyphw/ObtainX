@@ -58,6 +58,27 @@ The label removal itself triggers new full workflows. Check exact SHA and all re
 - The cache change is a potential optimization for warm qualification runs, **not a measured speedup**. Compare hosted before/after steps and failed cache restores; keep qualification fail-closed.
 - The `ci:development-only` label still skips all four Android lanes. Caches can only be evaluated during an authorized qualification run.
 
+## OPT03 — exact-source normal-debug APK reuse
+
+- The full Flutter qualification continues running its full test suite, then compiles the
+  **normal-flavor debug APK**. It seals a bounded metadata receipt containing the event
+  checkout SHA, Flutter/JDK/build profile, exact APK size and SHA-256, and optionally saves
+  the APK and receipt to a pinned GitHub Actions cache.
+- The API36 bootstrap workflow restores **only the exact key** (no prefix keys). On a hit,
+  it checks event SHA == checked-out Git HEAD, receipt profile/size/hash, readable APK ZIP,
+  then independently verifies Android package identity, debug marking and signing with
+  SDK tools before ever invoking the emulator. A tampered hit fails closed, not fallback.
+- Cache misses compile locally as before, then seal the same receipt and verify Android
+  package/signing. Emulator launch, installed APK SHA-256, source/run receipts and mandatory
+  evidence uploads are never skipped. RT02, RT02B and RT02C retain their separate tests.
+- **First-run limitation:** Flutter and API36 jobs run concurrently, so API36 may miss the
+  cache before Flutter has finished saving it. Cache reuse is reliable only once a prior
+  same-SHA, same-PR build has seeded the cache; a warm rerun can then skip ~6 minutes of
+  redundant debug compilation, but actual hosted speedup remains to be measured.
+- GitHub cache storage is optional and **not qualification evidence**. A save failure must
+  not mask a successful source build; cache restore/verification and Android receipt failures
+  are not suppressed. PR caches have PR-merge-ref scope, not release provenance.
+
 ## Performance claims
 
 The runtime savings from development-only runs are structural (heavy jobs are omitted) and can be verified by job lists. No warm-cache speedup is claimed. Three-minute artifact timeouts cap the upload step cost but do not cure upload service failures. Compare cold/warm builds, caches and actual CI results before claiming additional gains.

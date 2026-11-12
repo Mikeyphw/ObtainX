@@ -18,7 +18,7 @@ class CIOptimizationSafety(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory(prefix='ox-ci-opt01-')
         self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name)
-        for rel in (*M.FILES, M.POLICY):
+        for rel in (*M.FILES, M.POLICY, M.OPT03_HELPER, M.OPT03_TEST):
             dest=self.root/rel
             dest.parent.mkdir(parents=True,exist_ok=True)
             copyfile(ROOT/rel,dest)
@@ -113,6 +113,50 @@ class CIOptimizationSafety(unittest.TestCase):
 
     def test_opt_python_change_retriggers_android(self):
         self.mutation(M.HEAVY[0],"      - '"+M.RISK+"'","      - 'docs/**'")
+
+    def test_opt03_cache_action_pin_cannot_be_mutated(self):
+        self.mutation(M.FLUTTER,'actions/cache/save@'+M.OPT03_CACHE_PIN,
+                      'actions/cache/save@main')
+
+    def test_opt03_wrong_cache_key_refused(self):
+        self.mutation(M.HEAVY[0],
+                      '          key: '+M.OPT03_KEY,
+                      '          key: obtainx-opt03-unpinned')
+
+    def test_opt03_cached_apk_validation_mandatory(self):
+        self.mutation(M.HEAVY[0],
+                      'python3 -B '+M.OPT03_HELPER+' verify',
+                      'echo cache-not-verified')
+
+    def test_opt03_verify_tools_cannot_impersonate_cache_hit_verify(self):
+        self.mutation(M.HEAVY[0],
+                      '            python3 -B '+M.OPT03_HELPER+' verify\n',
+                      '            python3 -B '+M.OPT03_HELPER+' verify-tools\n')
+
+    def test_opt03_verify_package_before_emulator(self):
+        self.mutation(M.HEAVY[0],
+                      'python3 -B '+M.OPT03_HELPER+' verify-tools',
+                      'echo skip-package-check')
+
+    def test_opt03_fallback_build_required(self):
+        self.mutation(M.HEAVY[0],
+                      'flutter build apk --debug --flavor normal --no-pub',
+                      'echo pretend-apk-build')
+
+    def test_opt03_producer_must_seal_cache(self):
+        self.mutation(M.FLUTTER,
+                      'python3 -B '+M.OPT03_HELPER+' seal',
+                      'echo skip-cache-sealing')
+
+    def test_opt03_cache_miss_must_not_fail(self):
+        self.mutation(M.HEAVY[0],
+                      '          fail-on-cache-miss: false',
+                      '          fail-on-cache-miss: true')
+
+    def test_opt03_no_prefix_cache_restore(self):
+        self.mutation(M.HEAVY[0],
+                      '          fail-on-cache-miss: false',
+                      '          restore-keys: obtainx-opt03-\n          fail-on-cache-miss: false')
 
 if __name__ == '__main__':
     unittest.main()

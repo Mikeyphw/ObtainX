@@ -32,6 +32,8 @@ RISK_GLOBS = (
     'scripts/ci/r02_sdk_retry.py',
     'scripts/ci/obtainx_ci_policy.py',
     'scripts/ci/*optimization*',
+    'scripts/ci/obtainx_ci_optimization_opt03_apk_cache.py',
+    'scripts/ci/test_obtainx_ci_optimization_opt03_cache.py',
     'scripts/ci/r00_source_contract.py',
     'pubspec.yaml',
     'pubspec.lock',

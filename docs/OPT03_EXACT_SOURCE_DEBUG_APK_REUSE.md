@@ -16,3 +16,13 @@ All installed APK byte proofs and Android receipt publication remain unchanged.
 The workflows are concurrent; first full CI pass may see cold misses in every
 job. Benchmark same-SHA reruns to measure actual savings. No intermediate cache
 output grants a release or physical Android qualification.
+
+## HF03 — realistic debug APK size bound
+
+The original 150 MiB maximum rejected a successfully compiled normal-flavor debug
+APK in API36 CI before its emulator test began (run 43148779428). The bound is
+now 512 MiB (upper limit, not evidence of APK identity); expanded ZIP entries
+are independently capped at 1 GiB before CRC inspection. SHA-256, exact checkout,
+profile and manifest checks, Android APK signature/package/debug checks, actual
+installed-byte verification, and hosted emulator acceptance remain mandatory.
+The first cache miss can still compile locally; cache reuse is opportunistic.

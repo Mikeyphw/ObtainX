@@ -29,6 +29,37 @@ class CacheIntegrity(unittest.TestCase):
         M.seal(self.apk,self.receipt,self.source)
     def test_valid_exact_source_receipt(self):
         M.verify(self.apk,self.receipt,self.source)
+    def test_realistic_debug_apk_over_old_150_mib_limit_passes(self):
+        # A genuine archive above the old size ceiling (not a mocked stat).
+        block=b'B'*(1024*1024)
+        with zipfile.ZipFile(self.apk,'w',compression=zipfile.ZIP_STORED,
+                             allowZip64=True) as z:
+            z.writestr('AndroidManifest.xml',b'manifest')
+            with z.open('classes.dex','w',force_zip64=True) as writer:
+                for _ in range(153):writer.write(block)
+        self.assertGreater(self.apk.stat().st_size,150*1024*1024)
+        self.assertLess(self.apk.stat().st_size,M.MAX_BYTES)
+        M.seal(self.apk,self.receipt,self.source)
+        M.verify(self.apk,self.receipt,self.source)
+
+    def test_apk_above_new_limit_refused_before_zip_read(self):
+        # Sparse oversized input, no 512 MiB allocation or decompression.
+        with self.apk.open('r+b') as f:f.truncate(M.MAX_BYTES+1)
+        with self.assertRaisesRegex(M.Refused,'outside bounded size'):
+            M.inspect_apk(self.apk)
+
+    def test_highly_compressed_archive_with_excessive_claimed_expansion_refused(self):
+        # Mutated member metadata simulates a bomb without allocating 1 GiB.
+        class BogusZipInfo:
+            def __init__(self,file_size):self.file_size=file_size
+        originals=M.zipfile.ZipFile.infolist
+        def bogus_list(z):
+            entries=originals(z)
+            return [*entries,BogusZipInfo(1024*1024*1024)]
+        with patch.object(M.zipfile.ZipFile,'infolist',bogus_list):
+            with self.assertRaisesRegex(M.Refused,'expanded ZIP entries'):
+                M.inspect_apk(self.apk)
+
     def test_wrong_sha_is_rejected(self):
         with self.assertRaises(M.Refused):M.verify(self.apk,self.receipt,'b'*40)
     def test_wrong_profile_is_rejected(self):

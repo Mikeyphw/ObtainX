@@ -20,7 +20,10 @@ PACKAGE = 'dev.bikram.obtainx.debug'
 APK_NAME = 'app-normal-debug.apk'
 RECEIPT_NAME = 'obtainx-opt03-debug-apk.json'
 MIN_BYTES = 1024 * 1024
-MAX_BYTES = 150 * 1024 * 1024
+# Real normal-flavor Flutter debug APKs can exceed 150 MiB. 512 MiB is a
+# bounded upper limit, not a release-size assertion; exact SHA and device
+# signature/installed-byte verification are still mandatory.
+MAX_BYTES = 512 * 1024 * 1024
 FIELDS = {'schema','source_sha','profile','package_name','apk_name','sha256','size_bytes'}
 
 class Refused(RuntimeError):
@@ -54,7 +57,13 @@ def inspect_apk(apk: Path) -> tuple[str,int]:
             need(len(names) < 150000 and all(
                  not n.startswith('/') and '\\' not in n and '..' not in Path(n).parts
                  for n in names), 'APK ZIP paths are unsafe')
+            info=z.infolist()
+            need(sum(member.file_size for member in info) <= 1024*1024*1024 and
+                 all(member.file_size <= MAX_BYTES for member in info),
+                 'APK expanded ZIP entries exceed bounded size')
             need(z.testzip() is None, 'APK ZIP CRC failure')
+    except Refused:
+        raise
     except (zipfile.BadZipFile, OSError, RuntimeError) as ex:
         raise Refused('OX_OPT03_REFUSED: unreadable APK ZIP') from ex
     digest = hashlib.sha256()

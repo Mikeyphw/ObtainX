@@ -424,11 +424,12 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
 def execute(out:Path)->int:
     source,run=host_check()
     out.mkdir(parents=True,exist_ok=True)
-    receipt={'schema':1,'status':'NOT_RUN','source_sha':source,'run_id':run,
+    receipt={'schema':2,'status':'NOT_RUN','source_sha':source,'run_id':run,
              'hosted_emulator_only':True,'physical_device_qualified':False,
              'full_r02_matrix_qualified':False,'release_qualified':False,
              'publication_allowed':False,'installer_backend':'production StockInstaller',
-             'scenarios':[]}
+             'scenarios':[],'flutter_launches':0,
+             'host_acknowledgement_order':[],'dart_event_order':[]}
     path=out/'rt02-receipt.json';path.write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
     fixtures=out/'fixtures';inventory=json.loads((fixtures/'fixture_inventory.json').read_text())
     need(inventory.get('source_sha')==source and inventory.get('fixture_package')==FIXTURE,
@@ -439,28 +440,38 @@ def execute(out:Path)->int:
         need(SHA.fullmatch(entry['sha256']) is not None and sha_file(fixtures/name)==entry['sha256'],
              'fixture digest mismatch: '+name)
     empty_or_expected_package()
-    FixtureServer.fixtures={name:fixtures/name for name in inventory['files']}
-    server=ThreadingHTTPServer(('127.0.0.1',PORT),FixtureServer)
-    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    # OPT05 P02: preserve one_scenario for legacy HF06 recovery regression
+    # tests, but run both real Android states in a single Flutter test process.
+    from opt05_p02_rt02_session import CASES,EVENTS,run_single_session
     try:
-        adb('reverse','tcp:'+str(PORT),'tcp:'+str(PORT))
+        # The hosted script executes as __main__, while the helper imports
+        # r02_rt02_hosted by module name. Convert its independent Refused
+        # class into this script's fail-closed exception type.
+        try:
+            proofs,log_sha=run_single_session(out,inventory)
+        except RuntimeError as ex:
+            raise Refused('OPT05 P02 Android session refused: '+str(ex)) from ex
         for scenario in ('standalone','split'):
-            proof=one_scenario(out,inventory,scenario)
-            receipt['scenarios'].append(proof)
+            need(scenario in proofs,'missing one-session Android scenario proof')
+            receipt['scenarios'].append(proofs[scenario])
             path.write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
+        receipt['flutter_launches']=1
+        receipt['host_acknowledgement_order']=list(CASES)
+        receipt['dart_event_order']=[case+':'+step for case,step in EVENTS]
+        receipt['session_log_sha256']=log_sha
         receipt['status']='PASS_TWO_ANDROID_SYSTEM_SESSIONS'
         path.write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
         print('OX_R02_RT02_TWO_REAL_SESSIONS_PASS',flush=True)
+        print('OX_R02_RT02_OPT05_ONE_FLUTTER_TWO_REAL_INSTALLS_PASS',flush=True)
         return 0
     finally:
-        server.shutdown();server.server_close()
-        adb('reverse','--remove','tcp:'+str(PORT),allow_failure=True)
+        # Only disposable RT02 fixture APK is removed. Never touch user apps.
         adb('shell','pm','uninstall',FIXTURE,allow_failure=True)
 
 def verify(out:Path)->int:
     source,run=identity_check()
     v=json.loads((out/'rt02-receipt.json').read_text())
-    for k,expected in {'schema':1,'status':'PASS_TWO_ANDROID_SYSTEM_SESSIONS',
+    for k,expected in {'schema':2,'status':'PASS_TWO_ANDROID_SYSTEM_SESSIONS',
         'source_sha':source,'run_id':run,'hosted_emulator_only':True,
         'physical_device_qualified':False,'full_r02_matrix_qualified':False,
         'release_qualified':False,'publication_allowed':False,
@@ -480,6 +491,17 @@ def verify(out:Path)->int:
             {**split_common,'android_confirmations':count,'approval_path':path}])
     need(v.get('scenarios') in valid_scenarios,
         'incomplete or forged real system-installation scenario proof')
+    # OPT05 P02: no duplicate compilation or unacknowledged Android outcome.
+    from opt05_p02_rt02_session import CASES,EVENTS
+    need(type(v.get('flutter_launches')) is int and v['flutter_launches']==1,
+         'one Flutter launch required')
+    need(v.get('host_acknowledgement_order')==list(CASES) and
+         v.get('dart_event_order')==[case+':'+step for case,step in EVENTS],
+         'exact two-case host ack and Dart event sequence required')
+    digest=v.get('session_log_sha256')
+    need(isinstance(digest,str) and re.fullmatch('[0-9a-f]{64}',digest) is not None,
+         'one-session private log SHA-256 required')
+    print('OX_R02_RT02_OPT05_SINGLE_SESSION_SOURCE_BOUND_VERIFIED',flush=True)
     print('OX_R02_RT02_SOURCE_BOUND_EMULATOR_ONLY_VERIFIED',flush=True)
     return 0
 

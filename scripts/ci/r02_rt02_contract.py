@@ -17,7 +17,12 @@ FIXTURE='scripts/ci/r02_rt02_fixture.py'
 TEST='scripts/ci/test_r02_rt02_contract.py'
 DOC='docs/R02_RT02_REAL_INSTALL_GATE.md'
 PUBSPEC='pubspec.yaml'
-PATHS=(WORKFLOW,R00,R00_TEST,SOURCE_GATE,DART,HOST,FIXTURE,TEST,DOC,PUBSPEC)
+P02_DART='integration_test/r02_opt05_single_session_test.dart'
+P02_HOST='scripts/ci/opt05_p02_rt02_session.py'
+P02_TEST='scripts/ci/test_opt05_p02_rt02_session.py'
+P02_DOC='docs/OPT05_P02_RT02_SINGLE_SESSION.md'
+PATHS=(WORKFLOW,R00,R00_TEST,SOURCE_GATE,DART,HOST,FIXTURE,TEST,DOC,PUBSPEC,
+       P02_DART,P02_HOST,P02_TEST,P02_DOC)
 
 
 def _functions(source:str)->dict[str,str]:
@@ -133,6 +138,46 @@ def inspect(root:Path=ROOT)->list[str]:
         errors.append('independent receipt verification lacks exact two-session proof')
     if "'status':'NOT_RUN'" not in host or "v['status']='FAILED'" not in host:
         errors.append('no fail-closed RT02 status lifecycle')
+    # OPT05 P02: real Android single-session proof is mandatory, not a
+    # test-only optimization or a parallel mock path.
+    runner=files[P02_HOST];session_dart=files[P02_DART]
+    session_tests=files[P02_TEST];session_docs=files[P02_DOC]
+    for marker in ("from opt05_p02_rt02_session import CASES,EVENTS,run_single_session",
+                   'proofs,log_sha=run_single_session(out,inventory)',
+                   "'flutter_launches']=1", "'host_acknowledgement_order']=list(CASES)",
+                   "'dart_event_order']=[case+':'+step for case,step in EVENTS]",
+                   "'schema':2", "'session_log_sha256'", 'session_log_sha256',
+                   'OX_R02_RT02_OPT05_ONE_FLUTTER_TWO_REAL_INSTALLS_PASS'):
+        if marker not in host:errors.append('OPT05 P02 host transition missing: '+marker)
+    for marker in ("CASES=('standalone','split')", 'events==EVENTS[:len(events)]',
+                   'base.installed_state(1 if pending',
+                   'base.classify_android_approval(pending,approvals[pending],actual)',
+                   'state.acks[pending].set()', 'start_new_session=True',
+                   'base.terminate_flutter_process_group(child)',
+                   "'flutter','test','integration_test/r02_opt05_single_session_test.dart'",
+                   '--dart-define=OX_R02_P02_V1_SHA=', '--dart-define=OX_R02_P02_V2_SHA=',
+                   '--dart-define=OX_R02_P02_SPLIT_SHA=', 'events==EVENTS',
+                   'done==list(CASES)', 'all(state.acks[case].is_set() for case in CASES)',
+                   "'reverse','--remove'", "'Cache-Control','no-store'"):
+        if marker not in runner:errors.append('OPT05 P02 independent Android proof missing: '+marker)
+    if runner.count("args=['flutter','test'")!=1 or runner.count('subprocess.Popen(args')!=1:
+        errors.append('OPT05 P02 requires exactly one real Flutter invocation')
+    for marker in ('for (final scenario in scenarios)',
+                   'StockInstaller(SettingsProvider()).installApk(',
+                   'await awaitHostAck(scenario)', 'OX_R02_P02_EVENT=$scenario:ACKED',
+                   'OX_R02_P02_V1_SHA', 'OX_R02_P02_V2_SHA', 'OX_R02_P02_SPLIT_SHA',
+                   'result.isSuccess,isTrue', 'sha256.convert(bytes).toString()!=expected',
+                   "scenario=='standalone'?InstallArtifactFormat.apk:InstallArtifactFormat.apks"):
+        if marker not in session_dart:
+            errors.append('OPT05 P02 real Dart test missing: '+marker)
+    if session_dart.count('testWidgets(')!=1 or 'setMockMethodCallHandler' in session_dart:
+        errors.append('OPT05 P02 requires one non-mocked integration test')
+    for marker in ('test_duplicate_event_refused','test_dart_event_order_refused',
+                   'test_host_ack_before_proof_refused', 'test_receipt_requires_one_launch',
+                   'test_split_missing_android_proof_refused'):
+        if marker not in session_tests:errors.append('OPT05 P02 mutation regression missing: '+marker)
+    if 'No releases' not in session_docs or 'No merges' not in session_docs:
+        errors.append('OPT05 P02 qualification scope documentation missing')
     # AAPT2 cannot resolve android:configForSplit; for a base-targeting
     # config split omit configForSplit entirely and keep only split identity.
     if 'android:configForSplit="' in fixture or 'configForSplit="base"' in fixture:

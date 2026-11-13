@@ -91,9 +91,15 @@ class SingleSession:
                 self.failure = category
 
     def snapshot(self):
+        # The control-server thread may begin a case while the host polls.
+        # Capture the monotonic clock AND case start under the same lock;
+        # an earlier host clock sample would otherwise produce negative elapsed.
         with self.lock:
-            return (self.active, self.phase, self.called, self.taps,
-                    self.call_at, self.next_index, self.failure)
+            now = time.monotonic()
+            active = self.active
+            case_elapsed = now - self.case_started_at if active is not None else None
+            return (now, active, self.phase, self.called, self.taps,
+                    self.call_at, self.next_index, self.failure, case_elapsed)
 
     def transition(self, route: str, data: dict):
         with self.lock:
@@ -199,15 +205,15 @@ class SingleSession:
                                  stdout=target, stderr=subprocess.STDOUT)
             try:
                 while p.poll() is None:
-                    now = time.monotonic()
-                    active, phase, called, taps, call_at, idx, failure = self.snapshot()
+                    (now, active, phase, called, taps, call_at, idx,
+                     failure, case_elapsed) = self.snapshot()
                     if failure:
                         raise self.H.Refused('single-session boundary refused: ' + failure)
                     observed_phase = phase if active else self.H.stage(self.flutter_log)
                     failure_code = watchdog.tick(
                         now=now, observed_phase=observed_phase, completed_cases=idx,
                         active=active is not None,
-                        case_elapsed=(now-self.case_started_at if active else None))
+                        case_elapsed=case_elapsed)
                     if failure_code:
                         # Only bounded, non-sensitive phase/elapsed evidence leaves
                         # the CI runner. Private Flutter logs remain unpublished.

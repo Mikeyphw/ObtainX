@@ -156,6 +156,21 @@ def inspect(root:Path=ROOT)->list[str]:
         errors.append('adversarial archive fixtures missing')
     if re.search(r'\bfor\s+attempt\s+in\s*\(', docs[SINGLE]):
         errors.append('HF02 single-session retry loop forbidden')
+    # RT02C HF09: enforce an atomic observation, not a stale clock sampled
+    # before the control-server thread advances the active case start time.
+    if not re.search(
+        r'(?m)^    def snapshot\(self\):\n'
+        r'(?:        \#[^\n]*\n)*'
+        r'        with self\.lock:\n'
+        r'            now = time\.monotonic\(\)\n'
+        r'            active = self\.active\n'
+        r'            case_elapsed = now - self\.case_started_at if active is not None else None\n',
+        docs[SINGLE]):
+        errors.append('HF09 atomic monotonic clock/case-start lock missing')
+    if (docs[SINGLE].count('failure, case_elapsed) = self.snapshot()')!=1 or
+        docs[SINGLE].count('case_elapsed=case_elapsed)')!=1 or
+        'case_elapsed=(now-self.case_started_at' in docs[SINGLE]):
+        errors.append('HF09 runner must consume the same atomic clock snapshot')
     if docs[SINGLE].count('subprocess.Popen(')!=1:
         errors.append('HF01 must launch exactly one Flutter process')
     if docs[SINGLE].count('self.H.baseline_v1(self.fixtures)')!=2:

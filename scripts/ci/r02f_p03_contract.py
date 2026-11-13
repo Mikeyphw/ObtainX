@@ -114,6 +114,7 @@ RULES = {
     ),
     'scripts/ci/r02f_p03_hosted.py': (
         'base.host_check()',
+        'write_failure(out, log, process.returncode, stage, source, runid)',
         'rt02c.baseline_v1(fixtures)',
         'P03Handler.foreground_count == 1',
         'integration_test/r02f_p03_app_cancel_test.dart',

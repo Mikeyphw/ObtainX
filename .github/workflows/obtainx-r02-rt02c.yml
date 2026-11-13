@@ -16,6 +16,7 @@ on:
       - '.github/workflows/**'
       - 'scripts/ci/r02_rt02**'
       - 'scripts/ci/r02f_p02_*'
+      - 'scripts/ci/r02f_p03_*'
       - 'scripts/ci/r02g_*'
       - 'scripts/ci/r02_sdk_retry.py'
       - 'scripts/ci/obtainx_ci_policy.py'
@@ -162,5 +163,6 @@ jobs:
             ${{ runner.temp }}/obtainx-rt02c/r02g-incompatible-sdk.json
             ${{ runner.temp }}/obtainx-rt02c/r02f-p03-app-ui-cancel.json
             ${{ runner.temp }}/obtainx-rt02c/r02f-p03-android-audit.json
+            ${{ runner.temp }}/obtainx-rt02c/r02f-p03-failure-diagnostics.json
           if-no-files-found: warn
           retention-days: 7

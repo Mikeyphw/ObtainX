@@ -21,6 +21,7 @@ import time
 
 import r02_rt02_hosted as base
 import r02_rt02c_hosted as rt02c
+from r02f_p03_failure_diagnostics import write_failure
 
 RECEIPT = 'r02f-p03-app-ui-cancel.json'
 AUDIT = 'r02f-p03-android-audit.json'
@@ -150,8 +151,11 @@ def run(out: Path) -> int:
                 process.kill();process.wait(timeout=20)
                 raise Refused('Flutter runtime P03 timed out in '+stage)
         text=log.read_text('utf-8','replace')
-        need(process.returncode==0 and 'All tests passed!' in text,
-             'Flutter P03 app UI test failed, log_sha256='+sha(log))
+        if process.returncode != 0 or 'All tests passed!' not in text:
+            diag = write_failure(out, log, process.returncode, stage, source, runid)
+            raise Refused('Flutter P03 app UI test failed; diagnostic_categories='+
+                          ','.join(diag['failure_categories'])+
+                          '; private_log_sha256='+diag['private_log_sha256'])
         for marker in MARKERS:
             need(text.count(marker) == 1, 'missing/duplicate real UI marker: '+marker)
         need(P03Handler.foreground_count == 1,

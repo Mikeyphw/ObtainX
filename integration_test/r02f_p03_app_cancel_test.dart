@@ -1,6 +1,5 @@
 // Real hosted API36 app-page -> AppsProvider.installApk -> stock PackageInstaller.
 // This is NOT a bare Cancel button harness and never uses adb install-abandon.
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -99,7 +98,7 @@ void main() {
           .buffer.asUint8List();
       final base = await _download('base_v2.apk', _baseSha, dir);
       final split = await _download('config.x86_64.apk', _splitSha, dir);
-      final app = App(
+      const app = App(
         id: _pkg,
         url: 'https://github.com/example/obtainx-r02f-p03-disposable-fixture',
         author: 'ObtainX CI fixture',

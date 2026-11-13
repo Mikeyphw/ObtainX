@@ -1713,7 +1713,7 @@ class AppsProvider with ChangeNotifier {
       }
       recoveredNativeInstallIds[listingKey] = id;
       final entry = apps[listingKey]!;
-      if (entry.downloadProgress == null) entry.downloadProgress = -5;
+      entry.downloadProgress ??= -5;
       notify();
     } catch (error) {
       unawaited(logs.add('P03 restart session reconciliation inconclusive: $error'));

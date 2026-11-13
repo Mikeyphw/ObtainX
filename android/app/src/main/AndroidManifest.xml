@@ -95,6 +95,9 @@
         <receiver
             android:name=".DownloadActionReceiver"
             android:exported="false" />
+        <receiver
+            android:name=".R02fP03ResultReceiver"
+            android:exported="false" />
         <meta-data
             android:name="dev.imranr.obtainium.service.NOTIFICATION_ICON"
             android:resource="@drawable/ic_notification" />

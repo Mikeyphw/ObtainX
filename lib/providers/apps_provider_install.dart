@@ -31,6 +31,7 @@ import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/providers/virustotal_provider.dart';
 import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
+import 'package:obtainium/services/install_precommit_gate.dart';
 import 'package:obtainium/services/verified_obb_delivery.dart';
 import 'package:obtainium/theme/app_dialog_theme.dart';
 import 'package:obtainium/widgets/app_toast.dart';
@@ -55,6 +56,7 @@ const double _flaggedProgressSentinel = -3;
 // reporting a result. Rendered exactly like -1; kept distinct because it must not
 // count as work in flight (see [AppsProviderInstall.areDownloadsRunning]).
 const double _awaitingThirdPartyInstallSentinel = -4;
+const double _recoveredNativeInstallSentinel = -5;
 // How long that indicator survives without a confirming package broadcast. Purely
 // cosmetic - the install is confirmed independently and never waits on this - so
 // it only stops a dismissed installer from leaving the row spinning forever.
@@ -383,9 +385,12 @@ extension AppsProviderInstall on AppsProvider {
     final installedInfo = await getInstalledInfo(packageName);
     if (installedInfo == null) return;
     thirdPartyInstallIndicatorTimers.remove(packageName)?.cancel();
-    if (entry.downloadProgress == _awaitingThirdPartyInstallSentinel) {
+    if (entry.downloadProgress == _awaitingThirdPartyInstallSentinel ||
+        entry.downloadProgress == _recoveredNativeInstallSentinel) {
       entry.downloadProgress = null;
     }
+    recoveredNativeInstallIds.remove(entry.listingKey);
+    uncertainNativeInstallListings.remove(entry.listingKey);
     final pending =
         InstallReleaseSnapshot.fromJson(
           entry.app.additionalSettings[pendingInstallReleaseKey],
@@ -928,7 +933,8 @@ extension AppsProviderInstall on AppsProvider {
       .where(
         (element) =>
             element.downloadProgress != null &&
-            element.downloadProgress != _awaitingThirdPartyInstallSentinel,
+            element.downloadProgress != _awaitingThirdPartyInstallSentinel &&
+            element.downloadProgress != _recoveredNativeInstallSentinel,
       )
       .isNotEmpty;
 
@@ -1013,6 +1019,7 @@ extension AppsProviderInstall on AppsProvider {
     DownloadedDir dir,
     NotificationsProvider? firstInstallNotificationsProvider, {
     bool needsBGWorkaround = false,
+    InstallPrecommitGate? preparationGate,
     Map<String, dynamic> installOptions = const {},
     bool skipPreInstallVerification = false,
     ThemeData? toastTheme,
@@ -1108,6 +1115,11 @@ extension AppsProviderInstall on AppsProvider {
           final packageInfo = plannedInfo;
           release = dir.release?.withPackage(packageInfo);
           await _recordPendingInstall(dir.appId, release);
+          // No await after this synchronous barrier: a route-level Cancel
+          // cannot claim to undo a third-party handoff already dispatched.
+          if (!sealInstallHandoff(preparationGate)) {
+            throw const CancellationException();
+          }
           final result = await installer.installApk(
             [dir.file.path],
             appId: dir.appId,
@@ -1142,6 +1154,9 @@ extension AppsProviderInstall on AppsProvider {
             ], attemptToCorrectInstallStatus: false);
           }
           unawaited(_disposeDownloadedBundle(dir, somethingInstalled));
+        } on CancellationException {
+          await _clearPendingInstall(dir.appId, release);
+          rethrow;
         } catch (e) {
           await _clearPendingInstall(dir.appId, release);
           unawaited(
@@ -1162,6 +1177,7 @@ extension AppsProviderInstall on AppsProvider {
           DownloadedApk(dir.appId, File(plan.baseApkPath), release: dir.release),
           firstInstallNotificationsProvider,
           needsBGWorkaround: needsBGWorkaround,
+          preparationGate: preparationGate,
           installOptions: installOptions,
           additionalAPKs: plan.configApkPaths
               .map((path) => DownloadedApk(dir.appId, File(path), release: dir.release))
@@ -1180,6 +1196,8 @@ extension AppsProviderInstall on AppsProvider {
           }
         }
         unawaited(_disposeDownloadedBundle(dir, somethingInstalled));
+      } on CancellationException {
+        rethrow;
       } catch (e) {
         unawaited(
           logs.add(
@@ -1205,6 +1223,7 @@ extension AppsProviderInstall on AppsProvider {
     DownloadedApk file,
     NotificationsProvider? firstInstallNotificationsProvider, {
     bool needsBGWorkaround = false,
+    InstallPrecommitGate? preparationGate,
     Map<String, dynamic> installOptions = const {},
     List<DownloadedApk> additionalAPKs = const [],
 
@@ -1312,10 +1331,23 @@ extension AppsProviderInstall on AppsProvider {
     allAPKs.addAll(additionalAPKs.map((a) => a.file.path));
     final InstallResult result;
     try {
-      result = await getInstaller().installApk(
+      // Native stock mode keeps the owned session cancellable while
+      // awaiting Android approval. Other installer modes seal irreversibly.
+      final activeInstaller = getInstaller();
+      if (!sealInstallHandoff(preparationGate,
+          nativeCancelable: activeInstaller.modeKey == 'system')) {
+        throw const CancellationException();
+      }
+      result = await activeInstaller.installApk(
         allAPKs,
         appId: file.appId,
-        installOptions: installOptions,
+        installOptions: {
+          ...installOptions,
+          // Never send a Dart owner object to an external, Shizuku or Dhizuku
+          // MethodChannel. Only first-party stock mode understands this token.
+          if (activeInstaller.modeKey == 'system' && preparationGate != null)
+            'r02fP03Gate': preparationGate,
+        },
       );
     } catch (_) {
       await _clearPendingInstall(file.appId, installedRelease);
@@ -1326,7 +1358,15 @@ extension AppsProviderInstall on AppsProvider {
       await _clearPendingInstall(file.appId, installedRelease);
     }
     if (result.isHandedOff) {
-      _awaitThirdPartyInstallConfirmation(file.appId);
+      if (getInstaller().modeKey == 'external') {
+        _awaitThirdPartyInstallConfirmation(file.appId);
+      } else {
+        // An uncertain native stock session is not a third-party handoff.
+        // Preserve the pending source receipt and allow recovery if it still
+        // belongs to this app; never manufacture successful rollback.
+        apps[file.appId]?.downloadProgress = _recoveredNativeInstallSentinel;
+        unawaited(recoverNativeInstallSessions());
+      }
     }
     if (installed) {
       apps[file.appId]!.app = recordConfirmedInstall(
@@ -1766,7 +1806,8 @@ extension AppsProviderInstall on AppsProvider {
       // Clear any remaining progress in case the flow was interrupted
       // (e.g. unhandled error in a download, app backgrounded/killed, etc.)
       for (var id in appsToInstall) {
-        if (apps[id]?.downloadProgress != _awaitingThirdPartyInstallSentinel) {
+        if (apps[id]?.downloadProgress != _awaitingThirdPartyInstallSentinel &&
+            apps[id]?.downloadProgress != _recoveredNativeInstallSentinel) {
           apps[id]?.downloadProgress = null;
         }
       }
@@ -1958,6 +1999,9 @@ extension AppsProviderInstall on AppsProvider {
     // rather than a frozen percentage. If a VirusTotal scan will run first, lead
     // with "Scanning" so the indicator doesn't flash "Installing" before the scan
     // (the scan step later flips this to "Flagged"/"Installing" as appropriate).
+    final InstallPrecommitGate? installPreparationGate = allowUserInteraction
+        ? beginInstallPreparation(id)
+        : null;
     appEntry.downloadProgress = willScanApkWithVirusTotal(appEntry.app)
         ? _scanningProgressSentinel
         : _installingProgressSentinel;
@@ -2038,6 +2082,7 @@ extension AppsProviderInstall on AppsProvider {
             },
             showMalwareScanDialog: allowUserInteraction,
             toastTheme: toastTheme,
+            preparationGate: installPreparationGate,
           );
         }
       } else {
@@ -2102,6 +2147,7 @@ extension AppsProviderInstall on AppsProvider {
             },
             showMalwareScanDialog: allowUserInteraction,
             toastTheme: toastTheme,
+            preparationGate: installPreparationGate,
           );
         }
       }
@@ -2131,10 +2177,18 @@ extension AppsProviderInstall on AppsProvider {
         // Dismiss the update notification since the app was successfully installed
         unawaited(notificationsProvider?.cancel(updateNotificationId));
       }
+    } on CancellationException {
+      // The platform handoff was refused before dispatch, not installed.
+      unawaited(logs.add('R02F P03 precommit user cancellation: $id'));
     } finally {
+      if (installPreparationGate != null) {
+        endInstallPreparation(id, installPreparationGate);
+        unawaited(recoverNativeInstallSessions());
+      }
       // Leave the awaiting-third-party indicator alone; it outlives the handoff
       // on purpose and clears itself on the package broadcast or its own timer.
-      if (appEntry.downloadProgress != _awaitingThirdPartyInstallSentinel) {
+      if (appEntry.downloadProgress != _awaitingThirdPartyInstallSentinel &&
+          appEntry.downloadProgress != _recoveredNativeInstallSentinel) {
         appEntry.downloadProgress = null;
       }
       notify();

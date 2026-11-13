@@ -23,7 +23,9 @@ import r02_rt02_hosted as base
 import r02_rt02c_hosted as rt02c
 
 RECEIPT = 'r02f-p03-app-ui-cancel.json'
+AUDIT = 'r02f-p03-android-audit.json'
 SUCCESS = 'PASS_APP_UI_NATIVE_PENDING_APPROVAL_CANCEL_V1_BYTES_INTACT'
+AUDIT_SUCCESS = 'PASS_INDEPENDENT_LIVE_ANDROID_V1_BASELINE_AUDIT'
 MARKERS = (
     'OX_P03_DART_STAGE=APP_ROUTE_OWNER_SURVIVED',
     'OX_P03_DART_STAGE=PRODUCTION_PROVIDER_INSTALL_STARTED',
@@ -178,36 +180,105 @@ def run(out: Path) -> int:
         base.adb('reverse','--remove','tcp:'+str(base.PORT), allow_failure=True)
 
 
-def verify(out: Path) -> int:
-    source,runid = base.host_check()
+def bounded_json(path: Path) -> dict:
+    need(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= 131072,
+         'missing or unbounded P03 evidence: '+path.name)
+    obj = json.loads(path.read_text(encoding='utf8'))
+    need(isinstance(obj, dict), 'non-object P03 evidence: '+path.name)
+    return obj
+
+
+def static_evidence(out: Path, source: str, runid: str) -> dict:
+    # Deliberately NO ADB in this helper. Called inside the emulator during
+    # audit and outside the emulator during independent artifact verification.
     fixture_dir = out/'fixtures'
-    obj = json.loads((out/RECEIPT).read_text())
-    need(obj.get('head_sha') == source and obj.get('run_id') == runid,
+    obj = bounded_json(out/RECEIPT)
+    need(obj.get('head_sha') == source and str(obj.get('run_id')) == runid,
          'source/run receipt mismatch')
     need(obj.get('status') == SUCCESS and obj.get('schema') == 1,
          'missing successful real hosted UI receipt')
-    need(obj.get('baseline_before') == obj.get('baseline_after') == rt02c.baseline_v1(fixture_dir),
-         'Android installed baseline changed after receipt')
+    need(obj.get('baseline_before') == obj.get('baseline_after'),
+         'P03 before/after v1 baseline mismatch')
     need(all(obj.get(k) is True for k in (
         'ui_cancel_widget_tapped','native_session_abandoned_from_application',
         'android_approval_observed','installed_v1_signed_bytes_preserved')),
         'missing real UI/Android proof')
+    need(all(obj.get(k) is False for k in (
+        'raw_logs_uploaded','physical_device_qualified',
+        'external_or_root_installer_used','external_shizuku_dhizuku_qualified',
+        'release_qualified')),
+         'P03 receipt claims an unqualified scope')
     need(obj.get('v2_base_sha256')==sha(fixture_dir/'base_v2.apk') and
          obj.get('v2_split_sha256')==sha(fixture_dir/'config.x86_64.apk'),
          'signed v2 fixture drift')
     need(obj.get('flutter_log_sha256')==sha(out/'r02f-p03-private.log'),
          'private runtime log no longer matches receipt')
+    return obj
+
+
+def audit(out: Path) -> int:
+    # Runs WITHIN the same live API36 emulator as the real production UI tap.
+    # Never replace this check with offline receipt self-attestation.
+    source, runid = base.host_check()
+    need(out.is_absolute(), 'absolute P03 evidence root required')
+    need(not (out/AUDIT).exists(), 'stale live Android audit receipt exists')
+    obj = static_evidence(out, source, runid)
+    fresh = rt02c.baseline_v1(out/'fixtures')
+    need(obj['baseline_before'] == obj['baseline_after'] == fresh,
+         'INDEPENDENT LIVE Android v1 installed version/APK bytes changed')
+    proof = {
+        'schema': 1,
+        'status': AUDIT_SUCCESS,
+        'head_sha': source,
+        'run_id': runid,
+        'receipt_sha256': sha(out/RECEIPT),
+        'signed_v1_installed_state': fresh,
+        'android_live_queried': True,
+        'android_api_36_emulator': True,
+        'physical_device_qualified': False,
+        'release_qualified': False,
+    }
+    (out/AUDIT).write_text(json.dumps(proof, sort_keys=True, indent=2)+'\n', encoding='utf8')
     print('OX_R02F_P03_INDEPENDENT_ANDROID_UI_CANCEL_RECEIPT_PASS',flush=True)
+    return 0
+
+
+def verify(out: Path) -> int:
+    # Runner has SHUT DOWN its emulator here. Only verify the receipt which
+    # audit emitted *after* its independent live Android state query.
+    source, runid = base.identity_check()
+    need(out.is_absolute(), 'absolute P03 evidence root required')
+    obj = static_evidence(out, source, runid)
+    proof = bounded_json(out/AUDIT)
+    required = {'schema', 'status', 'head_sha', 'run_id', 'receipt_sha256',
+                'signed_v1_installed_state', 'android_live_queried',
+                'android_api_36_emulator', 'physical_device_qualified',
+                'release_qualified'}
+    need(set(proof) == required, 'P03 independent audit schema mismatch')
+    need(proof.get('schema') == 1 and proof.get('status') == AUDIT_SUCCESS,
+         'P03 live Android audit never passed')
+    need(proof.get('head_sha') == source and str(proof.get('run_id')) == runid,
+         'P03 live Android audit belongs to another source/run')
+    need(proof.get('receipt_sha256') == sha(out/RECEIPT),
+         'P03 main receipt modified after live Android audit')
+    need(proof.get('signed_v1_installed_state') == obj['baseline_before'],
+         'P03 live audit v1 state differs from signed baseline')
+    need(proof.get('android_live_queried') is True and
+         proof.get('android_api_36_emulator') is True and
+         proof.get('physical_device_qualified') is False and
+         proof.get('release_qualified') is False,
+         'P03 runtime scope or Android provenance unqualified')
+    print('OX_R02F_P03_OFFLINE_SOURCE_BOUND_LIVE_AUDIT_RECEIPT_VERIFIED_PASS',flush=True)
     return 0
 
 
 def main():
     ap=argparse.ArgumentParser()
-    ap.add_argument('command', choices=['run','verify'])
+    ap.add_argument('command', choices=['run','audit','verify'])
     ap.add_argument('--out',type=Path,required=True)
     a=ap.parse_args()
     try:
-        return run(a.out) if a.command=='run' else verify(a.out)
+        return run(a.out) if a.command=='run' else (audit(a.out) if a.command=='audit' else verify(a.out))
     except (OSError,ValueError,KeyError,TypeError,Refused,base.Refused,rt02c.Refused) as e:
         print('OX_R02F_P03_REFUSED: '+str(e),file=sys.stderr,flush=True)
         return 2

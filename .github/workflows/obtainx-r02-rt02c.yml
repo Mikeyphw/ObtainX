@@ -121,7 +121,7 @@ jobs:
           disk-size: 3072M
           disable-animations: true
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: bash -c 'set -euo pipefail; python3 -B scripts/ci/r02_rt02c_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p02_session_abandon.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02g_incompatible_sdk_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p03_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"'
+          script: bash -c 'set -euo pipefail; python3 -B scripts/ci/r02_rt02c_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p02_session_abandon.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02g_incompatible_sdk_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p03_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p03_hosted.py audit --out "$RUNNER_TEMP/obtainx-rt02c"'
       - name: Independently verify archive-to-installer Android package-state receipts
         shell: bash
         run: |
@@ -161,5 +161,6 @@ jobs:
             ${{ runner.temp }}/obtainx-rt02c/fixtures/rt02g_inventory.json
             ${{ runner.temp }}/obtainx-rt02c/r02g-incompatible-sdk.json
             ${{ runner.temp }}/obtainx-rt02c/r02f-p03-app-ui-cancel.json
+            ${{ runner.temp }}/obtainx-rt02c/r02f-p03-android-audit.json
           if-no-files-found: warn
           retention-days: 7

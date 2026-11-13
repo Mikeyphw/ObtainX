@@ -120,6 +120,11 @@ RULES = {
         'native_session_abandoned_from_application',
         'before == after',
         'OX_R02F_P03_INDEPENDENT_ANDROID_UI_CANCEL_RECEIPT_PASS',
+        'OX_R02F_P03_OFFLINE_SOURCE_BOUND_LIVE_AUDIT_RECEIPT_VERIFIED_PASS',
+        'def audit(out: Path) -> int:',
+        'def verify(out: Path) -> int:',
+        'base.identity_check()',
+        'r02f-p03-android-audit.json',
     ),
     'test/r02f_p03_precommit_gate_test.dart': (
         'user cancellation before platform handoff',
@@ -133,6 +138,8 @@ RULES = {
     '.github/workflows/obtainx-r02-rt02c.yml': (
         'python3 -B scripts/ci/r02f_p03_hosted.py run',
         'python3 -B scripts/ci/r02f_p03_hosted.py verify',
+        'python3 -B scripts/ci/r02f_p03_hosted.py audit',
+        'r02f-p03-android-audit.json',
         'r02f-p03-app-ui-cancel.json',
         'r02f_p03_contract.py --check',
         'r02f_p02_session_abandon.py run',
@@ -141,6 +148,42 @@ RULES = {
     ),
 }
 
+
+def ensure_live_audit_is_before_shutdown(workflow: str, hosted: str) -> None:
+    import re
+    runner = re.findall(r"(?m)^\s*script: bash -c '([^\n]*)'$", workflow)
+    if len(runner) != 1:
+        raise ValueError('OX_P03_REFUSED one pinned API36 emulator runner required')
+    body = runner[0]
+    order = [
+        'scripts/ci/r02_rt02c_hosted.py run --out',
+        'scripts/ci/r02f_p02_session_abandon.py run --out',
+        'scripts/ci/r02g_incompatible_sdk_hosted.py run --out',
+        'scripts/ci/r02f_p03_hosted.py run --out',
+        'scripts/ci/r02f_p03_hosted.py audit --out',
+    ]
+    positions = [body.find(k) for k in order]
+    if any(x < 0 for x in positions) or positions != sorted(positions):
+        raise ValueError('OX_P03_REFUSED live Android audit must follow actual UI in same emulator')
+    if body.count('scripts/ci/r02f_p03_hosted.py audit --out') != 1:
+        raise ValueError('OX_P03_REFUSED missing or duplicated live emulator audit')
+    outer = workflow.split('      - name: Independently verify archive-to-installer Android package-state receipts', 1)
+    if len(outer) != 2:
+        raise ValueError('OX_P03_REFUSED missing independent offline receipt gate')
+    after = outer[1].split('      - name: Record only bounded receipt hashes before artifact upload', 1)
+    if len(after) != 2 or after[0].count('scripts/ci/r02f_p03_hosted.py verify --out') != 1 or \
+       'scripts/ci/r02f_p03_hosted.py audit --out' in after[0]:
+        raise ValueError('OX_P03_REFUSED offline verifier must follow emulator teardown')
+    if 'r02f-p03-android-audit.json' not in after[1]:
+        raise ValueError('OX_P03_REFUSED separate live Android audit receipt not uploaded')
+    parts = hosted.split('def audit(out: Path) -> int:', 1)
+    if len(parts) != 2 or 'base.host_check()' not in parts[1].split('def verify(out: Path)',1)[0] or \
+       "rt02c.baseline_v1(out/'fixtures')" not in parts[1].split('def verify(out: Path)',1)[0]:
+        raise ValueError('OX_P03_REFUSED no independent live Android package-state query')
+    tail = parts[1].split('def verify(out: Path) -> int:', 1)
+    if len(tail) != 2 or 'base.identity_check()' not in tail[1] or \
+       'base.host_check()' in tail[1] or 'rt02c.baseline_v1(' in tail[1] or 'base.adb(' in tail[1]:
+        raise ValueError('OX_P03_REFUSED post-emulator verifier depends on live ADB')
 
 def verify_sources(sources: dict[str,str]) -> None:
     for path, anchors in RULES.items():
@@ -190,8 +233,10 @@ def verify_sources(sources: dict[str,str]) -> None:
         raise ValueError('OX_P03_REFUSED host substitutes Android-only abandon')
     workflow=sources['.github/workflows/obtainx-r02-rt02c.yml']
     if workflow.count('scripts/ci/r02f_p03_hosted.py run') != 1 or \
+       workflow.count('scripts/ci/r02f_p03_hosted.py audit') != 1 or \
        workflow.count('scripts/ci/r02f_p03_hosted.py verify') != 1:
         raise ValueError('OX_P03_REFUSED missing/doubled hosted acceptance')
+    ensure_live_audit_is_before_shutdown(workflow, hosted)
     print('OX_R02F_P03_APP_UI_NATIVE_SOURCE_AND_NEGATIVE_CONTRACT_PASS')
 
 

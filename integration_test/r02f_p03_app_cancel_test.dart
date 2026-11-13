@@ -105,9 +105,9 @@ void main() {
         name: 'ObtainX RT02 Fixture',
         installedVersion: '1',
         latestVersion: '2',
-        apkUrls: const [MapEntry('base_v2.apk', 'http://127.0.0.1:18782/fixtures/base_v2.apk')],
+        apkUrls: [MapEntry('base_v2.apk', 'http://127.0.0.1:18782/fixtures/base_v2.apk')],
         preferredApkIndex: 0,
-        additionalSettings: const {'versionDetection': 'auto'},
+        additionalSettings: {'versionDetection': 'auto'},
       );
       provider.apps[app.listingKey] = AppInMemory(
         app, -1, await getInstalledInfo(_pkg), icon,

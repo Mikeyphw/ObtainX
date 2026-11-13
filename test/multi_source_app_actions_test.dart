@@ -151,6 +151,10 @@ class _LocalClient extends Fake implements HttpClient {
 }
 
 class _Apps extends ChangeNotifier implements AppsProvider {
+  @override
+  bool isNativeInstallOutcomeUncertain(String listingKey) => false;
+  @override
+  bool canCancelInstallPreparation(String listingKey) => false;
   _Apps(this.settingsProvider, Directory directory)
     : cachedAppsDir = directory,
       appCheckStore = AppCheckStore('${directory.path}/checks.db');

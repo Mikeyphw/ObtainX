@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from r02_rt02_hosted import FixtureServer
 from obtainx_ci_optimization_opt06_rt02c_polling import should_probe_runner
+from r02c_watchdog import RT02CWatchdog
 
 CASES = ('apks', 'apkm', 'xapk', 'zip', 'tar.gz', 'traversal', 'ambiguous')
 POSITIVE = CASES[:5]
@@ -192,7 +193,7 @@ class SingleSession:
                 '--dart-define=OX_R02C_BASE_SHA=' + self.inv['signed_base_sha256'],
                 '--dart-define=OX_R02C_SPLIT_SHA=' + self.inv['signed_split_sha256']]
         started = time.monotonic()
-        timeout_at = started + 6000  # One bounded runtime for all seven cases.
+        watchdog = RT02CWatchdog(started)  # Bounded, phase-aware real runtime.
         with self.flutter_log.open('wb') as target:
             p = subprocess.Popen(args, stdin=subprocess.DEVNULL,
                                  stdout=target, stderr=subprocess.STDOUT)
@@ -202,7 +203,23 @@ class SingleSession:
                     active, phase, called, taps, call_at, idx, failure = self.snapshot()
                     if failure:
                         raise self.H.Refused('single-session boundary refused: ' + failure)
-                    self.need(now < timeout_at, 'bounded single-session Flutter timeout')
+                    observed_phase = phase if active else self.H.stage(self.flutter_log)
+                    failure_code = watchdog.tick(
+                        now=now, observed_phase=observed_phase, completed_cases=idx,
+                        active=active is not None,
+                        case_elapsed=(now-self.case_started_at if active else None))
+                    if failure_code:
+                        # Only bounded, non-sensitive phase/elapsed evidence leaves
+                        # the CI runner. Private Flutter logs remain unpublished.
+                        current_case = active or (CASES[idx] if idx < len(CASES) else CASES[-1])
+                        self.H.progress(self.out, current_case, observed_phase,
+                                        int(now-started), taps if active else 0)
+                        raise self.H.Refused('OX_RT02C_WATCHDOG_REFUSED ' + failure_code +
+                                             ' case=' + current_case +
+                                             ' phase=' + observed_phase +
+                                             ' elapsed=' + str(int(now-started)) +
+                                             ' runner_seen=' + ('1' if self.app_installed else '0') +
+                                             ' runner_probes=' + str(self.runner_probe_count))
                     self.need(call_at is None or now - call_at < 240,
                               'bounded real installer request timeout')
                     if not self.app_installed:

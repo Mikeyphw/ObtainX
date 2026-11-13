@@ -14,13 +14,15 @@ WF='.github/workflows/obtainx-r02-rt02c.yml'
 FIX='scripts/ci/r02_rt02c_fixture.py'
 HOST='scripts/ci/r02_rt02c_hosted.py'
 SINGLE='scripts/ci/r02_rt02c_single_session.py'
+WATCHDOG='scripts/ci/r02c_watchdog.py'
+WATCHDOG_TEST='scripts/ci/test_r02c_watchdog.py'
 POLL='scripts/ci/obtainx_ci_optimization_opt06_rt02c_polling.py'
 TEST='scripts/ci/test_r02_rt02c_contract.py'
 DART='integration_test/r02c_archive_install_test.dart'
 DOC='docs/R02_RT02C_ARCHIVE_RUNTIME_ACCEPTANCE.md'
 BASE_HOST='scripts/ci/r02_rt02_hosted.py'
 BASE_FIX='scripts/ci/r02_rt02_fixture.py'
-PATHS=(R00,R00_TEST,SOURCE_WF,WF,FIX,HOST,SINGLE,POLL,TEST,DART,DOC,BASE_HOST,BASE_FIX)
+PATHS=(R00,R00_TEST,SOURCE_WF,WF,FIX,HOST,SINGLE,POLL,TEST,DART,DOC,BASE_HOST,BASE_FIX,WATCHDOG,WATCHDOG_TEST)
 CASES=('apks','apkm','xapk','zip','tar.gz','traversal','ambiguous')
 
 def inspect(root:Path=ROOT)->list[str]:
@@ -78,7 +80,16 @@ def inspect(root:Path=ROOT)->list[str]:
               'from obtainx_ci_optimization_opt06_rt02c_polling import should_probe_runner',
               'should_probe_runner(now, self.runner_probe_last, runner_stage)',
               'self.runner_probe_skipped += 1',
+              'from r02c_watchdog import RT02CWatchdog',
+              'RT02CWatchdog(started)', 'watchdog.tick(',
+              'OX_RT02C_WATCHDOG_REFUSED',
               "self.receipt['runner_probe_count'] = self.runner_probe_count"),
+      WATCHDOG:('class RT02CWatchdog:', 'TOTAL_SECONDS=1200',
+                "'TEST_APK_INSTALL':360", 'ACTIVE_CASE_SECONDS=420',
+                'PRE_DART_APK_INSTALL_STALL', 'case_elapsed>=ACTIVE_CASE_SECONDS'),
+      WATCHDOG_TEST:('test_first_apks_install_stall_refused',
+                     'test_healthy_all_seven_cases_unaffected',
+                     'test_total_cap_cannot_be_evaded_by_log_phase_churn'),
       POLL:('GRADLE_PROBE_INTERVAL_SECONDS = 8.0',
             'def should_probe_runner(', "phase != 'GRADLE_BUILD'"),
       DART:('IntegrationTestWidgetsFlutterBinding.ensureInitialized()',

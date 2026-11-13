@@ -105,6 +105,15 @@ class SourceMutations(unittest.TestCase):
         self.mutation(C.SINGLE, 'self.H.baseline_v1(self.fixtures)', 'dict()')
     def test_no_session_handshake_bypass(self):
         self.mutation(C.DART, "await control('prepare', name)", "await fakePrepare(name)")
+    def test_watchdog_must_be_invoked_by_real_runner(self):
+        self.mutation(C.SINGLE, 'watchdog.tick(', 'watchdog.noop(')
+
+    def test_watchdog_total_limit_cannot_be_raised_to_one_hour(self):
+        self.mutation(C.WATCHDOG, 'TOTAL_SECONDS=1200', 'TOTAL_SECONDS=6000')
+
+    def test_watchdog_pre_dart_deadline_cannot_be_removed(self):
+        self.mutation(C.WATCHDOG, "'TEST_APK_INSTALL':360", "'TEST_APK_INSTALL':6000")
+
     def test_no_second_flutter_launch(self):
         self.mutation(C.SINGLE, 'self.launches = 1', 'self.launches = 2')
     def test_no_skip_live_signed_v1_staging(self):

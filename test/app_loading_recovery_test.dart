@@ -38,6 +38,8 @@ class _Logs implements LogsProvider {
 
 class _Provider implements AppsProvider {
   @override
+  Future<void> recoverNativeInstallSessions() => Future<void>.value();
+  @override
   AppListings apps = AppListings();
   @override
   Directory? cachedAppsDir;

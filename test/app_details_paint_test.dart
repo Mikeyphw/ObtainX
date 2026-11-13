@@ -19,6 +19,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _Apps extends ChangeNotifier implements AppsProvider {
   @override
+  bool isNativeInstallOutcomeUncertain(String listingKey) => false;
+  @override
+  bool canCancelInstallPreparation(String listingKey) => false;
+  @override
   final AppListings apps = AppListings();
   @override
   final Map<String, ({String? title, String message})> appPageErrors = {};

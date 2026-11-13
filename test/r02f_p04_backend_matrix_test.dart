@@ -24,6 +24,7 @@ App _tracked({String source = 'https://example.invalid/first'}) => App(
       latestVersion: '2',
       preferredApkIndex: 0,
       apkUrls: const [MapEntry('base.apk', 'https://example.invalid/base.apk')],
+      additionalSettings: const {},
     );
 
 void main() {

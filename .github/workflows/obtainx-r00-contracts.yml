@@ -41,6 +41,8 @@ jobs:
         run: python3 -B scripts/ci/r02f_p02_contract.py --check
       - name: Enforce R02F P03 app UI/native cancellation source and mutation contract
         run: python3 -B scripts/ci/r02f_p03_contract.py --check
+      - name: Enforce R02F P04A external-hand-off package provenance and backend scope
+        run: python3 -B scripts/ci/r02f_p04_contract.py --check
       - name: Enforce R02G P01 real incompatible-SDK refusal contract
         run: python3 -B scripts/ci/r02g_incompatible_sdk_contract.py --check
       - name: Enforce R02 HF02 analyzer and golden-triage contracts

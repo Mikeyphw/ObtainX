@@ -70,6 +70,20 @@ const int _remainingStepsProgress = 90;
 // window to confirm the install actually landed.
 const int _bgInstallConfirmAttempts = 20; // 20 × 500ms = 10 seconds
 
+/// A package-change broadcast is not independent proof of this attempted
+/// release. The exact listing/source snapshot, package ID and package metadata
+/// must all match before the pending release is promoted to confirmed.
+@visibleForTesting
+bool p04PendingMatchesInstalledPackage(
+  App app,
+  InstallReleaseSnapshot? pending,
+  PackageInfo installedInfo,
+) =>
+    pending != null &&
+    pending.belongsTo(app) &&
+    installedInfo.packageName == app.id &&
+    pending.matchesPackage(installedInfo);
+
 @visibleForTesting
 bool isCleartextDownloadUrl(String url) {
   return Uri.tryParse(url)?.scheme.toLowerCase() == 'http';
@@ -378,28 +392,48 @@ extension AppsProviderInstall on AppsProvider {
 
   /// See [listenForThirdPartyInstallResults].
   Future<void> recordThirdPartyInstallBroadcast(String packageName) async {
-    // Checked before the platform query: this now runs for every package change
-    // on the device, and most of them are for apps ObtainX does not track.
-    final entry = apps[packageName];
-    if (entry == null) return;
+    // A package may have multiple tracked source listings. A broadcast has
+    // package scope, not listing scope; confirm only each listing's *own*
+    // attempted release, never a different listing's pending intent.
+    final listingKeys = apps.values
+        .where((entry) => entry.app.id == packageName)
+        .map((entry) => entry.listingKey)
+        .toList(growable: false);
+    if (listingKeys.isEmpty) return;
     final installedInfo = await getInstalledInfo(packageName);
-    if (installedInfo == null) return;
-    thirdPartyInstallIndicatorTimers.remove(packageName)?.cancel();
-    if (entry.downloadProgress == _awaitingThirdPartyInstallSentinel ||
-        entry.downloadProgress == _recoveredNativeInstallSentinel) {
-      entry.downloadProgress = null;
+    if (installedInfo == null || installedInfo.packageName != packageName) {
+      return;
     }
-    recoveredNativeInstallIds.remove(entry.listingKey);
-    uncertainNativeInstallListings.remove(entry.listingKey);
-    final pending =
-        InstallReleaseSnapshot.fromJson(
-          entry.app.additionalSettings[pendingInstallReleaseKey],
-        ) ??
-        InstallReleaseSnapshot.fromJson(
-          entry.app.additionalSettings[confirmedInstallReleaseKey],
+    for (final listingKey in listingKeys) {
+      final entry = apps[listingKey];
+      if (entry == null || entry.app.id != packageName) continue;
+      final pending = InstallReleaseSnapshot.fromJson(
+        entry.app.additionalSettings[pendingInstallReleaseKey],
+      );
+      if (p04PendingMatchesInstalledPackage(entry.app, pending, installedInfo)) {
+        // Verified package/version for this exact pending source snapshot.
+        thirdPartyInstallIndicatorTimers.remove(listingKey)?.cancel();
+        if (entry.downloadProgress == _awaitingThirdPartyInstallSentinel ||
+            entry.downloadProgress == _recoveredNativeInstallSentinel) {
+          entry.downloadProgress = null;
+        }
+        recoveredNativeInstallIds.remove(listingKey);
+        uncertainNativeInstallListings.remove(listingKey);
+        entry.app = recordConfirmedInstall(entry.app, pending, installedInfo);
+        await saveApps([entry.app], attemptToCorrectInstallStatus: false);
+      } else {
+        // A generic broadcast, stale v1, or different attempted release is
+        // only a device observation. Preserve the unresolved pending receipt
+        // and its UI timeout; it is NOT proof of a completed installation.
+        final corrected = getCorrectedInstallStatusAppIfPossible(
+          entry.app, installedInfo,
         );
-    entry.app = recordConfirmedInstall(entry.app, pending, installedInfo);
-    await saveApps([entry.app], attemptToCorrectInstallStatus: false);
+        if (corrected != null) {
+          entry.app = corrected;
+          await saveApps([entry.app], attemptToCorrectInstallStatus: false);
+        }
+      }
+    }
   }
 
   Future<void> _recordPendingInstall(

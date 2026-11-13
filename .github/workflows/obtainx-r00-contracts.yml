@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
   workflow_dispatch:
 
 permissions:
@@ -36,6 +37,10 @@ jobs:
         run: python3 -B scripts/ci/r02e_source_contract.py --check
       - name: Enforce RT02F external handoff and targeted CI source contract
         run: python3 -B scripts/ci/r02f_source_contract.py --check
+      - name: Enforce RT02F P02 API36 install-abandon source and mutation contracts
+        run: python3 -B scripts/ci/r02f_p02_contract.py --check
+      - name: Enforce R02G P01 real incompatible-SDK refusal contract
+        run: python3 -B scripts/ci/r02g_incompatible_sdk_contract.py --check
       - name: Enforce R02 HF02 analyzer and golden-triage contracts
         run: python3 scripts/ci/r02_hf02_contract.py --check
       - name: Enforce R02 API36 emulator source/evidence staleness contracts
@@ -46,3 +51,12 @@ jobs:
         run: python3 scripts/ci/r02_rt02b_contract.py --check
       - name: Enforce RT02C archive-to-session source and mutation contracts
         run: python3 scripts/ci/r02_rt02c_contract.py --check
+      - name: Enforce bounded CI optimization and dev-only qualification guard
+        run: python3 -B scripts/ci/obtainx_ci_optimization_contract.py --check
+      - name: Development-only cannot qualify (same runner)
+        if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:development-only') }}
+        shell: bash
+        run: |
+          echo 'OX_CI_DEVELOPMENT_ONLY_NOT_QUALIFIED: remove ci:development-only to force the full Android/Flutter matrix' >&2
+          echo 'Development-only mode. All Android runtime and full Flutter gates are NOT QUALIFIED.' >> "$GITHUB_STEP_SUMMARY"
+          exit 1

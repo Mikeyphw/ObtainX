@@ -15,11 +15,14 @@ on:
       - 'android/**'
       - '.github/workflows/**'
       - 'scripts/ci/r02_rt02**'
+      - 'scripts/ci/r02_sdk_retry.py'
       - 'scripts/ci/obtainx_ci_policy.py'
+      - 'scripts/ci/*optimization*'
       - 'scripts/ci/r00_source_contract.py'
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - 'docs/SECURITY_RELEASE_POLICY.md'
+    types: [opened, reopened, synchronize, labeled, unlabeled]
   workflow_dispatch:
 
 permissions:
@@ -31,8 +34,11 @@ concurrency:
 
 jobs:
   emulator-api36:
+    if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'ci:development-only') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
+    env:
+      GRADLE_OPTS: -Dorg.gradle.caching=true -Dorg.gradle.parallel=true -Dorg.gradle.workers.max=2
     steps:
       - name: Checkout exact source commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
@@ -50,7 +56,21 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            android/gradle/wrapper/gradle-wrapper.properties
+            android/**/*.gradle*
+      - name: Restore optional exact-SHA normal-debug APK
+        id: opt03_apk_restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # pinned v6.1.0
+        with:
+          path: |
+            build/app/outputs/flutter-apk/app-normal-debug.apk
+            build/app/outputs/flutter-apk/obtainx-opt03-debug-apk.json
+          key: obtainx-opt03-v1-${{ runner.os }}-flutter3.47.6-java21-normal-debug-${{ github.sha }}
+          fail-on-cache-miss: false
       - name: Set up Flutter 3.47.6
+        if: steps.opt03_apk_restore.outputs.cache-hit != 'true'
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # pinned v2
         with:
           flutter-version: '3.47.6'
@@ -66,13 +86,20 @@ jobs:
           test "$(uname -m)" = x86_64
           mkdir -p "$RUNNER_TEMP/obtainx-r02-api36"
           python3 -B scripts/ci/r02_api36_smoke.py init --out "$RUNNER_TEMP/obtainx-r02-api36"
-      - name: Build unsigned-for-release debug APK (normal flavor)
+      - name: Verify exact-SHA cache or build normal debug APK
         shell: bash
         run: |
           set -euo pipefail
-          flutter pub get
-          flutter build apk --debug --flavor normal --no-pub
-          test -s build/app/outputs/flutter-apk/app-normal-debug.apk
+          if [[ '${{ steps.opt03_apk_restore.outputs.cache-hit }}' == 'true' ]]; then
+            python3 -B scripts/ci/obtainx_ci_optimization_opt03_apk_cache.py verify
+            echo 'OX_OPT03_CACHE_HIT_EXACT_SOURCE_APK_VERIFIED'
+          else
+            flutter pub get
+            flutter build apk --debug --flavor normal --no-pub
+            test -s build/app/outputs/flutter-apk/app-normal-debug.apk
+            python3 -B scripts/ci/obtainx_ci_optimization_opt03_apk_cache.py seal
+            echo 'OX_OPT03_CACHE_MISS_BUILT_SOURCE_APK_LOCALLY'
+          fi
       - name: Verify KVM and provision API 36 system image
         shell: bash
         run: |
@@ -82,12 +109,17 @@ jobs:
             sudo chmod a+rw /dev/kvm
           fi
           test -r /dev/kvm && test -w /dev/kvm || { echo OX_R02_API36_KVM_UNAVAILABLE >&2; exit 1; }
-          sdkmanager --install 'platforms;android-36' 'build-tools;35.0.0' 'system-images;android-36;google_apis;x86_64'
+          python3 -B scripts/ci/r02_sdk_retry.py 'platforms;android-36' 'build-tools;35.0.0' 'system-images;android-36;google_apis;x86_64'
           avd_root="${ANDROID_AVD_HOME:-$HOME/.android/avd}"
           mkdir -p "$avd_root"
           available_kib="$(df -Pk "$avd_root" | awk 'END {print $4}')"
           [[ "$available_kib" =~ ^[0-9]+$ ]] || { echo OX_R02_API36_DISK_QUERY_FAILED >&2; exit 1; }
           (( available_kib >= 4 * 1024 * 1024 )) || { echo OX_R02_API36_DISK_INSUFFICIENT >&2; exit 1; }
+      - name: Verify APK package, signature and debug mode before emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B scripts/ci/obtainx_ci_optimization_opt03_apk_cache.py verify-tools
       - name: Install and launch ObtainX on disposable API 36 emulator
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # pinned
         with:
@@ -99,15 +131,33 @@ jobs:
           ram-size: 2048M
           disk-size: 3072M
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           script: python3 -B scripts/ci/r02_api36_smoke.py run --out "$RUNNER_TEMP/obtainx-r02-api36"
       - name: Independently verify source-bound installed APK and launch evidence
         shell: bash
         run: |
           set -euo pipefail
           python3 -B scripts/ci/r02_api36_smoke.py verify --out "$RUNNER_TEMP/obtainx-r02-api36"
+      - name: Record only bounded receipt hashes before artifact upload
+        if: always()
+        shell: bash
+        env:
+          OX_EVIDENCE_ROOT: ${{ runner.temp }}/obtainx-r02-api36
+        run: |
+          set -euo pipefail
+          printf 'ObtainX evidence hashes only; source=%s; uploads remain mandatory\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          for f in "$OX_EVIDENCE_ROOT"/*.json "$OX_EVIDENCE_ROOT"/fixtures/*inventory.json; do
+            if [[ -f "$f" && ! -L "$f" ]]; then
+              n="$(wc -c < "$f")"
+              if [[ "$n" =~ ^[0-9]+$ ]] && (( n <= 131072 )); then
+                printf '%s (%s bytes): ' "$(basename "$f")" "$n" >> "$GITHUB_STEP_SUMMARY"
+                sha256sum "$f" | awk '{print $1}' >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
+          done
       - name: Publish minimized emulator-only evidence even on failure
         if: always()
+        timeout-minutes: 3
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # pinned v4
         with:
           name: obtainx-r02-api36-bootstrap-${{ github.sha }}

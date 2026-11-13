@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -216,6 +217,39 @@ def classify_android_approval(scenario:str,tap_count:int,actual:dict)->str:
 
 
 
+def split_pre_dart_recovery_allowed(scenario:str,attempt:int,phase:str,
+                                    dart_started:bool,tap_count:int)->bool:
+    """Only recover from a failed *test harness*, never from an installer attempt."""
+    return (scenario=='split' and type(attempt) is int and attempt==1 and
+            phase in ('FLUTTER_STARTING','GRADLE_BUILD','TEST_APK_INSTALL') and
+            dart_started is False and type(tap_count) is int and tap_count==0)
+
+
+def split_pre_dart_stalled(scenario:str,attempt:int,phase:str,
+                           elapsed:float,idle:float)->bool:
+    """No timed restart after Dart, StockInstaller, or Android approval."""
+    return (scenario=='split' and attempt==1 and phase=='TEST_APK_INSTALL' and
+            elapsed>=360 and idle>=180)
+
+
+def terminate_flutter_process_group(p:subprocess.Popen)->None:
+    """Stop only this invocation's isolated process group; reap its parent."""
+    try:
+        os.killpg(p.pid,signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        p.wait(timeout=6)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid,signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:p.wait(timeout=6)
+        except subprocess.TimeoutExpired as ex:
+            raise Refused('Flutter process group did not terminate') from ex
+
+
 # Explicitly allowlisted, bounded log diagnostics. Never emit, upload or store
 # raw Flutter output, device identifiers, environment variables or stack traces.
 FAILURE_RULES=(
@@ -283,14 +317,28 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
         deadline=started+900
         saw_installer_call=False
         last_progress=0.0
+        last_log_size=0
+        last_log_growth=started
         tap_count=0
         with logfile.open('wb') as log:
-            p=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT)
+            p=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,
+                               start_new_session=True)
             installed_app=False
             try:
                 while p.poll() is None and time.monotonic()<deadline:
                     now=time.monotonic()
                     phase=flutter_phase(logfile)
+                    log_size=logfile.stat().st_size
+                    if log_size != last_log_size:
+                        last_log_growth=now
+                        last_log_size=log_size
+                    # A stalled second Flutter test has already installed its
+                    # harness APK but has not reached Dart or StockInstaller.
+                    # Abort only this pre-Dart bootstrap, never an install call.
+                    if split_pre_dart_stalled(scenario,attempt,phase,
+                                              now-started,now-last_log_growth):
+                        print('OX_R02_RT02_SPLIT_BOOTSTRAP_STALL_DETECTED',flush=True)
+                        break
                     if phase=='STOCK_INSTALLER_CALL' and not saw_installer_call:
                         saw_installer_call=True
                         deadline=min(deadline,now+240)
@@ -315,7 +363,16 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
                     phase=flutter_phase(logfile)
                     record_flutter_progress(out,scenario,phase,int(time.monotonic()-started),
                                             installed_app,tap_count)
-                    record_flutter_failure(out,scenario,attempt,phase,logfile,-1)
+                    category,dart_started=record_flutter_failure(out,scenario,attempt,phase,logfile,-1)
+                    if split_pre_dart_recovery_allowed(scenario,attempt,phase,dart_started,tap_count):
+                        # Flutter's prior process must be fully stopped before
+                        # inspecting/reusing the exact v1 Android baseline.
+                        terminate_flutter_process_group(p)
+                        installed_state(1,False,out/'fixtures')
+                        adb('shell','am','force-stop',APP,timeout=20)
+                        installed_state(1,False,out/'fixtures')
+                        print('OX_R02_RT02_SPLIT_PRE_DART_RETRY category='+category,flush=True)
+                        continue
                     raise Refused('RT02_FLUTTER_TIMEOUT: scenario='+scenario+' phase='+phase+
                                   ' app_present='+str(installed_app)+' approvals='+str(tap_count))
                 text=logfile.read_text('utf-8','replace')
@@ -331,7 +388,15 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
                         # Confirm the real fixture is absent before restarting a
                         # test-runner/bootstrap failure. An installed fixture or
                         # ambiguous package query prevents a retry.
-                        empty_or_expected_package()
+                        if scenario=='split':
+                            # V1 is a mandatory installed baseline for an update;
+                            # the old 'fixture absent' check was impossible here.
+                            terminate_flutter_process_group(p)
+                            installed_state(1,False,out/'fixtures')
+                            adb('shell','am','force-stop',APP,timeout=20)
+                            installed_state(1,False,out/'fixtures')
+                        else:
+                            empty_or_expected_package()
                         print('OX_R02_RT02_PRE_DART_RETRY scenario='+scenario+
                               ' category='+category,flush=True)
                         continue
@@ -353,19 +418,18 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
                 return actual
             finally:
                 if p.poll() is None:
-                    p.terminate()
-                    try:p.wait(timeout=6)
-                    except subprocess.TimeoutExpired:p.kill()
+                    terminate_flutter_process_group(p)
     raise Refused('both Flutter attempts failed without runtime installation')
 
 def execute(out:Path)->int:
     source,run=host_check()
     out.mkdir(parents=True,exist_ok=True)
-    receipt={'schema':1,'status':'NOT_RUN','source_sha':source,'run_id':run,
+    receipt={'schema':2,'status':'NOT_RUN','source_sha':source,'run_id':run,
              'hosted_emulator_only':True,'physical_device_qualified':False,
              'full_r02_matrix_qualified':False,'release_qualified':False,
              'publication_allowed':False,'installer_backend':'production StockInstaller',
-             'scenarios':[]}
+             'scenarios':[],'flutter_launches':0,
+             'host_acknowledgement_order':[],'dart_event_order':[]}
     path=out/'rt02-receipt.json';path.write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
     fixtures=out/'fixtures';inventory=json.loads((fixtures/'fixture_inventory.json').read_text())
     need(inventory.get('source_sha')==source and inventory.get('fixture_package')==FIXTURE,
@@ -376,28 +440,38 @@ def execute(out:Path)->int:
         need(SHA.fullmatch(entry['sha256']) is not None and sha_file(fixtures/name)==entry['sha256'],
              'fixture digest mismatch: '+name)
     empty_or_expected_package()
-    FixtureServer.fixtures={name:fixtures/name for name in inventory['files']}
-    server=ThreadingHTTPServer(('127.0.0.1',PORT),FixtureServer)
-    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    # OPT05 P02: preserve one_scenario for legacy HF06 recovery regression
+    # tests, but run both real Android states in a single Flutter test process.
+    from opt05_p02_rt02_session import CASES,EVENTS,run_single_session
     try:
-        adb('reverse','tcp:'+str(PORT),'tcp:'+str(PORT))
+        # The hosted script executes as __main__, while the helper imports
+        # r02_rt02_hosted by module name. Convert its independent Refused
+        # class into this script's fail-closed exception type.
+        try:
+            proofs,log_sha=run_single_session(out,inventory)
+        except RuntimeError as ex:
+            raise Refused('OPT05 P02 Android session refused: '+str(ex)) from ex
         for scenario in ('standalone','split'):
-            proof=one_scenario(out,inventory,scenario)
-            receipt['scenarios'].append(proof)
+            need(scenario in proofs,'missing one-session Android scenario proof')
+            receipt['scenarios'].append(proofs[scenario])
             path.write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
+        receipt['flutter_launches']=1
+        receipt['host_acknowledgement_order']=list(CASES)
+        receipt['dart_event_order']=[case+':'+step for case,step in EVENTS]
+        receipt['session_log_sha256']=log_sha
         receipt['status']='PASS_TWO_ANDROID_SYSTEM_SESSIONS'
         path.write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
         print('OX_R02_RT02_TWO_REAL_SESSIONS_PASS',flush=True)
+        print('OX_R02_RT02_OPT05_ONE_FLUTTER_TWO_REAL_INSTALLS_PASS',flush=True)
         return 0
     finally:
-        server.shutdown();server.server_close()
-        adb('reverse','--remove','tcp:'+str(PORT),allow_failure=True)
+        # Only disposable RT02 fixture APK is removed. Never touch user apps.
         adb('shell','pm','uninstall',FIXTURE,allow_failure=True)
 
 def verify(out:Path)->int:
     source,run=identity_check()
     v=json.loads((out/'rt02-receipt.json').read_text())
-    for k,expected in {'schema':1,'status':'PASS_TWO_ANDROID_SYSTEM_SESSIONS',
+    for k,expected in {'schema':2,'status':'PASS_TWO_ANDROID_SYSTEM_SESSIONS',
         'source_sha':source,'run_id':run,'hosted_emulator_only':True,
         'physical_device_qualified':False,'full_r02_matrix_qualified':False,
         'release_qualified':False,'publication_allowed':False,
@@ -417,6 +491,17 @@ def verify(out:Path)->int:
             {**split_common,'android_confirmations':count,'approval_path':path}])
     need(v.get('scenarios') in valid_scenarios,
         'incomplete or forged real system-installation scenario proof')
+    # OPT05 P02: no duplicate compilation or unacknowledged Android outcome.
+    from opt05_p02_rt02_session import CASES,EVENTS
+    need(type(v.get('flutter_launches')) is int and v['flutter_launches']==1,
+         'one Flutter launch required')
+    need(v.get('host_acknowledgement_order')==list(CASES) and
+         v.get('dart_event_order')==[case+':'+step for case,step in EVENTS],
+         'exact two-case host ack and Dart event sequence required')
+    digest=v.get('session_log_sha256')
+    need(isinstance(digest,str) and re.fullmatch('[0-9a-f]{64}',digest) is not None,
+         'one-session private log SHA-256 required')
+    print('OX_R02_RT02_OPT05_SINGLE_SESSION_SOURCE_BOUND_VERIFIED',flush=True)
     print('OX_R02_RT02_SOURCE_BOUND_EMULATOR_ONLY_VERIFIED',flush=True)
     return 0
 

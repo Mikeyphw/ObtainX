@@ -2,6 +2,7 @@ name: ObtainX R00 / Hosted Flutter Qualification
 
 on:
   pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
   workflow_dispatch:
 
 permissions:
@@ -75,9 +76,11 @@ jobs:
 
   flutter-and-android-debug:
     needs: scope
-    if: needs.scope.outputs.full_flutter == 'true'
+    if: needs.scope.outputs.full_flutter == 'true' && !contains(github.event.pull_request.labels.*.name, 'ci:development-only')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      GRADLE_OPTS: -Dorg.gradle.caching=true -Dorg.gradle.parallel=true -Dorg.gradle.workers.max=2
     steps:
       - name: Checkout exact commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned tag v4
@@ -88,6 +91,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            android/gradle/wrapper/gradle-wrapper.properties
+            android/**/*.gradle*
       - name: Set up Flutter 3.47.6
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # pinned tag v2
         with:
@@ -119,6 +126,7 @@ jobs:
           python3 scripts/ci/r01_hf02_golden_triage.py "$RUNNER_TEMP/ox-full-tests.log" test/goldens/R01_HF02_TRIAGE.json
           flutter test --no-pub --update-goldens test/apps_scroll_work_test.dart
       - name: Publish golden references for reviewed commit (job stays failed)
+        timeout-minutes: 3
         if: ${{ failure() && steps.golden_triage.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 pinned
         with:
@@ -128,3 +136,18 @@ jobs:
           retention-days: 7
       - name: Compile unsigned debug Android APK
         run: flutter build apk --debug --flavor normal --no-pub
+      - name: Seal exact-source debug APK for cache reuse
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B scripts/ci/obtainx_ci_optimization_opt03_apk_cache.py seal
+      - name: Save optional OPT03 debug APK cache
+        if: success()
+        timeout-minutes: 3
+        continue-on-error: true # cache upload is optional, build and source/security tests are not
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # pinned v6.1.0
+        with:
+          path: |
+            build/app/outputs/flutter-apk/app-normal-debug.apk
+            build/app/outputs/flutter-apk/obtainx-opt03-debug-apk.json
+          key: obtainx-opt03-v1-${{ runner.os }}-flutter3.47.6-java21-normal-debug-${{ github.sha }}

@@ -105,6 +105,15 @@ class SourceMutations(unittest.TestCase):
         self.mutation(C.SINGLE, 'self.H.baseline_v1(self.fixtures)', 'dict()')
     def test_no_session_handshake_bypass(self):
         self.mutation(C.DART, "await control('prepare', name)", "await fakePrepare(name)")
+    def test_watchdog_must_be_invoked_by_real_runner(self):
+        self.mutation(C.SINGLE, 'watchdog.tick(', 'watchdog.noop(')
+
+    def test_watchdog_total_limit_cannot_be_raised_to_one_hour(self):
+        self.mutation(C.WATCHDOG, 'TOTAL_SECONDS=1200', 'TOTAL_SECONDS=6000')
+
+    def test_watchdog_pre_dart_deadline_cannot_be_removed(self):
+        self.mutation(C.WATCHDOG, "'TEST_APK_INSTALL':360", "'TEST_APK_INSTALL':6000")
+
     def test_no_second_flutter_launch(self):
         self.mutation(C.SINGLE, 'self.launches = 1', 'self.launches = 2')
     def test_no_skip_live_signed_v1_staging(self):
@@ -209,6 +218,7 @@ class RuntimeReceipts(unittest.TestCase):
             item['boundary_index']=index
         self.data={'schema':1,'status':'PASS_FIVE_ARCHIVES_TWO_PREINSTALL_REFUSALS',
                    'flutter_launches':1,'session_log_sha256':hashlib.sha256(b'session').hexdigest(),
+                   'runner_probe_count':27,'runner_probe_skipped':180,
                    'source_sha':self.commit,'run_id':self.run,'hosted_emulator_only':True,
                    'physical_device_qualified':False,'full_r02_matrix_qualified':False,
                    'user_facing_import_qualified':False,'release_qualified':False,
@@ -220,6 +230,24 @@ class RuntimeReceipts(unittest.TestCase):
         with patch.object(H.base,'identity_check',return_value=(self.commit,self.run)):
             return H.verify(self.out)
     def test_valid_receipt(self):self.assertEqual(self.verify(),0)
+    def test_opt06_missing_probe_count_refused(self):
+        del self.data['runner_probe_count'];self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_opt06_missing_skipped_count_refused(self):
+        del self.data['runner_probe_skipped'];self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_opt06_negative_probe_count_refused(self):
+        self.data['runner_probe_count']=-1;self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_opt06_boolean_probe_count_refused(self):
+        self.data['runner_probe_count']=True;self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_opt06_excessive_skipped_count_refused(self):
+        self.data['runner_probe_skipped']=6001;self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_opt06_float_skipped_count_refused(self):
+        self.data['runner_probe_skipped']=0.0;self.write()
+        with self.assertRaises(H.Refused):self.verify()
     def test_missing_single_process_proof(self):
         self.data['flutter_launches']=2;self.write()
         with self.assertRaises(H.Refused):self.verify()

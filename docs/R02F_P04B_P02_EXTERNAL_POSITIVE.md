@@ -98,3 +98,27 @@ mandatory. The existing archive, decline, SDK and cancellation gates remain.
 The full Python suite must pass prior to commit and six exact-head hosted
 workflows must pass before qualification. Physical devices, privileged/remote
 installers, Shizuku/Dhizuku, release and main merge remain outside scope.
+
+## CI6 — automatic six-workflow Android qualification path coverage
+
+HF03 PR #18 source `498f52e1f42221d6914303aa70e3c7215af199fc`
+proved actual PackageInstaller pending-user-action callback, Android UI tap,
+terminal STATUS_SUCCESS, installed signed v2 bytes and offline verification in
+hosted API36 RT02C, while R00 contracts and Flutter checks also passed.
+This does not grant six-workflow or release qualification on that commit.
+
+The RT02/API36 bootstrap, RT02 real install and RT02B negative workflows
+had path filters which omitted `scripts/ci/r02f_p04b_*`, so P04B-only PRs
+ran only three of the six declared gates. CI6 adds the same four native
+installer risk path groups to all four Android workflow PR filters,
+marks those paths high-risk in `obtainx_ci_policy.py`, and defines one
+source-controlled six-workflow policy JSON. A mandatory R00 CI6 contract and
+adversarial mutation tests reject missing filters, missing workflow dispatch,
+changed names, skipped risk classification and false qualification flags.
+
+All six workflows must run and finish successfully at the *same exact PR HEAD*
+before hosted CI can qualify. Workflow discovery is eventually consistent:
+not-yet-visible is not failed; missing at bounded deadline is not qualified.
+The change never creates or implies physical-device acceptance, root/Shizuku/
+Dhizuku acceptance, a merge, or a release. P04B P03 delayed, spoofed/mismatched
+and parallel handoff cases remain separate next-stage work.

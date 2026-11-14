@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "purpose": "Exact-head PR qualification for installer-relevant source changes; release is separate",
+  "path_groups": [
+    "scripts/ci/r02f_p02_*",
+    "scripts/ci/r02f_p03_*",
+    "scripts/ci/r02f_p04b_*",
+    "scripts/ci/r02g_*"
+  ],
+  "workflows": [
+    {"name": "ObtainX R00 / Source and Contract Integrity", "path": ".github/workflows/obtainx-r00-contracts.yml", "scope": "required"},
+    {"name": "ObtainX R00 / Hosted Flutter Qualification", "path": ".github/workflows/obtainx-r00-flutter.yml", "scope": "required"},
+    {"name": "ObtainX R02 / API 36 Hosted Emulator Bootstrap", "path": ".github/workflows/obtainx-r02-api36.yml", "scope": "required"},
+    {"name": "ObtainX R02 / RT02 Real System Installer API36", "path": ".github/workflows/obtainx-r02-rt02.yml", "scope": "required"},
+    {"name": "ObtainX R02 / RT02B Negative Installer API36", "path": ".github/workflows/obtainx-r02-rt02b.yml", "scope": "required"},
+    {"name": "ObtainX R02 / RT02C Archive-to-Installer API36", "path": ".github/workflows/obtainx-r02-rt02c.yml", "scope": "required"}
+  ],
+  "qualification": {
+    "require_all_exact_head_success": true,
+    "missing_is_not_qualified": true,
+    "failure_is_not_qualified": true,
+    "release_qualified": false,
+    "physical_device_qualified": false
+  }
+}

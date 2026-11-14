@@ -304,15 +304,31 @@ internal class R02fP03SessionBridge(
                 return
             }
         }
+        // A PackageInstaller pending-approval abandon may take a short time
+        // to settle. Retry ONLY while the owned operation was still staged or
+        // awaiting approval, and never infer cancellation from the call itself.
+        val cancellationWindow = op.state == "approval" || op.state == "staged"
         var abandoned = false
-        try {
-            installer.abandonSession(op.sessionId)
-            abandoned = installer.getSessionInfo(op.sessionId) == null
-        } catch (_: Exception) { /* Session may have crossed the commit boundary. */ }
+        for (attempt in 0 until 3) {
+            try {
+                installer.abandonSession(op.sessionId)
+            } catch (_: Exception) {
+                // Android may have crossed the commit boundary: no claimed rollback.
+            }
+            abandoned = try {
+                installer.getSessionInfo(op.sessionId) == null
+            } catch (_: Exception) { false }
+            if (abandoned || !cancellationWindow) break
+            if (attempt < 2) {
+                try { Thread.sleep(150L) } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+            }
+        }
         // The session may have crossed commit before a cancellation request.
         // Never advertise rollback from a state whose commit result was not
         // observed. A second device observation catches delayed package writes.
-        val cancellationWindow = op.state == "approval" || op.state == "staged"
         val unchangedBeforeSettle = try { baselineStillProven(op) } catch (_: Exception) { false }
         if (abandoned && unchangedBeforeSettle) {
             try { Thread.sleep(600L) } catch (_: InterruptedException) {

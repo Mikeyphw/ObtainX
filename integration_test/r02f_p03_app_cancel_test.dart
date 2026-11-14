@@ -168,6 +168,17 @@ void main() {
           reason: 'App provider cannot report a successful install after UI Cancel');
       final snapshot = await R02fP03CancellableStock.instance.snapshot();
       final terminal = snapshot['terminal'] as Map<String, dynamic>?;
+      if (terminal?['outcome'] != 'cancelled') {
+        // Fixed allowlist only: no session identifiers, package paths, or
+        // native exception strings are exported through CI diagnostics.
+        final terminalCode = switch (terminal?['outcome']) {
+          'unknown' => 'UNKNOWN',
+          'error' => 'ERROR',
+          null => 'MISSING',
+          _ => 'UNEXPECTED',
+        };
+        debugPrint('OX_P03_DART_NATIVE_TERMINAL=$terminalCode');
+      }
       expect(terminal?['id'], native['id']);
       expect(terminal?['outcome'], 'cancelled',
           reason: 'Native abandon and original APK integrity must be established');

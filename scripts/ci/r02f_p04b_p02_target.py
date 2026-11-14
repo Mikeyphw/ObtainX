@@ -18,13 +18,15 @@ MANIFEST = '''<?xml version="1.0" encoding="utf-8"?>
     <activity android:name=".PositiveInstallActivity" android:exported="true">
       <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="application/vnd.android.package-archive"/></intent-filter>
     </activity>
-    <activity android:name=".PositiveInstallActivity$StatusActivity" android:exported="false" android:launchMode="singleTop"/>
+    <receiver android:name=".PositiveInstallActivity$StatusReceiver" android:exported="false"/>
   </application>
 </manifest>
 '''
 JAVA = r'''package dev.bikram.obtainx.p04b.positive;
 import android.app.Activity;
 import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInstaller;
 import android.net.Uri;
@@ -39,12 +41,27 @@ import java.security.MessageDigest;
 /** CI-only installer: user approval mandatory; no shell, root or hidden APIs. */
 public final class PositiveInstallActivity extends Activity {
   static final String PREF = "p04b_positive";
+  static final String SHOW_APPROVAL = "dev.bikram.obtainx.P04B_POSITIVE_SHOW_APPROVAL";
   static final String FIXTURE = "dev.bikram.obtainx.rt02.fixture";
-  static void status(Activity a, String value) {
+  static void status(Context a, String value) {
     a.getSharedPreferences(PREF, MODE_PRIVATE).edit().putString("status", value).commit();
   }
   @Override public void onCreate(Bundle state) {
     super.onCreate(state);
+    // Hosted-API36-only entry: a shell/UI command may show the *real*
+    // Android approval screen only AFTER the OS PackageInstaller callback.
+    // It cannot commit, approve or install a package by itself.
+    if (getIntent() != null && SHOW_APPROVAL.equals(getIntent().getAction())) {
+      Intent approval=StatusReceiver.pendingApprovalIntent;
+      if (approval == null || !"user_approval_requested".equals(
+          getSharedPreferences(PREF, MODE_PRIVATE).getString("status", ""))) {
+        status(this,"approval_launch_failed"); finish(); return;
+      }
+      StatusReceiver.pendingApprovalIntent=null;
+      try {startActivity(approval.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));}
+      catch (Exception ignored) {status(this,"approval_launch_failed");}
+      finish(); return;
+    }
     status(this,"started");
     Uri uri = getIntent() == null ? null : getIntent().getData();
     if (uri == null || !"content".equals(uri.getScheme()) ||
@@ -78,10 +95,10 @@ public final class PositiveInstallActivity extends Activity {
         for (byte b:sha.digest()) hex.append(String.format("%02x", b & 255));
         getSharedPreferences(PREF, MODE_PRIVATE).edit()
             .putString("sha256",hex.toString()).putString("status","approval_pending").commit();
-        Intent callback=new Intent(this, StatusActivity.class);
+        Intent callback=new Intent(this, StatusReceiver.class);
         callback.setAction("dev.bikram.obtainx.P04B_POSITIVE_STATUS");
-        callback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        PendingIntent pending=PendingIntent.getActivity(this,id,callback,
+        callback.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
+        PendingIntent pending=PendingIntent.getBroadcast(this,id,callback,
             PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_MUTABLE);
         session.commit(pending.getIntentSender());
       }
@@ -95,24 +112,34 @@ public final class PositiveInstallActivity extends Activity {
       finish();
     }
   }
-  public static final class StatusActivity extends Activity {
-    @Override public void onCreate(Bundle state) {super.onCreate(state);handle(getIntent());}
-    @Override public void onNewIntent(Intent intent) {super.onNewIntent(intent);handle(intent);}
-    private void handle(Intent callback) {
+  // Application process holds the transient Android-owned approval Intent
+  // in memory; a process death fails closed rather than inventing approval.
+  public static final class StatusReceiver extends BroadcastReceiver {
+    static volatile Intent pendingApprovalIntent;
+    @Override public void onReceive(Context context, Intent callback) {
+      if (callback == null || !"dev.bikram.obtainx.P04B_POSITIVE_STATUS".equals(callback.getAction()))
+        return;
+      String previous=context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+          .getString("status", "");
       int result=callback.getIntExtra(PackageInstaller.EXTRA_STATUS,PackageInstaller.STATUS_FAILURE);
       if (result==PackageInstaller.STATUS_PENDING_USER_ACTION) {
-        status(this,"user_approval_requested");
+        if (!"approval_pending".equals(previous)) {
+          status(context,"approval_launch_failed"); return;
+        }
         Intent approve;
         if (Build.VERSION.SDK_INT>=33)
           approve=callback.getParcelableExtra(Intent.EXTRA_INTENT,Intent.class);
         else approve=(Intent)callback.getParcelableExtra(Intent.EXTRA_INTENT);
-        if (approve==null) {status(this,"missing_approval_intent");finish();return;}
-        try {startActivity(approve.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));}
-        catch (Exception ignored) {status(this,"approval_launch_failed");}
-        finish(); return;
+        if (approve==null) {status(context,"missing_approval_intent");return;}
+        pendingApprovalIntent=approve;
+        status(context,"user_approval_requested");
+        return;
       }
-      status(this,result==PackageInstaller.STATUS_SUCCESS?"system_status_success":"system_status_failure");
-      finish();
+      pendingApprovalIntent=null;
+      // Do not infer success from a broadcast; the host still rehashes
+      // installed base.apk and checks the PackageManager version.
+      status(context,result==PackageInstaller.STATUS_SUCCESS?
+          "system_status_success":"system_status_failure");
     }
   }
 }

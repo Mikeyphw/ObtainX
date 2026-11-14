@@ -50,4 +50,8 @@ class ContractMutations(unittest.TestCase):
     def test_13_no_qualifying_physical(self):
         self.mutate(C.MODEL,'bool get physicalDeviceQualified => false;',
                           'bool get physicalDeviceQualified => true;')
+    def test_14_backend_library_doc_comment_needs_directive(self):
+        self.mutate(C.MODEL,'library;\n', '')
+    def test_15_backend_mode_decl_must_be_const(self):
+        self.mutate(C.DART,"const mode = _selected == 'shizuku'","final mode = _selected == 'shizuku'")
 if __name__=='__main__':unittest.main()

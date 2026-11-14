@@ -1,6 +1,7 @@
 /// Read-only R02F P04 backend evidence. A permission code is not install proof.
 /// Explicit user-initiated checks may call the existing serialized plugin, but
 /// this classifier itself never requests privilege, installs or changes DPM.
+library;
 import 'package:shizuku_apk_installer/shizuku_apk_installer.dart';
 
 enum P04BackendState {

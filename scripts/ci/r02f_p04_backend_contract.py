@@ -24,6 +24,16 @@ def inspect(root:Path=ROOT)->list[str]:
             issues.append('missing/linked/oversized '+path);d[path]=''
         else:d[path]=f.read_text('utf8')
     p,m,dt,t,h,doc,mat,ci,r00=(d[x] for x in PATHS)
+    # HF01: cheap mandatory source checks for Dart analyzer regressions that
+    # previously blocked all hosted Flutter and Android workflows.
+    # A leading /// library documentation comment requires a library directive;
+    # the mode selection is a compile-time constant (prefer_const_declarations).
+    if not (m.count('\nlibrary;\n')==1 and
+            m.split('import ',1)[0].rstrip().endswith('library;')):
+        issues.append('HF01 dangling backend model library documentation comment')
+    if (dt.count("const mode = _selected == 'shizuku' ? InstallerMode.shizuku : InstallerMode.dhizuku;")!=1
+            or "final mode = _selected == 'shizuku'" in dt):
+        issues.append('HF01 backend integration test must use const mode')
     def check(ok,label):
         if not ok:issues.append(label)
     try:ast.parse(h,filename=HOST)

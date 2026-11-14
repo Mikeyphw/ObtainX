@@ -33,7 +33,7 @@ void main() {
       }
     } else if (_mode == 'authorized_read_only' &&
                (_selected == 'shizuku' || _selected == 'dhizuku')) {
-      final mode = _selected == 'shizuku' ? InstallerMode.shizuku : InstallerMode.dhizuku;
+      const mode = _selected == 'shizuku' ? InstallerMode.shizuku : InstallerMode.dhizuku;
       final p = await probeP04BackendAvailability(mode, userInitiated: true)
           .timeout(const Duration(seconds: 30));
       expect(p.state, P04BackendState.authorizedUnqualified);

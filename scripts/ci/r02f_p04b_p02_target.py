@@ -88,6 +88,11 @@ public final class PositiveInstallActivity extends Activity {
     } catch (Exception ignored) {
       status(this,"installer_error");
       if (id>=0) {try {installer.abandonSession(id);} catch (Exception ignore2) {}}
+    } finally {
+      // The status callback is an independent explicit Activity. Leaving this
+      // handoff Activity open strands the Flutter test behind the installer.
+      // Never assume that finishing means the package was installed.
+      finish();
     }
   }
   public static final class StatusActivity extends Activity {

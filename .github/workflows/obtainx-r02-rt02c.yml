@@ -171,6 +171,7 @@ jobs:
             ${{ runner.temp }}/obtainx-rt02c/r02f-p03-failure-diagnostics.json
             ${{ runner.temp }}/obtainx-rt02c/r02f-p04b-external-decline.json
             ${{ runner.temp }}/obtainx-rt02c/r02f-p04b-p02-positive.json
+            ${{ runner.temp }}/obtainx-rt02c/r02f-p04b-p02-diagnostics.json
             ${{ runner.temp }}/obtainx-rt02c/fixtures/p04b_positive_inventory.json
           if-no-files-found: warn
           retention-days: 7

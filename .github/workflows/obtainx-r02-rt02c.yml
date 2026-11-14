@@ -109,6 +109,7 @@ jobs:
           python3 -B scripts/ci/r02_rt02c_fixture.py --out "$RUNNER_TEMP/obtainx-rt02c/fixtures"
           python3 -B scripts/ci/r02g_incompatible_sdk_fixture.py --out "$RUNNER_TEMP/obtainx-rt02c/fixtures"
           python3 -B scripts/ci/r02f_p04b_target.py --out "$RUNNER_TEMP/obtainx-rt02c/fixtures"
+          python3 -B scripts/ci/r02f_p04b_p02_target.py --out "$RUNNER_TEMP/obtainx-rt02c/fixtures"
           test -s "$RUNNER_TEMP/obtainx-rt02c/fixtures/rt02g_inventory.json"
           test -s "$RUNNER_TEMP/obtainx-rt02c/fixtures/fixture_inventory.json"
           test -s "$RUNNER_TEMP/obtainx-rt02c/fixtures/rt02c_inventory.json"
@@ -124,7 +125,7 @@ jobs:
           disk-size: 3072M
           disable-animations: true
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: bash -c 'set -euo pipefail; python3 -B scripts/ci/r02_rt02c_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p02_session_abandon.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02g_incompatible_sdk_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p03_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p03_hosted.py audit --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p04b_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"'
+          script: bash -c 'set -euo pipefail; python3 -B scripts/ci/r02_rt02c_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p02_session_abandon.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02g_incompatible_sdk_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p03_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p03_hosted.py audit --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p04b_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p04b_p02_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"'
       - name: Independently verify archive-to-installer Android package-state receipts
         shell: bash
         run: |
@@ -134,6 +135,7 @@ jobs:
           python3 -B scripts/ci/r02g_incompatible_sdk_hosted.py verify --out "$RUNNER_TEMP/obtainx-rt02c"
           python3 -B scripts/ci/r02f_p03_hosted.py verify --out "$RUNNER_TEMP/obtainx-rt02c"
           python3 -B scripts/ci/r02f_p04b_hosted.py verify --out "$RUNNER_TEMP/obtainx-rt02c"
+          python3 -B scripts/ci/r02f_p04b_p02_hosted.py verify --out "$RUNNER_TEMP/obtainx-rt02c"
       - name: Record only bounded receipt hashes before artifact upload
         if: always()
         shell: bash
@@ -168,5 +170,7 @@ jobs:
             ${{ runner.temp }}/obtainx-rt02c/r02f-p03-android-audit.json
             ${{ runner.temp }}/obtainx-rt02c/r02f-p03-failure-diagnostics.json
             ${{ runner.temp }}/obtainx-rt02c/r02f-p04b-external-decline.json
+            ${{ runner.temp }}/obtainx-rt02c/r02f-p04b-p02-positive.json
+            ${{ runner.temp }}/obtainx-rt02c/fixtures/p04b_positive_inventory.json
           if-no-files-found: warn
           retention-days: 7

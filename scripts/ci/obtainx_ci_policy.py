@@ -32,6 +32,8 @@ RISK_GLOBS = (
     'scripts/ci/r02f_p02_*',
     'scripts/ci/r02f_p03_*',
     'scripts/ci/r02f_p04b_*',
+    'scripts/ci/r02f_p04_*',
+    'lib/services/r02f_p04_backend_availability.dart',
     'scripts/ci/r02g_*',
     'scripts/ci/r02_sdk_retry.py',
     'scripts/ci/obtainx_ci_policy.py',

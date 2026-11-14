@@ -1369,6 +1369,14 @@ class MainActivity : FlutterActivity() {
         expectedPkgName: String?,
         methodResult: MethodChannel.Result
     ) {
+        // P04B P03: refuse a concurrent handoff BEFORE copying cached APKs.
+        // MethodChannel dispatch runs on the Android main thread; replacing
+        // the existing watcher could misattribute delayed broadcasts.
+        val activeExternalWatcher = installWatcher
+        if (activeExternalWatcher != null && !activeExternalWatcher.responded) {
+            methodResult.error("INSTALL_IN_PROGRESS", "An external install handoff is already active", null)
+            return
+        }
         if (apkSourcePaths.isEmpty()) {
             methodResult.error("INSTALL_ERROR", "No APK paths", null)
             return
@@ -1446,6 +1454,11 @@ class MainActivity : FlutterActivity() {
                 // install does not mutate the wrong session.
                 val session = installWatcher ?: return
                 if (session.receiver !== this) return
+                // A custom or wrongly schemed intent is never an Android
+                // package transition, even if the package text matches.
+                if (broadcastIntent.action != Intent.ACTION_PACKAGE_ADDED &&
+                    broadcastIntent.action != Intent.ACTION_PACKAGE_REPLACED) return
+                if (broadcastIntent.data?.scheme != "package") return
                 val changedPkg = broadcastIntent.data?.schemeSpecificPart ?: return
                 if (changedPkg != expectedPkgName || session.responded) return
                 if (session.packageInstallBroadcastReceived) return

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:obtainium/services/r02f_p04_backend_availability.dart';
 import 'package:shizuku_apk_installer/shizuku_apk_installer.dart';
 
 /// Shared entry point for the `shizuku_apk_installer` permission check, used by
@@ -88,4 +89,15 @@ Future<String?> checkShizukuPluginPermission(InstallerMode mode) async {
     // Backoff waits outside the lock so a retrying check doesn't block installs.
     await Future<void>.delayed(Duration(milliseconds: 150 * (attempt + 1)));
   }
+}
+
+/// Explicit-only availability/authorization probe. The production permission
+/// wrapper stays serialized; a missing service never triggers an installer.
+Future<P04BackendAvailability> probeP04BackendAvailability(
+  InstallerMode mode, {required bool userInitiated}) async {
+  if (!userInitiated) {
+    return classifyP04Backend(mode, null, userInitiated: false);
+  }
+  final raw = await checkShizukuPluginPermission(mode);
+  return classifyP04Backend(mode, raw, userInitiated: true);
 }

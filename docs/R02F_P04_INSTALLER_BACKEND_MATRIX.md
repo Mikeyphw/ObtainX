@@ -26,3 +26,13 @@ Before closure preserve P03 six-source hosted checks, RT02C 7/7, P02 2/2, R02G
 real incompatible-SDK rejection and no false success. No forced merge or release.
 Then P05 ABI/locale/density/OBB and physical-device constraints; P06 user-facing
 archive import; thereafter R03 downloads and R04 GitHub Actions source.
+
+## P04 additional availability and explicit authorization checks (combined P03/P04 overlay)
+
+The existing serialized Shizuku/Dhizuku plugin is retained. The default
+API36 CI checks both services are absent and their actual plugin permission
+checks report `services_not_found`. A separate explicit, disposable-emulator
+only probe may record an already-granted backend without asking to install,
+setup device owner or touch a physical device. This stage remains
+**NOT_AVAILABLE / NOT_QUALIFIED** for privileged backend package installation;
+no permission flag is proof of an installed signed package.

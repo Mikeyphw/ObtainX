@@ -44,3 +44,31 @@ original positive receipt verifier remains mandatory and unchanged. Full
 six-workflow exact-head CI and hosted API36 Android acceptance are required.
 P04B P03, Shizuku, Dhizuku, physical-device and release qualification remain
 unqualified. No device writes outside the disposable hosted emulator.
+
+## HF02 — full regression contract repair and early Flutter failure inspection
+
+The PR #16 batch at source `50184478b9932ef725679be8151c93c9e4b55b71`
+completed **4/6 PASS**. R00 source contracts failed two historic mutation tests:
+`test_09_no_package_bytes` (the same independent v2 verifier was now called
+in two locations) and `test_15_no_false_scope` (a document weakening escaped a
+substring-only contract). RT02C verified archives 7/7, P03 Cancel, and P04B
+P01 decline, but P04B P02 failed with `approval_pending`, no verified system
+approval, and nonzero Flutter exit. No exact root cause can be established from
+the privacy-preserving public log alone.
+
+HF02 routes both v2 observations through ONE exact, mutation-tested
+`package_observation(fx,2)` gate and strengthens the qualification-source
+contract to check the exact bold `NOT_QUALIFIED` statement. This preserves the
+existing 16 mutations while adding the full repository regression suite before
+any commit. The Android monitor samples only a disposable target's status
+before declaring early Flutter exit; the refusal receipt includes a strictly
+bounded, allowlisted error **category** and numeric exit code, not raw stdout,
+UI XML, package data or stack traces. The UI approval scanner only runs once
+the explicit callback reports `user_approval_requested` — never merely because
+a native session wrote `approval_pending`. It still requires a verified system
+approval tap, `STATUS_SUCCESS`, and fresh signed v2 PackageManager byte proof.
+
+HF02 does not claim that the underlying Flutter failure has been eliminated.
+An exact-SHA API36 acceptance and full six-workflow success remain required;
+failed or absent receipts remain unqualified. P04B P03, physical
+phones, Shizuku/Dhizuku, merged main and release are still outside scope.

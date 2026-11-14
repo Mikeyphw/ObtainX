@@ -38,15 +38,43 @@ def normalize_target_status(observation):
     value=observation.get('status') if isinstance(observation,dict) else None
     return value if value in TARGET_STATES else 'unrecognized_or_missing'
 
+# Never upload private Flutter output. Classify only narrowly enumerated
+# tool failure types and exact non-sensitive milestone markers.
+FLUTTER_FAILURE_CATEGORIES=(
+    ('DEVICE_DISCONNECTED', ('lost connection to device','device disconnected',
+                             'device went offline')),
+    ('PLATFORM_CHANNEL', ('missingpluginexception','platformexception(')),
+    ('DART_TEST_ASSERTION', ('testfailure','expected:','which:')),
+    ('DART_UNHANDLED', ('unhandled exception','[e] exception was thrown',
+                        'uncaught exception')),
+    ('FLUTTER_RUNNER', ('compilation failed','failed to build',
+                        'could not start the dart vm')),
+    ('ANDROID_RUNTIME', ('fatal exception:','process crash',
+                         'activity has been destroyed')),
+    ('TIMEOUT', ('timeoutexception','test timed out','deadline exceeded')),
+)
+
+def private_flutter_failure_kind(path):
+    if not path.is_file(): return 'NO_PRIVATE_LOG'
+    # Tail only: keep memory bounded even on broken, runaway Flutter logging.
+    with path.open('rb') as file:
+        file.seek(0,2)
+        file.seek(max(0,file.tell()-98304))
+        tail=file.read(98304).decode('utf8','replace').lower()
+    for kind,patterns in FLUTTER_FAILURE_CATEGORIES:
+        if any(pattern in tail for pattern in patterns):return kind
+    return 'UNCLASSIFIED_PRIVATE_FAILURE'
+
 def failure_report(out,source,runid,stage,started,approvals,last_status,
-                   polling_errors,approval_scans,foreground_recovered,log,reason):
+                   polling_errors,approval_scans,foreground_recovered,log,reason,
+                   flutter_exit_code=None):
     # Only invariant stage identifiers, bounded counts and a hash of private
     # output are retained; raw stdout, UI XML, stack traces and URLs are not.
     approved_stages={'INSTALL_DISPOSABLE_TARGET','PREPARE_FLUTTER',
         'FLUTTER_BUILD','WAITING_FOR_HANDOFF','HANDOFF_STARTED',
         'APPROVAL_PENDING','USER_APPROVAL_REQUESTED',
         'ANDROID_INSTALL_COMPLETED','FLUTTER_BRIDGE_COMPLETED',
-        'FOREGROUND_RECOVERY','UNCLASSIFIED'}
+        'FOREGROUND_RECOVERY','FLUTTER_EXIT_EARLY','UNCLASSIFIED'}
     stage=stage if stage in approved_stages else 'UNCLASSIFIED'
     log_hash=sha(log) if log is not None and log.is_file() else None
     data={'schema':1,'status':'REFUSED_NOT_QUALIFIED',
@@ -58,7 +86,11 @@ def failure_report(out,source,runid,stage,started,approvals,last_status,
           'target_status':last_status if last_status in TARGET_STATES else 'unrecognized_or_missing',
           'target_poll_failures':polling_errors,'approval_scans':approval_scans,
           'foreground_recovered':bool(foreground_recovered),
-          'private_log_sha256':log_hash,'real_android_positive_qualified':False,
+          'private_log_sha256':log_hash,
+          'flutter_failure_kind':private_flutter_failure_kind(log) if log is not None else 'NO_PRIVATE_LOG',
+          'flutter_exit_code':flutter_exit_code if type(flutter_exit_code) is int and
+                                  0<=flutter_exit_code<=255 else None,
+          'real_android_positive_qualified':False,
           'release_qualified':False,'raw_logs_uploaded':False}
     path=out/DIAGNOSTIC
     path.write_text(json.dumps(data,sort_keys=True,indent=2)+'\n')
@@ -154,6 +186,10 @@ def run(out:Path)->int:
         base.adb('shell','appops','set',target.PACKAGE,'REQUEST_INSTALL_PACKAGES','allow',timeout=30)
         base.adb('install','-r','-t',str(fx/'base_v1.apk'),timeout=90)
         before=package_observation(fx,1)
+        # One reviewable, mutation-tested entry point for both the foreground
+        # recovery barrier and final independently verified v2 observation.
+        def observe_signed_v2():
+            return package_observation(fx,2)
         FixtureServer.apk=fx/'base_v2.apk'
         server=ThreadingHTTPServer(('127.0.0.1',PORT),FixtureServer)
         threading.Thread(target=server.serve_forever,daemon=True).start()
@@ -171,11 +207,8 @@ def run(out:Path)->int:
                 # The Flutter call may finish before a separate Android
                 # PackageInstaller approval callback arrives. Continue its
                 # independent system verification after Flutter exits.
-                if process.poll() is not None and process.returncode != 0:
-                    raise Refused('Flutter external handoff exited unsuccessfully')
-                if (process.poll() is not None and approvals>0 and
-                    last_status=='system_status_success'):
-                    break
+                # A failed Flutter runner is NOT an install result. First
+                # observe the disposable Android state for precise diagnostics.
                 elapsed=int(time.monotonic()-started)
                 tail=log.read_text('utf8','replace')[-32000:]
                 if MARKERS[-1] in tail:stage='FLUTTER_BRIDGE_COMPLETED'
@@ -198,8 +231,16 @@ def run(out:Path)->int:
                     if last_status=='system_status_success':
                         stage='ANDROID_INSTALL_COMPLETED'
                         if terminal_observed_at is None:terminal_observed_at=time.monotonic()
+                if process.poll() is not None and process.returncode != 0:
+                    stage='FLUTTER_EXIT_EARLY'
+                    raise Refused('Flutter external handoff exited unsuccessfully')
+                if (process.poll() is not None and approvals>0 and
+                    last_status=='system_status_success'):
+                    break
+                # Only scan when the disposable native callback has actually
+                # requested system approval, not merely after session.commit().
                 if approvals==0 and observed is not None and observed.get('status') in (
-                        'approval_pending','user_approval_requested'):
+                        'user_approval_requested',):
                     approval_scans+=1
                     if approve_if_verified():
                         approvals+=1
@@ -212,7 +253,7 @@ def run(out:Path)->int:
                     not foreground_recovered and process.poll() is None and
                     terminal_observed_at is not None and
                     time.monotonic()-terminal_observed_at>=5):
-                    package_observation(fx,2)
+                    observe_signed_v2()
                     stage='FOREGROUND_RECOVERY'
                     base.adb('shell','am','start','-f','0x24000000','-n',
                              base.APP+'/dev.imranr.obtainium.MainActivity',timeout=30)
@@ -248,7 +289,7 @@ def run(out:Path)->int:
              'sha256':inv['files']['base_v2.apk']['sha256'],
              'status':'system_status_success'},
              'disposable third-party target did not report Android status success')
-        after=package_observation(fx,2)
+        after=observe_signed_v2()
         need(before['version_code']==1 and after['version_code']==2 and
              before['base_sha256'] != after['base_sha256'],
              'independent signed v1 to v2 package replacement not proved')
@@ -272,7 +313,8 @@ def run(out:Path)->int:
             'TARGET_FAILURE' if 'target' in str(exc).lower() else (
             'PACKAGE_MISMATCH' if 'package' in str(exc).lower() else 'OTHER'))
         failure_report(out,source,runid,stage,started,approvals,last_status,
-                       polling_errors,approval_scans,foreground_recovered,log,reason)
+                       polling_errors,approval_scans,foreground_recovered,log,reason,
+                       process.returncode if process is not None else None)
         raise
     finally:
         if process is not None and process.poll() is None:process.kill();process.wait(timeout=15)

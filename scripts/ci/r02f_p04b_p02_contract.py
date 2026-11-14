@@ -79,6 +79,8 @@ def inspect(root:Path=ROOT)->list[str]:
               'prior decline verification must be retained and precede positive verification')
     check('run: python3 -B scripts/ci/r02f_p04b_p02_contract.py --check' in ci,
           'P04B P02 source contract missing from mandatory CI')
+    check('**NOT_QUALIFIED** until hosted API 36 workflow actually passes.' in doc,
+          'positive-path Android qualification statement was weakened')
     check('NOT_QUALIFIED' in doc and 'P04B P03' in doc and 'Shizuku' in doc and
           'Dhizuku' in doc and 'physical' in doc,'scope disclosure missing')
     return problems

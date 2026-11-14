@@ -34,6 +34,22 @@ def inspect(root:Path=ROOT)->list[str]:
         if s=='Installer.abandonSession':continue
         check(s in t,'positive target missing '+s)
     check('installer.abandonSession(id)' in t,'session cleanup on failure missing')
+    check('PendingIntent.getBroadcast(this,id,callback,' in t and
+          'new Intent(this, StatusReceiver.class)' in t and
+          'StatusReceiver extends BroadcastReceiver' in t and
+          '<receiver android:name=".PositiveInstallActivity$StatusReceiver" android:exported="false"/>' in t and
+          'PendingIntent.getActivity(this,id,callback,' not in t,
+          'HF03 mutable broadcast status callback missing')
+    check('SHOW_APPROVAL.equals(getIntent().getAction())' in t and
+          'pendingApprovalIntent=approve;' in t and
+          '"user_approval_requested"' in t and
+          'PackageInstaller.STATUS_PENDING_USER_ACTION' in t,
+          'HF03 native callback identity/user approval barrier missing')
+    check("'user_approval_requested',):" in h and
+          'dev.bikram.obtainx.P04B_POSITIVE_SHOW_APPROVAL' in h and
+          "'-n',target.PACKAGE+'/'+target.ACTIVITY" in h and
+          'if approve_if_verified():' in h,
+          'HF03 verified system UI approval launch missing')
     check('Runtime.getRuntime().exec(' not in t and 'ProcessBuilder(' not in t and
           'pm install' not in t and 'su -c' not in t,
           'positive target attempted privileged shell path')

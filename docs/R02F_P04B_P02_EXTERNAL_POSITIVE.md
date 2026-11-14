@@ -72,3 +72,29 @@ HF02 does not claim that the underlying Flutter failure has been eliminated.
 An exact-SHA API36 acceptance and full six-workflow success remain required;
 failed or absent receipts remain unqualified. P04B P03, physical
 phones, Shizuku/Dhizuku, merged main and release are still outside scope.
+
+## HF03 — Android PackageInstaller broadcast callback and explicit UI launch
+
+HF02 PR #17 run `43638414384` (source `3af3de8c26a2164d3cbdecd8da63c982d4517f1e`)
+passed R00 contracts and archives 7/7, P03 UI Cancel, and external decline,
+but the positive target remained in `approval_pending` for 420 seconds with
+zero user-approval callbacks, scans, or taps. This is *not* a positive pass.
+
+HF03 sends the Android `Session.commit()` mutable status IntentSender to a
+manifest-declared, nonexported `BroadcastReceiver` instead of a background
+Activity. The receiver records actual `STATUS_PENDING_USER_ACTION` and holds
+the OS-provided approval Intent only in memory, without persisting the token.
+After observing that exact native callback, the hosted API36 runner may
+bring the disposable external target Activity foreground once, causing it to
+launch the OS-provided permission UI. The runner still accepts a tap only in
+a verified system-package install dialog. A missing callback, process death,
+missing system UI, or absence of installed signed-v2 bytes fails closed.
+
+The receiver, activity UI, and PackageInstaller callback do not themselves
+qualify installation. The real Android user-approval tap, native
+`STATUS_SUCCESS`, current installed version 2, exact installed base APK SHA256,
+Flutter's unverified handoff result, and independent offline receipt remain
+mandatory. The existing archive, decline, SDK and cancellation gates remain.
+The full Python suite must pass prior to commit and six exact-head hosted
+workflows must pass before qualification. Physical devices, privileged/remote
+installers, Shizuku/Dhizuku, release and main merge remain outside scope.

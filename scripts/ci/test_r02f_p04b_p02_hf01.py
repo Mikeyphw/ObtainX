@@ -35,7 +35,7 @@ class PositivePathHF01(unittest.TestCase):
     def test_01_disposable_activity_finishes_after_session_commit(self):
         source=TARGET.read_text()
         start=source.index('session.commit(pending.getIntentSender())')
-        end=source.index('public static final class StatusActivity',start)
+        end=source.index('public static final class StatusReceiver',start)
         segment=source[start:end]
         self.assertIn('} finally {',segment)
         self.assertIn('finish();',segment)

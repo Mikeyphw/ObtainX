@@ -74,7 +74,8 @@ def failure_report(out,source,runid,stage,started,approvals,last_status,
         'FLUTTER_BUILD','WAITING_FOR_HANDOFF','HANDOFF_STARTED',
         'APPROVAL_PENDING','USER_APPROVAL_REQUESTED',
         'ANDROID_INSTALL_COMPLETED','FLUTTER_BRIDGE_COMPLETED',
-        'FOREGROUND_RECOVERY','FLUTTER_EXIT_EARLY','UNCLASSIFIED'}
+        'FOREGROUND_RECOVERY','FLUTTER_EXIT_EARLY',
+        'APPROVAL_ACTIVITY_LAUNCH','UNCLASSIFIED'}
     stage=stage if stage in approved_stages else 'UNCLASSIFIED'
     log_hash=sha(log) if log is not None and log.is_file() else None
     data={'schema':1,'status':'REFUSED_NOT_QUALIFIED',
@@ -179,6 +180,7 @@ def run(out:Path)->int:
     server=None;process=None;approvals=0
     stage='INSTALL_DISPOSABLE_TARGET';last_status='unrecognized_or_missing'
     polling_errors=0;approval_scans=0;foreground_recovered=False
+    approval_activity_started=False
     started=time.monotonic()
     log=out/'r02f-p04b-p02-private.log'
     try:
@@ -241,6 +243,17 @@ def run(out:Path)->int:
                 # requested system approval, not merely after session.commit().
                 if approvals==0 and observed is not None and observed.get('status') in (
                         'user_approval_requested',):
+                    # This is a native PackageInstaller callback, not the
+                    # earlier "approval_pending" status written before commit.
+                    # Host only summons the disposable target's already-
+                    # prepared approval UI; neither shell nor Dart installs.
+                    if not approval_activity_started:
+                        stage='APPROVAL_ACTIVITY_LAUNCH'
+                        base.adb('shell','am','start','-a',
+                                 'dev.bikram.obtainx.P04B_POSITIVE_SHOW_APPROVAL',
+                                 '-n',target.PACKAGE+'/'+target.ACTIVITY,timeout=30)
+                        approval_activity_started=True
+                        print('OX_P04B_P02_NATIVE_CALLBACK_APPROVAL_UI_REQUESTED',flush=True)
                     approval_scans+=1
                     if approve_if_verified():
                         approvals+=1

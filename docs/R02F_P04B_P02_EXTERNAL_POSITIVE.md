@@ -20,3 +20,27 @@ will cover delayed broadcasts, spoof/mismatched versions and parallel handoffs.
 Shizuku, Dhizuku and physical devices remain unqualified, as do release and
 self-update. No device-owner, root, shell-privileged install or personal package
 operation is authorized. This overlay does not merge or publish a release.
+
+## HF01 — lifecycle recovery and stage-bound failure diagnostics
+
+The P04B P02 first hosted positive attempt (GitHub run `43554835212`,
+November 14, 2026) timed out after the P03 user-UI cancellation and P04B P01
+external-decline tests passed. **Do not classify that run as P04B P02 PASS.**
+
+HF01 repairs the disposable Java installer target to finish its source Activity
+after the system PackageInstaller session is submitted. The independent explicit
+`StatusActivity` still owns the actual user-approval callback. The hosted runner
+records a bounded positive-test stage and reads only the disposable target's
+limited shared-preference status. It never guesses that an Android session was
+approved. Only if actual `system_status_success`, a recorded verified system UI
+tap, and a fresh independent v2 PackageManager+SHA256 inspection all exist may
+it restore the original Flutter test Activity using CLEAR_TOP/SINGLE_TOP.
+
+On any refusal, `r02f-p04b-p02-diagnostics.json` is uploaded (not private
+Flutter stdout, signed APKs, emulator UI XML or signing keys). It records stage,
+strictly classified target state, bounded counters and private-log SHA256,
+`REFUSED_NOT_QUALIFIED`, and false qualification flags. On a genuine pass, the
+original positive receipt verifier remains mandatory and unchanged. Full
+six-workflow exact-head CI and hosted API36 Android acceptance are required.
+P04B P03, Shizuku, Dhizuku, physical-device and release qualification remain
+unqualified. No device writes outside the disposable hosted emulator.

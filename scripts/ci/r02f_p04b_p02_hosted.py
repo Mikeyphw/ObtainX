@@ -21,6 +21,53 @@ class Refused(RuntimeError): pass
 def need(ok,msg):
     if not ok:raise Refused(msg)
 def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
+
+# Bounded, runner-only diagnostic schema. Never upload the Flutter log itself.
+DIAGNOSTIC='r02f-p04b-p02-diagnostics.json'
+TARGET_STATES=frozenset({
+    'started','approval_pending','user_approval_requested',
+    'system_status_success','system_status_failure','installer_error',
+    'refused_content_grant','missing_approval_intent','approval_launch_failed',
+})
+FAILURE_STATES=frozenset({
+    'system_status_failure','installer_error','refused_content_grant',
+    'missing_approval_intent','approval_launch_failed',
+})
+
+def normalize_target_status(observation):
+    value=observation.get('status') if isinstance(observation,dict) else None
+    return value if value in TARGET_STATES else 'unrecognized_or_missing'
+
+def failure_report(out,source,runid,stage,started,approvals,last_status,
+                   polling_errors,approval_scans,foreground_recovered,log,reason):
+    # Only invariant stage identifiers, bounded counts and a hash of private
+    # output are retained; raw stdout, UI XML, stack traces and URLs are not.
+    approved_stages={'INSTALL_DISPOSABLE_TARGET','PREPARE_FLUTTER',
+        'FLUTTER_BUILD','WAITING_FOR_HANDOFF','HANDOFF_STARTED',
+        'APPROVAL_PENDING','USER_APPROVAL_REQUESTED',
+        'ANDROID_INSTALL_COMPLETED','FLUTTER_BRIDGE_COMPLETED',
+        'FOREGROUND_RECOVERY','UNCLASSIFIED'}
+    stage=stage if stage in approved_stages else 'UNCLASSIFIED'
+    log_hash=sha(log) if log is not None and log.is_file() else None
+    data={'schema':1,'status':'REFUSED_NOT_QUALIFIED',
+          'source_sha':source,'run_id':runid,'stage':stage,
+          'reason':reason if reason in ('TIMEOUT','TARGET_FAILURE','FLUTTER_FAILURE',
+             'APPROVAL_MISSING','PACKAGE_MISMATCH','OTHER') else 'OTHER',
+          'elapsed_seconds':min(max(0,int(time.monotonic()-started)),3600),
+          'approval_taps':approvals,
+          'target_status':last_status if last_status in TARGET_STATES else 'unrecognized_or_missing',
+          'target_poll_failures':polling_errors,'approval_scans':approval_scans,
+          'foreground_recovered':bool(foreground_recovered),
+          'private_log_sha256':log_hash,'real_android_positive_qualified':False,
+          'release_qualified':False,'raw_logs_uploaded':False}
+    path=out/DIAGNOSTIC
+    path.write_text(json.dumps(data,sort_keys=True,indent=2)+'\n')
+    print('OX_P04B_P02_DIAGNOSTIC_REFUSAL stage='+stage+
+          ' reason='+data['reason']+' target_status='+data['target_status']+
+          ' taps='+str(approvals)+' poll_failures='+str(polling_errors)+
+          ' scans='+str(approval_scans)+
+          ' log_sha256='+str(log_hash),flush=True)
+    return data
 class FixtureServer(BaseHTTPRequestHandler):
     apk:Path
     def log_message(self,*args):pass
@@ -98,6 +145,10 @@ def run(out:Path)->int:
         need(sha(fx/name)==want,'source-bound signed fixture mutated')
     dest=out/RECEIPT;need(not dest.exists() and not dest.is_symlink(),'stale positive receipt')
     server=None;process=None;approvals=0
+    stage='INSTALL_DISPOSABLE_TARGET';last_status='unrecognized_or_missing'
+    polling_errors=0;approval_scans=0;foreground_recovered=False
+    started=time.monotonic()
+    log=out/'r02f-p04b-p02-private.log'
     try:
         base.adb('install','-r','-t',str(fx/target.APK),timeout=90)
         base.adb('shell','appops','set',target.PACKAGE,'REQUEST_INSTALL_PACKAGES','allow',timeout=30)
@@ -107,28 +158,78 @@ def run(out:Path)->int:
         server=ThreadingHTTPServer(('127.0.0.1',PORT),FixtureServer)
         threading.Thread(target=server.serve_forever,daemon=True).start()
         base.adb('reverse',f'tcp:{PORT}',f'tcp:{PORT}')
-        log=out/'r02f-p04b-p02-private.log'
+        stage='PREPARE_FLUTTER'
         argv=['flutter','test','integration_test/r02f_p04b_p02_external_positive_test.dart',
               '-d',base.SERIAL,'--flavor','normal','--no-pub','--reporter','expanded',
               '--dart-define=OX_P04B_P02_BASE_SHA='+inv['files']['base_v2.apk']['sha256']]
         with log.open('wb') as writer:
             process=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=writer,stderr=subprocess.STDOUT)
-            deadline=time.monotonic()+720
-            while process.poll() is None and time.monotonic()<deadline:
-                # Poll for an explicit PackageInstaller approval only after the
-                # disposable target reports that it committed its session.
+            deadline=time.monotonic()+420
+            next_report=0
+            terminal_observed_at=None
+            while time.monotonic()<deadline:
+                # The Flutter call may finish before a separate Android
+                # PackageInstaller approval callback arrives. Continue its
+                # independent system verification after Flutter exits.
+                if process.poll() is not None and process.returncode != 0:
+                    raise Refused('Flutter external handoff exited unsuccessfully')
+                if (process.poll() is not None and approvals>0 and
+                    last_status=='system_status_success'):
+                    break
+                elapsed=int(time.monotonic()-started)
+                tail=log.read_text('utf8','replace')[-32000:]
+                if MARKERS[-1] in tail:stage='FLUTTER_BRIDGE_COMPLETED'
+                elif MARKERS[0] in tail:stage='HANDOFF_STARTED'
+                elif 'Running Gradle task' in tail and stage=='PREPARE_FLUTTER':stage='FLUTTER_BUILD'
+                # ADB reads only the disposable CI target's small shared-pref
+                # receipt; failed reads are measured rather than ignored.
                 observed=None
                 try:observed=target_observation()
-                except (Refused,base.Refused,subprocess.TimeoutExpired,ValueError,ET.ParseError):pass
+                except (Refused,base.Refused,subprocess.TimeoutExpired,ValueError,ET.ParseError):
+                    polling_errors+=1
+                if observed is not None:
+                    last_status=normalize_target_status(observed)
+                    need(last_status in TARGET_STATES,'unrecognized disposable target state')
+                    if last_status in FAILURE_STATES:
+                        stage='UNCLASSIFIED'
+                        raise Refused('disposable external target reported '+last_status)
+                    if last_status=='approval_pending':stage='APPROVAL_PENDING'
+                    if last_status=='user_approval_requested':stage='USER_APPROVAL_REQUESTED'
+                    if last_status=='system_status_success':
+                        stage='ANDROID_INSTALL_COMPLETED'
+                        if terminal_observed_at is None:terminal_observed_at=time.monotonic()
                 if approvals==0 and observed is not None and observed.get('status') in (
                         'approval_pending','user_approval_requested'):
+                    approval_scans+=1
                     if approve_if_verified():
                         approvals+=1
                         print('OX_P04B_P02_REAL_SYSTEM_APPROVAL_TAPPED',flush=True)
+                # The disposable installer may finish its Activity without
+                # returning focus to the Flutter test. Only restore focus when
+                # the actual system status AND signed installed bytes confirm v2;
+                # CLEAR_TOP/SINGLE_TOP keeps the original test activity alive.
+                if (last_status=='system_status_success' and approvals>0 and
+                    not foreground_recovered and process.poll() is None and
+                    terminal_observed_at is not None and
+                    time.monotonic()-terminal_observed_at>=5):
+                    package_observation(fx,2)
+                    stage='FOREGROUND_RECOVERY'
+                    base.adb('shell','am','start','-f','0x24000000','-n',
+                             base.APP+'/dev.imranr.obtainium.MainActivity',timeout=30)
+                    foreground_recovered=True
+                    print('OX_P04B_P02_SIGNED_V2_VERIFIED_FLUTTER_FOCUS_RETURNED',flush=True)
+                if elapsed>=next_report:
+                    print('OX_P04B_P02_PROGRESS stage='+stage+' elapsed='+str(elapsed)+
+                          's target='+last_status+' approvals='+str(approvals)+
+                          ' scans='+str(approval_scans)+
+                          ' poll_errors='+str(polling_errors),flush=True)
+                    next_report=elapsed+25
                 time.sleep(3)
             if process.poll() is None:
                 process.kill();process.wait(timeout=15)
-                raise Refused('hosted Flutter external positive test timed out')
+                raise Refused('hosted Flutter external positive test timed out stage='+stage)
+            need(approvals>0 and last_status=='system_status_success',
+                 'hosted external install approval/status timed out stage='+stage)
         private=log.read_text('utf8','replace')
         need(process.returncode==0 and 'All tests passed!' in private and
              all(private.count(marker)==1 for marker in MARKERS),
@@ -164,6 +265,15 @@ def run(out:Path)->int:
         dest.write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
         print('OX_P04B_P02_REAL_EXTERNAL_SYSTEM_APPROVED_SIGNED_V2_BYTES_PASS',flush=True)
         return 0
+    except (OSError,ValueError,KeyError,TypeError,Refused,base.Refused,subprocess.TimeoutExpired) as exc:
+        # The independent positive receipt remains absent. This cannot be
+        # misread as runtime approval or a release qualification.
+        reason='TIMEOUT' if 'timed out' in str(exc).lower() else (
+            'TARGET_FAILURE' if 'target' in str(exc).lower() else (
+            'PACKAGE_MISMATCH' if 'package' in str(exc).lower() else 'OTHER'))
+        failure_report(out,source,runid,stage,started,approvals,last_status,
+                       polling_errors,approval_scans,foreground_recovered,log,reason)
+        raise
     finally:
         if process is not None and process.poll() is None:process.kill();process.wait(timeout=15)
         if server is not None:server.shutdown();server.server_close()

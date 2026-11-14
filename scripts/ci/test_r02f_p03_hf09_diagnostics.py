@@ -92,9 +92,26 @@ class DiagnosticsTests(unittest.TestCase):
     def test_hosted_runner_reports_before_refusing(self):
         if not H.is_file():self.skipTest('standalone diagnostic module test')
         s=H.read_text()
-        self.assertIn('write_failure(out, log, process.returncode, stage, source, runid)',s)
-        self.assertLess(s.index('write_failure(out, log, process.returncode'),s.index("raise Refused('Flutter P03 app UI test failed"))
-        self.assertNotIn('print(text)',s)
+        old_call = 'write_failure(out, log, process.returncode, stage, source, runid)'
+        direct_call = 'write_failure(out, log, process.returncode, final_stage, source, runid)'
+        recompute = 'for marker, label in reversed(tuple(zip(MARKERS,'
+        self.assertNotIn('print(text)', s)
+        self.assertIn("raise Refused('Flutter P03 app UI test failed", s)
+        if recompute in s:
+            self.assertIn('final_stage = stage', s)
+            if direct_call in s:
+                call = direct_call
+                self.assertLess(s.index('final_stage = stage'), s.index(call))
+            else:
+                call = old_call
+                assign = 'stage = final_stage\n            diag = ' + call
+                self.assertIn(assign, s)
+                self.assertLess(s.index('final_stage = stage'), s.index(assign))
+        else:
+            call = old_call
+            self.assertIn(call, s)
+        self.assertEqual(s.count(old_call) + s.count(direct_call), 1)
+        self.assertLess(s.index(call), s.index("raise Refused('Flutter P03 app UI test failed"))
     def test_workflow_artifact_keeps_private_log_excluded(self):
         if not WF.is_file():self.skipTest('standalone diagnostic module test')
         w=WF.read_text()

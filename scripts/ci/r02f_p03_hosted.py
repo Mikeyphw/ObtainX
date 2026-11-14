@@ -151,7 +151,18 @@ def run(out: Path) -> int:
                 process.kill();process.wait(timeout=20)
                 raise Refused('Flutter runtime P03 timed out in '+stage)
         text=log.read_text('utf-8','replace')
+        # Flutter may finish before the next three-second progress iteration;
+        # report the actual last Dart milestone from the full private log.
+        final_stage = stage
+        for marker, label in reversed(tuple(zip(MARKERS, (
+            'APP_ROUTE_OWNER_SURVIVED', 'PRODUCTION_PROVIDER_INSTALL_STARTED',
+            'APPROVAL_PENDING', 'UI_CANCEL_TAPPED', 'UI_CANCEL_COMPLETED',
+        )))):
+            if marker in text:
+                final_stage = label
+                break
         if process.returncode != 0 or 'All tests passed!' not in text:
+            stage = final_stage
             diag = write_failure(out, log, process.returncode, stage, source, runid)
             raise Refused('Flutter P03 app UI test failed; diagnostic_categories='+
                           ','.join(diag['failure_categories'])+

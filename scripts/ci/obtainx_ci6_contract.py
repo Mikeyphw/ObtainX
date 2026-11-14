@@ -36,6 +36,9 @@ GROUPS = (
     'scripts/ci/r02f_p04b_*',
     'scripts/ci/r02f_p04_*',
     'lib/services/r02f_p04_backend_availability.dart',
+    'scripts/ci/r02f_p05_*',
+    'lib/services/r02f_p05_*',
+    'test/r02f_p05_*',
     'scripts/ci/r02g_*',
 )
 

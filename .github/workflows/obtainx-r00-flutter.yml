@@ -112,6 +112,10 @@ jobs:
         run: flutter test --no-pub test/r02d_device_compatibility_test.dart
       - name: Execute RT02E verified OBB delivery and cancellation contracts
         run: flutter test --no-pub test/r02e_verified_obb_delivery_test.dart
+      - name: Verify P05 ABI SDK locale density and OBB refusal decisions
+        run: flutter test --no-pub test/r02f_p05_device_profile_test.dart
+      - name: Verify P05 OBB symlink ancestor and SHA safety
+        run: flutter test --no-pub test/r02f_p05_obb_ancestor_test.dart
       - name: Execute RT02F external handoff and cancelled-platform outcomes
         run: flutter test --no-pub test/r02f_external_handoff_test.dart
       - name: Execute full Flutter test suite

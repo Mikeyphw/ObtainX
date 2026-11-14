@@ -32,6 +32,7 @@ import 'package:obtainium/providers/virustotal_provider.dart';
 import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/services/install_precommit_gate.dart';
+import 'package:obtainium/services/r02f_p05_device_profile.dart';
 import 'package:obtainium/services/verified_obb_delivery.dart';
 import 'package:obtainium/theme/app_dialog_theme.dart';
 import 'package:obtainium/widgets/app_toast.dart';
@@ -1998,6 +1999,12 @@ extension AppsProviderInstall on AppsProvider {
     final int? uiDensityDpi = views.isNotEmpty
         ? (views.first.devicePixelRatio * 160).round()
         : null;
+    validateP05DeviceProfile(
+      sdk: device.version.sdkInt,
+      supportedAbis: device.supportedAbis,
+      locales: uiLocales,
+      densityDpi: uiDensityDpi,
+    );
     final plan = resolveInstallBundlePlan(
       members: members,
       format: format,
@@ -2006,6 +2013,9 @@ extension AppsProviderInstall on AppsProvider {
       deviceLocales: uiLocales,
       deviceDensityDpi: uiDensityDpi,
       expectedPackageName: expectedPackageName,
+    );
+    verifyP05SdkEnvelope(
+      plan: plan, members: members, deviceSdk: device.version.sdkInt,
     );
     final baseInfo = infoByPath[plan.baseApkPath];
     if (baseInfo == null) {

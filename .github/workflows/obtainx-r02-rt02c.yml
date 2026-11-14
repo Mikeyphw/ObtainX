@@ -20,6 +20,9 @@ on:
       - 'scripts/ci/r02f_p04b_*'
       - 'scripts/ci/r02f_p04_*'
       - 'lib/services/r02f_p04_backend_availability.dart'
+      - 'scripts/ci/r02f_p05_*'
+      - 'lib/services/r02f_p05_*'
+      - 'test/r02f_p05_*'
       - 'scripts/ci/r02g_*'
       - 'scripts/ci/r02_sdk_retry.py'
       - 'scripts/ci/obtainx_ci_policy.py'
@@ -129,7 +132,7 @@ jobs:
           disk-size: 3072M
           disable-animations: true
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: bash -c 'set -euo pipefail; python3 -B scripts/ci/r02_rt02c_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p02_session_abandon.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02g_incompatible_sdk_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p03_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p03_hosted.py audit --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p04b_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p04b_p02_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p04b_p03_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p04_backends_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"'
+          script: bash -c 'set -euo pipefail; python3 -B scripts/ci/r02_rt02c_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p02_session_abandon.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02g_incompatible_sdk_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p03_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p03_hosted.py audit --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p04b_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p04b_p02_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p04b_p03_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p04_backends_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"; python3 -B scripts/ci/r02f_p05_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02c"'
       - name: Independently verify archive-to-installer Android package-state receipts
         shell: bash
         run: |
@@ -142,6 +145,7 @@ jobs:
           python3 -B scripts/ci/r02f_p04b_p02_hosted.py verify --out "$RUNNER_TEMP/obtainx-rt02c"
           python3 -B scripts/ci/r02f_p04b_p03_hosted.py verify --out "$RUNNER_TEMP/obtainx-rt02c"
           python3 -B scripts/ci/r02f_p04_backends_hosted.py verify --out "$RUNNER_TEMP/obtainx-rt02c"
+          python3 -B scripts/ci/r02f_p05_hosted.py verify --out "$RUNNER_TEMP/obtainx-rt02c"
       - name: Record only bounded receipt hashes before artifact upload
         if: always()
         shell: bash
@@ -180,6 +184,7 @@ jobs:
             ${{ runner.temp }}/obtainx-rt02c/r02f-p04b-p02-diagnostics.json
             ${{ runner.temp }}/obtainx-rt02c/r02f-p04b-p03-adversarial.json
             ${{ runner.temp }}/obtainx-rt02c/r02f-p04-backend-availability.json
+            ${{ runner.temp }}/obtainx-rt02c/r02f-p05-device-profile.json
             ${{ runner.temp }}/obtainx-rt02c/r02f-p04b-p03-diagnostics.json
             ${{ runner.temp }}/obtainx-rt02c/fixtures/p04b_positive_inventory.json
             ${{ runner.temp }}/obtainx-rt02c/fixtures/p04b_p03/p04b_target_inventory.json

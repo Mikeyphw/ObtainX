@@ -6,6 +6,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart';
 import 'package:obtainium/app_sources/gradle_app_id.dart';
+import 'package:obtainium/services/r04_github_actions.dart';
 import 'package:obtainium/app_sources/html.dart';
 import 'package:obtainium/components/generated_form_model.dart';
 import 'package:obtainium/custom_errors.dart';
@@ -180,6 +181,17 @@ class GitHub extends AppSource {
     );
   }
 
+  // R04 explicit source channels. Missing keys keep legacy release behavior.
+  static const String r04SourceModeKey = 'r04GitHubSourceMode';
+  static const String r04ModeReleases = 'releases';
+  static const String r04ModePrereleases = 'prereleases';
+  static const String r04ModeActions = 'actions';
+  static const String r04PrereleaseOnlyKey = 'r04PrereleasesOnly';
+  static const String r04WorkflowKey = 'r04Workflow';
+  static const String r04BranchKey = 'r04Branch';
+  static const String r04RunIdKey = 'r04RunId';
+  static const String r04ArtifactFilterKey = 'r04ArtifactNamePattern';
+
   static const String githubCredsKey = 'github-creds';
   static const String githubReqPrefixKey = 'GHReqPrefix';
   static const String githubReqPrefixUseTokenKey = 'GHReqPrefixUseToken';
@@ -260,6 +272,41 @@ class GitHub extends AppSource {
   @override
   List<List<GeneratedFormItem>>
   get additionalSourceAppSpecificSettingFormItems => [
+    [
+      GeneratedFormDropdown(
+        r04SourceModeKey,
+        const [
+          MapEntry(r04ModeReleases, 'Releases'),
+          MapEntry(r04ModePrereleases, 'Prereleases'),
+          MapEntry(r04ModeActions, 'Actions'),
+        ],
+        label: 'GitHub source channel',
+        value: r04ModeReleases,
+      ),
+    ],
+    [
+      GeneratedFormTextField(
+        r04WorkflowKey,
+        label: 'Actions workflow (ID or exact name)',
+        required: false,
+      ),
+      GeneratedFormTextField(
+        r04BranchKey,
+        label: 'Actions branch (blank = repository default)',
+        required: false,
+      ),
+      GeneratedFormTextField(
+        r04RunIdKey,
+        label: 'Specific successful Actions run ID (optional)',
+        required: false,
+      ),
+      GeneratedFormTextField(
+        r04ArtifactFilterKey,
+        label: 'Actions artifact name filter (RegEx)',
+        required: false,
+        additionalValidators: [(value) => regExValidator(value)],
+      ),
+    ],
     [
       GeneratedFormSwitch(
         'includePrereleases',
@@ -1038,6 +1085,11 @@ class GitHub extends AppSource {
         prereleaseSkipped++;
         continue;
       }
+      if (additionalSettings[r04PrereleaseOnlyKey] == true &&
+          releases[i]['prerelease'] != true) {
+        prereleaseSkipped++;
+        continue;
+      }
       if (releases[i]['draft'] == true) {
         continue;
       }
@@ -1410,15 +1462,74 @@ class GitHub extends AppSource {
     }
   }
 
+  Future<APKDetails> _fetchR04ActionsDetails(
+    String standardUrl,
+    Map<String, dynamic> additionalSettings,
+  ) async {
+    final api = await convertStandardUrlToAPIUrl(
+      standardUrl, additionalSettings);
+    final selection = await R04GitHubActionsCatalog(
+      repoApi: Uri.parse(api),
+      request: (uri) => sourceRequest(uri.toString(), additionalSettings),
+    ).latest(
+      workflow: additionalSettings[r04WorkflowKey] as String?,
+      branch: additionalSettings[r04BranchKey] as String?,
+      runId: additionalSettings[r04RunIdKey] as String?,
+      artifactNamePattern: additionalSettings[r04ArtifactFilterKey] as String?,
+    );
+    // GitHub Actions returns an artifact ZIP, not an APK. It enters the
+    // existing R01 bounded archive extraction and R02 Android install gates.
+    // A run's 'success' or a ZIP digest does NOT imply signed APK provenance.
+    final archive = selection.archive;
+    final candidate = MapEntry(archive.fileName, archive.archiveUrl.toString());
+    final evidence = <String>[
+      'GitHub Actions candidate archive (not an APK verification)',
+      'Workflow: ${selection.workflowName} (#${archive.workflowId})',
+      'Run: ${archive.runId} (attempt ${archive.runAttempt})',
+      'Branch: ${archive.branch}',
+      'Commit SHA: ${archive.commitSha}',
+      'Artifact ID: ${archive.artifactId}',
+      'Expires: ${archive.expiresAt.toIso8601String()}',
+      if (archive.archiveSha256 != null)
+        'ZIP digest (NOT APK signing): sha256:${archive.archiveSha256}',
+      'Final APK certificate and installed bytes require R02 verification.',
+    ];
+    return APKDetails(
+      selection.version,
+      [candidate],
+      getAppNames(standardUrl),
+      releaseDate: selection.runDate,
+      changeLog: evidence.join('\n'),
+      allAssetUrls: [candidate],
+      rawReleaseTitleCandidates: [selection.workflowName],
+      releaseTitle: 'Actions run ${archive.runId}',
+      apkSizeBytes: archive.sizeBytes,
+    );
+  }
+
   @override
   Future<APKDetails> getLatestAPKDetails(
     String standardUrl,
     Map<String, dynamic> additionalSettings,
   ) async {
     try {
+      final mode = additionalSettings[r04SourceModeKey];
+      if (mode == r04ModeActions) {
+        return await _fetchR04ActionsDetails(standardUrl, additionalSettings);
+      }
+      // A missing mode preserves existing imported apps' release settings.
+      final releaseSettings = <String, dynamic>{...additionalSettings};
+      if (mode == r04ModeReleases) {
+        releaseSettings['includePrereleases'] = false;
+      } else if (mode == r04ModePrereleases) {
+        releaseSettings['includePrereleases'] = true;
+        releaseSettings[r04PrereleaseOnlyKey] = true;
+      } else if (mode != null) {
+        throw const FormatException('Unknown GitHub source channel');
+      }
       return await fetchReleaseDetailsWithTagFallback(
         standardUrl,
-        additionalSettings,
+        releaseSettings,
         (bool useTagUrl) async {
           return '${await convertStandardUrlToAPIUrl(standardUrl, additionalSettings)}/${useTagUrl ? 'tags' : 'releases'}?per_page=100';
         },

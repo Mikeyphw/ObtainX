@@ -106,6 +106,8 @@ jobs:
         run: flutter analyze lib test
       - name: R03 deterministic mock HTTP resume and persistence tests
         run: flutter test --no-pub test/r03_download_engine_test.dart
+      - name: Validate R04 exact workflow/run/artifact discovery
+        run: flutter test --no-pub test/r04_github_actions_test.dart
       - name: Execute R01 adversarial archive fixtures first
         run: flutter test --no-pub test/archive_extraction_security_test.dart
       - name: Execute R02 bundle and split-session contract tests

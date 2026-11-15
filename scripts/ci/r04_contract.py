@@ -35,6 +35,11 @@ def verify(root:Path=ROOT)->int:
         gate(marker in service,'service lacks '+marker)
     gate("archiveSha256" in service and "NOT the contained APK" in service,
          'archive digest improperly conflated with APK signing')
+    gate("final selectedRunId = _positiveInt(selected['id'])!;" in service and
+         "'/actions/runs/$selectedRunId/artifacts'" in service and
+         "artifactId: id, runId: selectedRunId" in service and
+         "final runId = _positiveInt(selected['id'])!;" not in service,
+         'selected run ID must not shadow manually requested run ID')
     for marker in (
         "r04ModeReleases", "r04ModePrereleases", "r04ModeActions",
         "_fetchR04ActionsDetails(", "R04GitHubActionsCatalog(",

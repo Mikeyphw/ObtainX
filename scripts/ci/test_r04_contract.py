@@ -45,6 +45,10 @@ class R04MutationContract(unittest.TestCase):
         self._mutation(PATHS[0],"r['conclusion'] == 'success'",'true')
     def test_remove_run_attempt(self):
         self._mutation(PATHS[0],"_positiveInt(r['run_attempt'])",'1')
+    def test_reintroduce_manual_run_id_shadowing(self):
+        self._mutation(PATHS[0],
+            "final selectedRunId = _positiveInt(selected['id'])!;",
+            "final runId = _positiveInt(selected['id'])!;")
     def test_remove_branch_guard(self):
         self._mutation(PATHS[0],"r['head_branch'] == chosenBranch",'true')
     def test_remove_expiry_check(self):

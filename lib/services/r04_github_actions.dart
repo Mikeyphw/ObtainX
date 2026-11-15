@@ -179,10 +179,14 @@ class R04GitHubActionsCatalog {
     if (name.isEmpty || name.length > 140 ||
         name.contains('/') || name.contains('\\') ||
         name.contains('..') || name.startsWith('.') ||
-        RegExp(r'[\x00-\x1f\x7f]').hasMatch(name)) return false;
+        RegExp(r'[\x00-\x1f\x7f]').hasMatch(name)) {
+      return false;
+    }
     final lower = name.toLowerCase();
     if (RegExp(r'(^|[-_. ])(logs?|reports?|coverage|screenshots?|source|symbols?|mapping|test-results?|lint|trace|debug-symbols)([-_. ]|$)')
-        .hasMatch(lower)) return false;
+        .hasMatch(lower)) {
+      return false;
+    }
     // This is only a *candidate* filter, not an APK proof. The bounded R01/R02
     // archive inspector still needs to find valid signed Android packages.
     return RegExp(r'(^|[-_. ])(apk|apks|xapk|android|installer|universal)([-_. ]|$)')
@@ -267,11 +271,11 @@ class R04GitHubActionsCatalog {
       throw const R04ActionsFailure('no successful completed run for selected workflow/branch');
     }
     final selected = goodRuns.first;
-    final runId = _positiveInt(selected['id'])!;
+    final selectedRunId = _positiveInt(selected['id'])!;
     final attempt = _positiveInt(selected['run_attempt'])!;
     final sha = _sha(selected['head_sha'])!;
     final workflowId = _positiveInt(selected['workflow_id'])!;
-    final artifacts = await _list('/actions/runs/$runId/artifacts', 'artifacts');
+    final artifacts = await _list('/actions/runs/$selectedRunId/artifacts', 'artifacts');
     final matches = <R04ActionsArchive>[];
     final current = now().toUtc();
     for (final raw in artifacts) {
@@ -284,11 +288,13 @@ class R04GitHubActionsCatalog {
       if (id == null || name == null || size == null ||
           size > maxArchiveBytes || created == null || expires == null ||
           !expires.isAfter(current) || !isCandidateName(name) ||
-          (filter != null && !filter.hasMatch(name))) continue;
+          (filter != null && !filter.hasMatch(name))) {
+        continue;
+      }
       // GitHub's archive_download_url is untrusted metadata: synthesize the
       // canonical in-repository API URL from the validated numeric ID.
       matches.add(R04ActionsArchive(
-        artifactId: id, runId: runId, runAttempt: attempt,
+        artifactId: id, runId: selectedRunId, runAttempt: attempt,
         workflowId: workflowId, commitSha: sha, branch: chosenBranch,
         name: name, sizeBytes: size, createdAt: created, expiresAt: expires,
         archiveUrl: repoApi.replace(path: '${repoApi.path}/actions/artifacts/$id/zip'),

@@ -447,6 +447,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         r02fP03Bridge = R02fP03SessionBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         installerChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        R02LocalArchiveBridge(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
         installerChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "launchInstallIntent" -> {

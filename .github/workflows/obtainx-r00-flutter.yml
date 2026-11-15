@@ -116,6 +116,8 @@ jobs:
         run: flutter test --no-pub test/r02f_p05_device_profile_test.dart
       - name: Verify P05 OBB symlink ancestor and SHA safety
         run: flutter test --no-pub test/r02f_p05_obb_ancestor_test.dart
+      - name: Verify R02 local import provenance, review and refusal policy
+        run: flutter test --no-pub test/r02_local_archive_policy_test.dart
       - name: Execute RT02F external handoff and cancelled-platform outcomes
         run: flutter test --no-pub test/r02f_external_handoff_test.dart
       - name: Execute full Flutter test suite

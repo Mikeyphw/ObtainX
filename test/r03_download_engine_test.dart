@@ -7,16 +7,13 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:obtainium/services/r03_download_engine.dart';
 
-// This file tests a loopback HttpServer, not external network services.
-// Flutter's default test binding replaces every HttpClient response with 400.
-// Disable that mock for this deterministic localhost-only test suite.
-class _R03LoopbackTestBinding extends AutomatedTestWidgetsFlutterBinding {
-  @override
-  bool get overrideHttpClient => false;
-}
+// Flutter's test binding is already initialized by the test runner.
+// Avoid instantiating a second binding. An isolated HttpOverrides zone creates
+// the one real HttpClient owned by these loopback-only HTTP test fixtures.
+// The production HTTP implementation and Flutter's global test mock are unchanged.
+class _R03RealLoopbackHttpOverrides extends HttpOverrides {}
 
 void main() {
-  _R03LoopbackTestBinding();
   group('R03 source identity and response policy', () {
     test('strict 206 Content-Range including invalid and overflow', () {
       expect(r03ContentRange('bytes 10-19/20'), (start: 10, end: 19, total: 20));
@@ -86,7 +83,10 @@ void main() {
 
     setUp(() async {
       sandbox = await Directory.systemTemp.createTemp('obtainx-r03-test-');
-      client = HttpClient();
+      client = HttpOverrides.runWithHttpOverrides(
+        () => HttpClient(),
+        _R03RealLoopbackHttpOverrides(),
+      );
       payload = Uint8List.fromList(List<int>.generate(2 * 1024 * 1024 + 97, (i) => i % 251));
       etag = '"r03-v1"';
       supportsRange = true;

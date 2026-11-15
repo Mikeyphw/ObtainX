@@ -30,6 +30,10 @@ Future<void> showR02LocalArchiveImport(
   if (!Platform.isAndroid) {
     throw const FormatException('R02 local archive import requires Android');
   }
+  // Capture ScaffoldMessenger before the async SAF picker. Its own mounted
+  // state is checked whenever a result is shown; never look up BuildContext
+  // after the await without checking context.mounted.
+  final notifications = ScaffoldMessenger.of(context);
   final chosen = await saf.openDocument(
     mimeType: '*/*', grantWritePermission: false,
     persistablePermission: false,
@@ -47,7 +51,6 @@ Future<void> showR02LocalArchiveImport(
   var wasCancelled = false;
   String? privatePath;
   Directory? extracted;
-  final notifications = ScaffoldMessenger.of(context);
 
   void notice(String message) {
     if (!notifications.mounted) return;

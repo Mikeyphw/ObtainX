@@ -7,7 +7,6 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:android_package_manager/android_package_manager.dart';
 // Uses the pinned plugin's wire format for queries dispatched on our worker.
@@ -653,7 +652,7 @@ Future<File> _downloadFile(
         )).value.value;
     final firstResponse = await fetch(requestHeaders);
     final suggested = extractDownloadFileNameFromContentDisposition(
-      firstResponse.headers.value(HttpHeaders.contentDispositionHeader));
+      firstResponse.headers.value('content-disposition'));
     String extensionOf(String rawName) {
       final lower = rawName.toLowerCase();
       for (final suffix in const [

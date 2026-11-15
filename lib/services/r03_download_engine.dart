@@ -187,7 +187,9 @@ String? r03StrongEtag(String? value) {
   final end = int.tryParse(match.group(2)!);
   final total = int.tryParse(match.group(3)!);
   if (start == null || end == null || total == null || start > end ||
-      total < 1 || total > r03MaximumBytes || end >= total) return null;
+      total < 1 || total > r03MaximumBytes || end >= total) {
+    return null;
+  }
   return (start: start, end: end, total: total);
 }
 
@@ -245,7 +247,7 @@ class R03DownloadEngine {
       jobId: key,
     );
     _active[key] = next;
-    unawaited(next.then<void>((_) {}, onError: (Object _, StackTrace __) {})
+    unawaited(next.then<void>((_) {}, onError: (Object _, StackTrace _) {})
         .whenComplete(() => _active.remove(key)));
     return next;
   }
@@ -274,7 +276,7 @@ class R03DownloadEngine {
             FileSystemEntityType.link) {
       throw const R03InvalidEntityException('symlink path rejected');
     }
-    R03DownloadRecord initial = R03DownloadRecord(
+    final R03DownloadRecord initial = R03DownloadRecord(
       jobId: jobId, sourceFingerprint: jobId, origin: origin,
       finalOrigin: origin, fileName: destination.uri.pathSegments.last,
       stage: R03Stage.queued, blocks: const [],
@@ -481,7 +483,9 @@ class R03DownloadEngine {
       for (final expected in blocks) {
         final bytes = await raf.read(r03ChunkBytes);
         if (bytes.length != r03ChunkBytes ||
-            sha256.convert(bytes).toString() != expected) return false;
+            sha256.convert(bytes).toString() != expected) {
+          return false;
+        }
       }
       return true;
     } finally {

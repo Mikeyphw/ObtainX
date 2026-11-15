@@ -34,7 +34,7 @@ void main() {
       expect(r03RetryAfterSeconds('9999', DateTime.utc(2026)), 120);
     });
     test('journal schema refuses forged progress and unknown state', () {
-      final receipt = R03DownloadRecord(
+      const receipt = R03DownloadRecord(
         jobId: 'a', sourceFingerprint: 'a', origin: 'https://example.org',
         finalOrigin: 'https://example.org', fileName: 'a.apk',
         stage: R03Stage.downloading, blocks: const [],
@@ -219,7 +219,7 @@ void main() {
     test('after cancellation, strong validator resumes with Range and If-Range', () async {
       var stop = false;
       await expectLater(transfer(cancelled: () => stop,
-        progress: (_, received, __) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
+        progress: (_, received, _) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
         throwsA(isA<R03InvalidEntityException>()));
       expect(await target().exists(), isFalse);
       expect(await File('${target().path}.part').exists(), isTrue);
@@ -231,7 +231,7 @@ void main() {
     test('changed ETag restarts safely; never appends old bytes', () async {
       var stop = false;
       await expectLater(transfer(cancelled: () => stop,
-        progress: (_, received, __) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
+        progress: (_, received, _) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
         throwsA(isA<R03InvalidEntityException>()));
       etag = '"r03-v2"';
       final output = await transfer();
@@ -241,7 +241,7 @@ void main() {
     test('ignored Range response starts over without duplicate bytes', () async {
       var stop = false;
       await expectLater(transfer(cancelled: () => stop,
-        progress: (_, received, __) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
+        progress: (_, received, _) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
         throwsA(isA<R03InvalidEntityException>()));
       ignoresRange = true;
       final output = await transfer();
@@ -252,7 +252,7 @@ void main() {
     test('invalid Content-Range starts over rather than combining entities', () async {
       var stop = false;
       await expectLater(transfer(cancelled: () => stop,
-        progress: (_, received, __) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
+        progress: (_, received, _) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
         throwsA(isA<R03InvalidEntityException>()));
       invalidRange = true;
       final output = await transfer();
@@ -261,7 +261,7 @@ void main() {
     test('416 on resumed range restarts cleanly with a full GET', () async {
       var stop = false;
       await expectLater(transfer(cancelled: () => stop,
-        progress: (_, received, __) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
+        progress: (_, received, _) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
         throwsA(isA<R03InvalidEntityException>()));
       force416 = true;
       final output = await transfer();

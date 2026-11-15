@@ -190,6 +190,20 @@ void main() {
       );
     }
 
+    Future<int> validatedResumeOffset() async {
+      final jobId = R03DownloadEngine.jobKey(source(), target(), const {});
+      final journal = File('${sandbox.path}/private-receipts/$jobId.json');
+      final record = R03DownloadRecord.fromJson(
+        Map<String, dynamic>.from(jsonDecode(await journal.readAsString())));
+      expect(record.stage, R03Stage.cancelled);
+      expect(record.validatedBytes, greaterThanOrEqualTo(r03ChunkBytes));
+      expect(record.validatedBytes % r03ChunkBytes, 0);
+      expect(record.validatedBytes, lessThan(payload.length));
+      expect(await File('${target().path}.part').length(),
+        greaterThanOrEqualTo(record.validatedBytes));
+      return record.validatedBytes;
+    }
+
     test('200 with known length publishes exact verified bytes and receipt', () async {
       final output = await transfer();
       expect(await output.readAsBytes(), payload);
@@ -232,9 +246,10 @@ void main() {
         throwsA(isA<R03InvalidEntityException>()));
       expect(await target().exists(), isFalse);
       expect(await File('${target().path}.part').exists(), isTrue);
+      final resumeOffset = await validatedResumeOffset();
       final file = await transfer();
       expect(await file.readAsBytes(), payload);
-      expect(ranges, contains('bytes=$r03ChunkBytes-'));
+      expect(ranges, contains('bytes=$resumeOffset-'));
       expect(ifRanges, contains('"r03-v1"'));
     });
     test('changed ETag restarts safely; never appends old bytes', () async {
@@ -242,6 +257,7 @@ void main() {
       await expectLater(transfer(cancelled: () => stop,
         progress: (_, received, _) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
         throwsA(isA<R03InvalidEntityException>()));
+      await validatedResumeOffset();
       etag = '"r03-v2"';
       final output = await transfer();
       expect(await output.readAsBytes(), payload);
@@ -252,17 +268,19 @@ void main() {
       await expectLater(transfer(cancelled: () => stop,
         progress: (_, received, _) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
         throwsA(isA<R03InvalidEntityException>()));
+      final resumeOffset = await validatedResumeOffset();
       ignoresRange = true;
       final output = await transfer();
       expect(await output.length(), payload.length);
       expect(await output.readAsBytes(), payload);
-      expect(ranges, contains('bytes=$r03ChunkBytes-'));
+      expect(ranges, contains('bytes=$resumeOffset-'));
     });
     test('invalid Content-Range starts over rather than combining entities', () async {
       var stop = false;
       await expectLater(transfer(cancelled: () => stop,
         progress: (_, received, _) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
         throwsA(isA<R03InvalidEntityException>()));
+      await validatedResumeOffset();
       invalidRange = true;
       final output = await transfer();
       expect(await output.readAsBytes(), payload);
@@ -272,10 +290,11 @@ void main() {
       await expectLater(transfer(cancelled: () => stop,
         progress: (_, received, _) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
         throwsA(isA<R03InvalidEntityException>()));
+      final resumeOffset = await validatedResumeOffset();
       force416 = true;
       final output = await transfer();
       expect(await output.readAsBytes(), payload);
-      expect(ranges, contains('bytes=$r03ChunkBytes-'));
+      expect(ranges, contains('bytes=$resumeOffset-'));
     });
     test('302 redirect completes with final origin evidence', () async {
       redirectInitial = true;
@@ -299,6 +318,43 @@ void main() {
         isCancelled: () => false, onProgress: null);
       expect(await a, await b);
       expect(await target().readAsBytes(), payload);
+    });
+
+    test('conflicting concurrent trusted digests never share a transfer', () async {
+      final first = await fetch(const {});
+      final second = await fetch(const {});
+      final validDigest = sha256.convert(payload).toString();
+      final trusted = engine().download(
+        source: source(), destination: target(), headers: const {},
+        firstResponse: first, fetch: fetch, isCancelled: () => false,
+        onProgress: null, expectedSha256: validDigest);
+      final conflicting = engine().download(
+        source: source(), destination: target(), headers: const {},
+        firstResponse: second, fetch: fetch, isCancelled: () => false,
+        onProgress: null, expectedSha256: List<String>.filled(64, '0').join());
+      await expectLater(conflicting, throwsA(isA<R03InvalidEntityException>()
+        .having((e) => e.reason, 'reason', contains('conflicting trusted digest'))));
+      expect(await (await trusted).readAsBytes(), payload);
+    });
+
+    test('unverified in-flight transfer cannot satisfy a trusted caller', () async {
+      final first = await fetch(const {});
+      final second = await fetch(const {});
+      final validDigest = sha256.convert(payload).toString();
+      final unverified = engine().download(
+        source: source(), destination: target(), headers: const {},
+        firstResponse: first, fetch: fetch, isCancelled: () => false,
+        onProgress: null);
+      final trusted = engine().download(
+        source: source(), destination: target(), headers: const {},
+        firstResponse: second, fetch: fetch, isCancelled: () => false,
+        onProgress: null, expectedSha256: validDigest);
+      await expectLater(trusted, throwsA(isA<R03InvalidEntityException>()));
+      expect(await (await unverified).readAsBytes(), payload);
+      // A later trusted request independently verifies the completed digest;
+      // it never borrows a transfer started without trusted bytes.
+      expect(await (await transfer(expectedSha256: validDigest)).readAsBytes(),
+        payload);
     });
   });
 }

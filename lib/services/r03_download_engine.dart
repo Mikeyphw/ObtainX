@@ -210,6 +210,9 @@ class R03DownloadEngine {
   R03DownloadEngine({required this.journalDirectory});
   final Directory journalDirectory;
   static final Map<String, Future<File>> _active = {};
+  // A caller with different trusted-byte requirements must never inherit a
+  // transfer owned by another caller, even when URL and destination match.
+  static final Map<String, String?> _activeExpectedDigest = {};
 
   static String jobKey(Uri url, File destination, Map<String, String> headers) {
     final sorted = headers.entries.toList()
@@ -237,6 +240,10 @@ class R03DownloadEngine {
     final existing = _active[key];
     if (existing != null) {
       unawaited(firstResponse.listen((_) {}).cancel());
+      if (_activeExpectedDigest[key] != expectedSha256) {
+        return Future<File>.error(const R03InvalidEntityException(
+          'conflicting trusted digest for active transfer'));
+      }
       return existing;
     }
     final next = _run(
@@ -247,8 +254,17 @@ class R03DownloadEngine {
       jobId: key,
     );
     _active[key] = next;
-    unawaited(next.then<void>((_) {}, onError: (Object _, StackTrace _) {})
-        .whenComplete(() => _active.remove(key)));
+    _activeExpectedDigest[key] = expectedSha256;
+    void clearActive() {
+      if (identical(_active[key], next)) {
+        _active.remove(key);
+        _activeExpectedDigest.remove(key);
+      }
+    }
+    // Consume completion and failure without returning the failed Future from
+    // cleanup (a returned Future can re-emit its error into the cleanup chain).
+    unawaited(next.then<void>((_) { clearActive(); },
+      onError: (Object error, StackTrace trace) { clearActive(); }));
     return next;
   }
 

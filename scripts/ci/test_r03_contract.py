@@ -50,6 +50,8 @@ class R03MutationTests(unittest.TestCase):
         self.mutated(PATHS[0],"..['if-range'] = previous.ifRange!", "..['wrong-range'] = previous.ifRange!")
     def test_remove_verified_blocks(self):
         self.mutated(PATHS[0],'eligibleForResume = await _verifyBlocks(part, previous.blocks)', 'eligibleForResume = true')
+    def test_remove_active_digest_policy(self):
+        self.mutated(PATHS[0], '_activeExpectedDigest[key] != expectedSha256', 'false')
     def test_remove_runtime_check(self):
         self.mutated(PATHS[0],"if (isCancelled()) throw const R03InvalidEntityException('cancelled');",'if (false) throw const R03InvalidEntityException(\"cancelled\");')
     def test_remove_atomic_publish(self):

@@ -36,6 +36,12 @@ def verify(root:Path=ROOT)->int:
         'journal must bind validated offset to block inventory')
     assert_has('finalDigest: digest, completedBytes: received' in engine,
         'terminal receipt must store verified bytes and digest')
+    assert_has('_activeExpectedDigest[key] != expectedSha256' in engine and
+        '_activeExpectedDigest[key] = expectedSha256' in engine,
+        'active download can bypass a conflicting trusted digest')
+    assert_has("whenComplete(() => _active.remove(key))" not in
+        engine.split('unawaited(next.then<void>', 1)[-1],
+        'unhandled failed Future returned by active cleanup')
     assert_has(engine.count("if (isCancelled()) throw const R03InvalidEntityException('cancelled');") >= 3,
         'cancellation checks must remain before and after transfer')
     assert_has("url.toString(), destination.absolute.path" in engine,
@@ -76,7 +82,8 @@ def verify(root:Path=ROOT)->int:
     for name in ('strict 206 Content-Range', 'after cancellation',
                  'ignored Range response', 'changed ETag',
                  'expected digest mismatch', 'no content-length',
-                 'two clients for same job', '302 redirect', '416 on resumed range', '401/403/410/416/429/5xx'):
+                 'two clients for same job', '302 redirect', '416 on resumed range', '401/403/410/416/429/5xx',
+                  'conflicting concurrent trusted digests', 'unverified in-flight transfer'):
         assert_has(name in tests,'mock HTTP coverage missing '+name)
     assert_has('NOT_QUALIFIED' in doc and 'R04' in doc,
         'R03 acceptance boundary incorrectly claimed')

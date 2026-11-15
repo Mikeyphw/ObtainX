@@ -9,6 +9,9 @@ ROOT=Path(__file__).resolve().parents[2]
 def verify(root:Path=ROOT)->int:
     def read(path):return (root/path).read_text(encoding='utf-8')
     service=read('lib/services/r04_github_actions.dart')
+    integrity=read('lib/services/r04_actions_archive_integrity.dart')
+    installer=read('lib/providers/apps_provider_install.dart')
+    integrity_tests=read('test/r04_archive_integrity_test.dart')
     github=read('lib/app_sources/github.dart')
     tests=read('test/r04_github_actions_test.dart')
     flutter=read('.github/workflows/obtainx-r00-flutter.yml')
@@ -79,6 +82,40 @@ def verify(root:Path=ROOT)->int:
         for marker in ("- 'lib/services/r04_*'", "- 'lib/app_sources/github.dart'",
                        "- 'test/r04_*'", "- 'scripts/ci/r04_*'"):
             gate(marker in workflow, workflow_path+' missing CI path '+marker)
+    gate('r04ActionsArchiveEvidenceKey' in github and
+         "additionalSettings[r04ActionsArchiveEvidenceKey] = <String, dynamic>{" in github and
+         "additionalSettings.remove(r04ActionsArchiveEvidenceKey)" in github and
+         "if (archive.archiveSha256 == null)" in github,
+         'Actions selection must persist a source-bound required ZIP digest')
+    gate("await verifyR04ActionsArchiveBeforeExtraction(" in installer and
+         installer.index('await verifyR04ActionsArchiveBeforeExtraction(') <
+         installer.index('final artifactFormat = installArtifactFormat('),
+         'Actions archive must be hashed before extraction or Android installation')
+    for marker in (
+        "additionalSettings['r04GitHubSourceMode'] != 'actions'",
+        "rawEvidence['sourceUrl'] != sourceUrl",
+        "rawEvidence['archiveName'] != selectedAssetName",
+        "archiveUrl != selectedAssetUrl",
+        "canonical.host != 'api.github.com'",
+        "canonical.path !=",
+        "repoParts.length != 2",
+        "int.tryParse(match.group(1)!) != artifactId",
+        "FileSystemEntity.type(archive.path, followLinks: false)",
+        "sha256.bind(archive.openRead())",
+        "if (actual != expected)",
+        "await archive.delete()",
+    ):
+        gate(marker in integrity, 'R04 P02 archive integrity lacks '+marker)
+    for marker in (
+        'matching ZIP SHA-256', 'mismatched ZIP SHA-256',
+        'missing ZIP digest', 'stale evidence', 'forged host',
+        'Releases unchanged', 'symlink archive',
+    ):
+        gate(marker in integrity_tests, 'R04 P02 offline test lacks '+marker)
+    gate('flutter test --no-pub test/r04_archive_integrity_test.dart' in flutter,
+         'R04 P02 digest test missing from hosted Flutter gate')
+    gate('R04 P02 ZIP SHA-256 enforcement' in docs,
+         'R04 P02 acceptance boundary undocumented')
     gate('NOT_QUALIFIED' in docs and 'R05' in docs,
          'R04 docs imply release-level proof without runtime acceptance')
     if errors:

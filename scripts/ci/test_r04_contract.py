@@ -23,6 +23,9 @@ PATHS=[
  '.github/workflows/obtainx-r02-rt02.yml',
  '.github/workflows/obtainx-r02-rt02b.yml',
  '.github/workflows/obtainx-r02-rt02c.yml',
+ 'lib/services/r04_actions_archive_integrity.dart',
+ 'lib/providers/apps_provider_install.dart',
+ 'test/r04_archive_integrity_test.dart',
 ]
 
 class R04MutationContract(unittest.TestCase):
@@ -72,6 +75,15 @@ class R04MutationContract(unittest.TestCase):
           'python3 -B scripts/ci/r04_contract.py --check','echo skip')
     def test_remove_android_workflow_r04_gate(self):
         self._mutation(PATHS[10], "- 'test/r04_*'", "- 'docs/r04_*'")
+    def test_remove_zip_sha256_comparison(self):
+        self._mutation(PATHS[11], 'if (actual != expected)', 'if (false)')
+    def test_remove_pre_extraction_archive_integrity_gate(self):
+        self._mutation(PATHS[12], 'await verifyR04ActionsArchiveBeforeExtraction(',
+                       'await bypassR04ActionsArchiveBeforeExtraction(')
+    def test_remove_source_bound_zip_digest_receipt(self):
+        self._mutation(PATHS[1],
+            'additionalSettings[r04ActionsArchiveEvidenceKey] = <String, dynamic>{',
+            'additionalSettings[r04ActionsArchiveEvidenceKey] = null; //')
     def test_remove_r04_risk_glob(self):
         self._mutation(PATHS[5],"'lib/services/r04_*'", "'docs/r04_*'")
 

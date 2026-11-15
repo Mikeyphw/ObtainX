@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart';
 import 'package:obtainium/app_sources/gradle_app_id.dart';
 import 'package:obtainium/services/r04_github_actions.dart';
+import 'package:obtainium/services/r04_actions_archive_integrity.dart';
 import 'package:obtainium/app_sources/html.dart';
 import 'package:obtainium/components/generated_form_model.dart';
 import 'package:obtainium/custom_errors.dart';
@@ -1481,6 +1482,25 @@ class GitHub extends AppSource {
     // existing R01 bounded archive extraction and R02 Android install gates.
     // A run's 'success' or a ZIP digest does NOT imply signed APK provenance.
     final archive = selection.archive;
+    // GitHub's completed/successful run is not enough to trust the bytes.
+    // Require an actual ZIP digest before making this Actions candidate
+    // installable. The final downloaded file is independently rehashed.
+    if (archive.archiveSha256 == null) {
+      throw const R04ActionsFailure(
+        'GitHub Actions archive has no SHA-256 digest; cannot verify download',
+      );
+    }
+    additionalSettings[r04ActionsArchiveEvidenceKey] = <String, dynamic>{
+      'sourceUrl': standardUrl,
+      'archiveUrl': archive.archiveUrl.toString(),
+      'archiveName': archive.fileName,
+      'archiveSha256': archive.archiveSha256,
+      'artifactId': archive.artifactId,
+      'runId': archive.runId,
+      'runAttempt': archive.runAttempt,
+      'workflowId': archive.workflowId,
+      'commitSha': archive.commitSha,
+    };
     final candidate = MapEntry(archive.fileName, archive.archiveUrl.toString());
     final evidence = <String>[
       'GitHub Actions candidate archive (not an APK verification)',
@@ -1517,6 +1537,8 @@ class GitHub extends AppSource {
       if (mode == r04ModeActions) {
         return await _fetchR04ActionsDetails(standardUrl, additionalSettings);
       }
+      // Do not carry an old Actions receipt across source channel changes.
+      additionalSettings.remove(r04ActionsArchiveEvidenceKey);
       // A missing mode preserves existing imported apps' release settings.
       final releaseSettings = <String, dynamic>{...additionalSettings};
       if (mode == r04ModeReleases) {

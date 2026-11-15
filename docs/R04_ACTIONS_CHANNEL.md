@@ -22,3 +22,19 @@ R04 discovery and package planning must not be described as R05 transactional in
 ## Execution contract
 
 Use only the source-pinned R04 consolidated launcher on the exact R03 feature branch SHA. No local Gradle, unattended APK installation, auto-merge, force push, signing secrets, personal device changes or privilege bypass. The launcher validates base branch/PR, source blob IDs, transactionally applies, runs Python source/mutation regressions, and can push/watch all six exact-SHA hosted workflows with their native output.
+
+## R04 P02 ZIP SHA-256 enforcement
+
+GitHub Actions candidates now require a valid GitHub artifact ZIP SHA-256 digest
+at check time (missing or malformed digests fail closed). The selected receipt
+stores the repository URL, canonical artifact URL/name, numeric workflow/run/
+attempt/artifact IDs, commit SHA and expected ZIP digest. Before bounded R01
+extraction or R02 install approval, ObtainX streams and hashes the actual ZIP
+bytes. A mismatch deletes the downloaded cached ZIP and refuses installation;
+channel changes invalidate stale Actions receipts. Releases/prereleases retain
+their existing verification behavior. A ZIP hash is NOT APK signing or build
+attestation, and this patch does not silently grant either status.
+
+Hosted Flutter qualification and all six exact-HEAD Android/contract workflows
+must pass again at the new source SHA. Live authenticated redirects, device
+install, history-browser UI and physical release remain **NOT_QUALIFIED**.

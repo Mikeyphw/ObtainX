@@ -18,6 +18,7 @@ import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart' show regExValidator;
+import 'package:obtainium/services/r02_local_archive_import.dart';
 import 'package:obtainium/services/pick_file.dart';
 import 'package:obtainium/theme/app_dialog_theme.dart';
 import 'package:obtainium/theme/app_theme_accent.dart';
@@ -413,6 +414,25 @@ class _ImportExportPageState extends State<ImportExportPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       if (Platform.isAndroid) ...[
+                        Padding(
+                          padding: importPageCardRowPadding,
+                          child: FilledButton.icon(
+                            icon: const Icon(Icons.install_mobile_rounded),
+                            label: const Text('Install local APK / archive'),
+                            onPressed: importInProgress ? null : () async {
+                              setState(() => importInProgress = true);
+                              try {
+                                await showR02LocalArchiveImport(context, appsProvider);
+                              } catch (error) {
+                                showError(error);
+                              } finally {
+                                if (mounted) {
+                                  setState(() => importInProgress = false);
+                                }
+                              }
+                            },
+                          ),
+                        ),
                         importPageSectionTitle(
                           tr('importExportCardUpdateAssets'),
                           Icons.system_update_rounded,

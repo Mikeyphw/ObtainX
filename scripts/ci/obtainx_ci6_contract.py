@@ -39,6 +39,9 @@ GROUPS = (
     'scripts/ci/r02f_p05_*',
     'lib/services/r02f_p05_*',
     'test/r02f_p05_*',
+    'scripts/ci/r02_final_*',
+    'lib/services/r02_local_*',
+    'test/r02_local_*',
     'scripts/ci/r02g_*',
 )
 

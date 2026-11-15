@@ -7,7 +7,16 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:obtainium/services/r03_download_engine.dart';
 
+// This file tests a loopback HttpServer, not external network services.
+// Flutter's default test binding replaces every HttpClient response with 400.
+// Disable that mock for this deterministic localhost-only test suite.
+class _R03LoopbackTestBinding extends AutomatedTestWidgetsFlutterBinding {
+  @override
+  bool get overrideHttpClient => false;
+}
+
 void main() {
+  _R03LoopbackTestBinding();
   group('R03 source identity and response policy', () {
     test('strict 206 Content-Range including invalid and overflow', () {
       expect(r03ContentRange('bytes 10-19/20'), (start: 10, end: 19, total: 20));

@@ -37,7 +37,7 @@ void main() {
       const receipt = R03DownloadRecord(
         jobId: 'a', sourceFingerprint: 'a', origin: 'https://example.org',
         finalOrigin: 'https://example.org', fileName: 'a.apk',
-        stage: R03Stage.downloading, blocks: const [],
+        stage: R03Stage.downloading, blocks: [],
       );
       final m = receipt.toJson();
       expect(R03DownloadRecord.fromJson(Map<String, dynamic>.from(m)).validatedBytes, 0);

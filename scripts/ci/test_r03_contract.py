@@ -20,6 +20,7 @@ PATHS=[
  '.github/workflows/obtainx-r02-rt02b.yml',
  '.github/workflows/obtainx-r02-rt02c.yml',
  'docs/R03_DOWNLOAD_PERSISTENCE.md',
+ 'test/overall_optimization_test.dart',
 ]
 
 class R03MutationTests(unittest.TestCase):
@@ -62,6 +63,17 @@ class R03MutationTests(unittest.TestCase):
     def test_remove_private_journal(self):
         self.mutated(PATHS[1],'await getApplicationSupportDirectory()',
                      'await getDownloadsDirectory()')
+    def test_remove_cancelled_header_exception_translation(self):
+        self.mutated(PATHS[1],
+            '    cancellationToken?.throwIfCancelled();\n    rethrow;\n  } finally {',
+            '    rethrow;\n  } finally {')
+    def test_remove_private_path_provider_mock(self):
+        self.mutated(PATHS[-1],
+            "return '${directory.path}/r03-private-support'", 'return null')
+    def test_remove_orphan_range_refusal(self):
+        self.mutated(PATHS[-1],
+            "expect(ranges, [null], reason: 'no verified .part block')",
+            'expect(ranges, isNotEmpty)')
     def test_remove_retry_stop(self):
         self.mutated(PATHS[1],'r03CanRetryHttpStatus(code)', 'true')
     def test_remove_mock_http_suite(self):

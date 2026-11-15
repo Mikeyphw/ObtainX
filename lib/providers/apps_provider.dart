@@ -707,6 +707,11 @@ Future<File> _downloadFile(
       cancellationToken?.throwIfCancelled();
       rethrow;
     }
+  } catch (_) {
+    // The first GET can fail while waiting for response headers. Convert an
+    // owner-requested cancellation; never mask a genuine HTTP/network error.
+    cancellationToken?.throwIfCancelled();
+    rethrow;
   } finally {
     cancellationToken?.removeListener(abortDownload);
     responseClient.close(force: true);

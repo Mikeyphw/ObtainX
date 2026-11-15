@@ -10,6 +10,7 @@ def verify(root:Path=ROOT)->int:
     engine=read('lib/services/r03_download_engine.dart')
     provider=read('lib/providers/apps_provider.dart')
     tests=read('test/r03_download_engine_test.dart')
+    legacy=read('test/overall_optimization_test.dart')
     scope=read('scripts/ci/obtainx_ci_policy.py')
     contracts=read('.github/workflows/obtainx-r00-contracts.yml')
     flutter=read('.github/workflows/obtainx-r00-flutter.yml')
@@ -58,6 +59,19 @@ def verify(root:Path=ROOT)->int:
         'retry/notification cancellation bypasses R03')
     assert_has('await getApplicationSupportDirectory()' in provider,
         'journal must use app-private storage')
+    assert_has('} catch (_) {\n    // The first GET can fail while waiting for response headers.' in provider and
+        'cancellationToken?.throwIfCancelled();\n    rethrow;\n  } finally {' in provider,
+        'header cancellation must retain canonical cancellation exception')
+    assert_has("MethodChannel('plugins.flutter.io/path_provider')" in legacy and
+        "call.method != 'getApplicationSupportDirectory'" in legacy and
+        "return '${directory.path}/r03-private-support'" in legacy,
+        'integrated tests must mock private support path, not bypass journal')
+    assert_has('orphan .part cannot authorize Range' in legacy and
+        "expect(ranges, [null], reason: 'no verified .part block')" in legacy,
+        'orphan parts must never authorize unsafe Range')
+    assert_has('unsolicited HTTP $responseCode never publishes an APK' in legacy and
+        "'HTTP_ERROR'" in legacy,
+        'unsolicited partial and transient HTTP failures must not publish')
     assert_has("_waitForConcurrentDownload(" not in provider,
         'old unowned part-file polling retained')
     assert_has('length == fullContentLength' not in provider,

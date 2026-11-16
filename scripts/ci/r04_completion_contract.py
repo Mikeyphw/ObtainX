@@ -2,6 +2,7 @@
 """Full R04 consolidated acceptance contracts. Not physical-device proof."""
 from __future__ import annotations
 import argparse
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +29,7 @@ FILES = (
  '.github/workflows/obtainx-r02-rt02b.yml',
  '.github/workflows/obtainx-r02-rt02c.yml',
  'test/r04_archive_integrity_test.dart',
+ 'config/delivery-required-ci.json',
 )
 
 def verify(root: Path = ROOT) -> int:
@@ -93,6 +95,7 @@ def verify(root: Path = ROOT) -> int:
       'artifactId: additionalSettings[r04ArtifactIdKey]',
       'runAttempt: additionalSettings[r04RunAttemptKey]',
       'commitSha: additionalSettings[r04CommitShaKey]',
+      "headers[HttpHeaders.acceptHeader] = 'application/vnd.github+json';",
       "'application/vnd.github+json'", "'X-GitHub-Api-Version'",
       'Actions source requires direct HTTPS and certificate validation',
       'if (archive.archiveSha256 == null)', 'r04ActionsArchiveEvidenceKey',
@@ -155,6 +158,36 @@ def verify(root: Path = ROOT) -> int:
     ))
     for path in FILES[17:21]:
         require(path, ("- 'lib/providers/source_provider.dart'", "- 'test/r04_*'"))
+    # This must be committed before Devtool delivery CI. Never infer a
+    # required set from observed runs or mark release qualification complete.
+    try:
+        policy=json.loads(data['config/delivery-required-ci.json'])
+        expected={
+          'ObtainX R00 / Source and Contract Integrity':413437262,
+          'ObtainX R00 / Hosted Flutter Qualification':413437265,
+          'ObtainX R02 / API 36 Hosted Emulator Bootstrap':413666807,
+          'ObtainX R02 / RT02 Real System Installer API36':413864665,
+          'ObtainX R02 / RT02B Negative Installer API36':414136383,
+          'ObtainX R02 / RT02C Archive-to-Installer API36':414158361,
+        }
+        req=policy.get('required_workflows') if isinstance(policy,dict) else None
+        actual={x['name']:x['workflow_id'] for x in req} if isinstance(req,list) and all(
+            isinstance(x,dict) and set(x)=={'name','workflow_id'} and
+            isinstance(x['name'],str) and type(x['workflow_id']) is int for x in req
+        ) else None
+        if (not isinstance(policy,dict) or set(policy)!={
+              'schema_version','repository','base_branch','event',
+              'required_workflows','release_qualification'} or
+            policy.get('schema_version') != 1 or
+            policy.get('repository') != 'Mikeyphw/ObtainX' or
+            policy.get('base_branch') !=
+              'feature/obtainx-r03-resumable-download-engine-20261115' or
+            policy.get('event') != 'pull_request' or
+            policy.get('release_qualification') != 'separate' or
+            len(req or ()) != len(expected) or actual != expected):
+            failures.append('committed native Devtool required-CI policy mismatch')
+    except (ValueError,TypeError,KeyError):
+        failures.append('committed native Devtool CI policy must be valid strict JSON')
     if failures:
         for problem in failures:
             print('OX_R04_FINAL_REFUSED '+problem, flush=True)

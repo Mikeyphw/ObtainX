@@ -50,7 +50,14 @@ class R04FinalMutationTests(unittest.TestCase):
           'Actions source requires direct HTTPS and certificate validation', 'insecure allowed')
     def test_remove_private_api_media_type(self):
         self.mutated('lib/app_sources/github.dart',
-          "'application/vnd.github+json'", "'application/octet-stream'")
+          "headers[HttpHeaders.acceptHeader] = 'application/vnd.github+json';",
+          "headers[HttpHeaders.acceptHeader] = 'application/octet-stream';")
+    def test_required_ci_policy_cannot_disable_pr_gate(self):
+        self.mutated('config/delivery-required-ci.json',
+          '"event": "pull_request"', '"event": "push"')
+    def test_required_ci_policy_cannot_swap_workflow_id(self):
+        self.mutated('config/delivery-required-ci.json',
+          '"workflow_id": 413437262', '"workflow_id": 413437263')
     def test_skip_archive_verification(self):
         self.mutated('lib/providers/apps_provider_install.dart',
           'await verifyR04ActionsArchiveBeforeExtraction(',

@@ -7,6 +7,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' show Response;
 
+part 'r04_actions_history_catalog.dart';
+
 typedef R04Request = Future<Response> Function(Uri uri);
 
 class R04ActionsFailure implements Exception {
@@ -199,6 +201,9 @@ class R04GitHubActionsCatalog {
     String? workflow,
     String? branch,
     String? runId,
+    String? runAttempt,
+    String? commitSha,
+    String? artifactId,
     String? artifactNamePattern,
   }) async {
     final repo = await _fetchObject(repoApi);
@@ -244,6 +249,13 @@ class R04GitHubActionsCatalog {
         throw const R04ActionsFailure('invalid manually selected run ID');
       }
     }
+    int? selectedArtifactId;
+    if (artifactId?.trim().isNotEmpty == true) {
+      selectedArtifactId = int.tryParse(artifactId!.trim());
+      if (selectedArtifactId == null || selectedArtifactId <= 0) {
+        throw const R04ActionsFailure('invalid selected artifact ID');
+      }
+    }
     RegExp? filter;
     if (artifactNamePattern?.trim().isNotEmpty == true) {
       if (artifactNamePattern!.length > 120) {
@@ -274,6 +286,14 @@ class R04GitHubActionsCatalog {
     final selectedRunId = _positiveInt(selected['id'])!;
     final attempt = _positiveInt(selected['run_attempt'])!;
     final sha = _sha(selected['head_sha'])!;
+    if (runAttempt?.trim().isNotEmpty == true &&
+        int.tryParse(runAttempt!.trim()) != attempt) {
+      throw const R04ActionsFailure('run attempt changed after manual selection');
+    }
+    if (commitSha?.trim().isNotEmpty == true &&
+        _sha(commitSha!.trim()) != sha) {
+      throw const R04ActionsFailure('commit SHA changed after manual selection');
+    }
     final workflowId = _positiveInt(selected['workflow_id'])!;
     final artifacts = await _list('/actions/runs/$selectedRunId/artifacts', 'artifacts');
     final matches = <R04ActionsArchive>[];
@@ -288,11 +308,19 @@ class R04GitHubActionsCatalog {
       if (id == null || name == null || size == null ||
           size > maxArchiveBytes || created == null || expires == null ||
           !expires.isAfter(current) || !isCandidateName(name) ||
+          (selectedArtifactId != null && id != selectedArtifactId) ||
           (filter != null && !filter.hasMatch(name))) {
         continue;
       }
       // GitHub's archive_download_url is untrusted metadata: synthesize the
       // canonical in-repository API URL from the validated numeric ID.
+      // An artifact belongs to one run/revision. Refuse inconsistent API
+      // identity rather than treating a renamed/replaced ZIP as trusted.
+      final boundRun = raw['workflow_run'];
+      if (boundRun is Map &&
+          (boundRun['id'] != selectedRunId || boundRun['head_sha'] != sha)) {
+        throw const R04ActionsFailure('artifact run/commit provenance changed');
+      }
       matches.add(R04ActionsArchive(
         artifactId: id, runId: selectedRunId, runAttempt: attempt,
         workflowId: workflowId, commitSha: sha, branch: chosenBranch,

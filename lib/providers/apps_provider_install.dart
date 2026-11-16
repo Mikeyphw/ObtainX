@@ -752,7 +752,10 @@ extension AppsProviderInstall on AppsProvider {
           this.apkDir.path,
           useExisting: useExisting,
           headers: requestHeaders,
-          allowInsecure: app.settings.getBool('allowInsecure'),
+          // The Actions API and signed ZIP always require verified TLS even
+          // when a separate legacy source permits insecure certificates.
+          allowInsecure: app.additionalSettings[GitHub.r04SourceModeKey] ==
+              GitHub.r04ModeActions ? false : app.settings.getBool('allowInsecure'),
           logs: logs,
           cancellationToken: cancellationToken,
         );
@@ -762,7 +765,9 @@ extension AppsProviderInstall on AppsProvider {
       try {
         downloadedFile = await runDownload(headers);
       } catch (error) {
-        if (!shouldRetryGitHubDownloadWithoutAuthorization(
+        if (app.additionalSettings[GitHub.r04SourceModeKey] ==
+                GitHub.r04ModeActions ||
+            !shouldRetryGitHubDownloadWithoutAuthorization(
           source: source,
           headers: headers,
           error: error,

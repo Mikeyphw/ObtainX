@@ -38,3 +38,68 @@ attestation, and this patch does not silently grant either status.
 Hosted Flutter qualification and all six exact-HEAD Android/contract workflows
 must pass again at the new source SHA. Live authenticated redirects, device
 install, history-browser UI and physical release remain **NOT_QUALIFIED**.
+
+## R04 consolidated completion overlay — no further P0X stages
+
+The remainder of R04 is delivered together: manual Actions history browsing from
+the Run ID field, workflow/branch/run/attempt/commit/artifact-ID selection,
+fail-closed changed-revision detection, GitHub API JSON media negotiation and
+API-version headers, HTTPS-only signed-storage redirect allowlist, and strict
+cross-origin PAT/cookie stripping. GitHub Actions API metadata and private repo
+credentials are never forwarded to third-party artifact storage hosts. A
+successful workflow still does not prove an APK signature.
+
+History shows unsuccessful/in-progress runs for inspection but never makes
+their artifacts selectable. Expired, unverifiable, ambiguous and non-Android
+artifacts remain excluded from the installable picker. A manual selection binds
+to the exact workflow, branch, run ID, attempt, source SHA and artifact ID.
+If a run is retried/replaced or an archive changes, a subsequent update check
+refuses it instead of silently installing a different revision.
+
+The existing R04 P02 SHA-256 gate hashes downloaded ZIP bytes BEFORE the R01
+bounded extraction or R02 installation pipeline. It does not verify contained
+APK signing, trusted release attestation or deployed package ownership; those
+remain governed by the existing R01/R02 independent checks.
+
+**Read-only live API acceptance:** `python3 -B scripts/ci/r04_live_acceptance.py
+--repo OWNER/REPO --workflow WORKFLOW_ID --branch BRANCH --run-id RUN_ID
+--artifact-id ARTIFACT_ID --download-verify`. This opt-in command uses `gh
+api` with the user's connected token and streams a transient artifact ZIP
+for exact SHA-256 comparison; never writes to Android, changes GitHub, or
+promotes an APK as signed. Store a JSON metadata receipt only with an explicit
+`--receipt PATH`. Failure, permission denial, expiry, ambiguity and digest
+mismatch fail closed.
+
+**Qualification truth:** Full source and Flutter/Android hosted workflows must
+run at the *new* exact commit. Real private artifact redirects, live API
+behaviors and physical Android installation are **NOT_QUALIFIED** until an
+independent live/device acceptance receipt is produced. No signed release or
+R05 transactional install state is claimed.
+
+A persisted Actions source receipt also binds the artifact's `expiresAt`.
+Before extraction, expired cached ZIPs are refused even when the ZIP digest
+still matches, including after app process death/restart.
+
+
+### Consolidated R04 reviewed delivery
+
+Manual history selection updates both the saved source mode and the visible
+source-channel dropdown. A published archive digest alone is not a verified
+byte stream; the SHA-256 is checked on transfer and again before extraction.
+
+Live acceptance supports `--run-attempt` and `--head-sha` to require an exact
+revision. Its `--download-verify` path requests a 302 from the authenticated
+canonical API endpoint and separately fetches the signed HTTPS object-store
+URL **without** the GitHub PAT or any cookie. Redirects to other origins are
+refused and ZIP bytes are streamed into an automatically deleted temporary
+file. Optional private-repository receipts are written with mode 0600 and do
+not claim APK signing or physical-device qualification.
+
+The launcher also runs a real rollback regression using a synthetic local Git
+repository. Any pre-commit failure restores source bytes, executable mode,
+staged index and a clean worktree; a failed rollback is never reported as PASS.
+
+R04 is hosted-qualified only after all six exact-SHA workflows pass on this
+new commit. This single overlay contains the complete R04 implementation;
+physical-device installation, live private-token acceptance, and a signed
+release remain separate acceptance evidence, **NOT_QUALIFIED** beforehand.

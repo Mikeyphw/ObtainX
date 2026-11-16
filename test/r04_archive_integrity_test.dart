@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:obtainium/services/r04_actions_archive_integrity.dart';
@@ -20,6 +21,7 @@ Map<String, dynamic> _settings(String digest) => {
     'runAttempt': 1,
     'workflowId': 7,
     'commitSha': _sha,
+    'expiresAt': '2099-01-01T00:00:00Z',
   },
 };
 
@@ -93,6 +95,24 @@ void main() {
     final missing = _settings(digest);
     (missing[r04ActionsArchiveEvidenceKey] as Map).remove('runAttempt');
     await expectLater(verify(missing), throwsA(isA<R04ArchiveIntegrityFailure>()));
+  });
+
+  test('expired cached ZIP is refused after source receipt expiry', () async {
+    final digest = sha256.convert(await archive.readAsBytes()).toString();
+    final settings = _settings(digest);
+    (settings[r04ActionsArchiveEvidenceKey] as Map)['expiresAt'] =
+      '2020-01-01T00:00:00Z';
+    await expectLater(verify(settings),
+      throwsA(isA<R04ArchiveIntegrityFailure>()));
+    expect(await archive.exists(), isTrue);
+  });
+
+  test('JSON persisted evidence remains source-bound across process restart', () async {
+    final digest = sha256.convert(await archive.readAsBytes()).toString();
+    final restored = Map<String, dynamic>.from(
+      jsonDecode(jsonEncode(_settings(digest))) as Map);
+    await verify(restored);
+    expect(await archive.exists(), isTrue);
   });
 
   test('GitHub Releases unchanged by Actions-only verification gate', () async {

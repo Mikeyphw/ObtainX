@@ -39,6 +39,11 @@ Future<void> verifyR04ActionsArchiveBeforeExtraction({
   final workflowId = rawEvidence['workflowId'];
   final commitSha = rawEvidence['commitSha'];
   final expected = digest is String ? digest.toLowerCase() : '';
+  // A verified ZIP still expires. Recovered/cached installs must re-check
+  // the persisted source's advertised expiration before opening the archive.
+  final expiryValue = rawEvidence['expiresAt'];
+  final expiresAt = expiryValue is String
+      ? DateTime.tryParse(expiryValue)?.toUtc() : null;
   if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(expected) ||
       rawEvidence['sourceUrl'] != sourceUrl ||
       rawEvidence['archiveName'] != selectedAssetName ||
@@ -50,6 +55,9 @@ Future<void> verifyR04ActionsArchiveBeforeExtraction({
       commitSha is! String ||
       !RegExp(r'^[a-f0-9]{40}$').hasMatch(commitSha)) {
     throw const R04ArchiveIntegrityFailure('stale or invalid archive receipt');
+  }
+  if (expiresAt == null || !expiresAt.isAfter(DateTime.now().toUtc())) {
+    throw const R04ArchiveIntegrityFailure('Actions artifact expired before extraction');
   }
   final canonical = Uri.tryParse(selectedAssetUrl);
   final source = Uri.tryParse(sourceUrl);

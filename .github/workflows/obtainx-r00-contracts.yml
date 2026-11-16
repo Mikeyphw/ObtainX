@@ -53,6 +53,8 @@ jobs:
         run: python3 -B scripts/ci/r02f_p04_backend_contract.py --check
       - name: Enforce R02F P05 device profile and OBB source contracts
         run: python3 -B scripts/ci/r02f_p05_contract.py --check
+      - name: Enforce full consolidated R04 live-source, history and redirect contracts
+        run: python3 -B scripts/ci/r04_completion_contract.py --check
       - name: Enforce original R03 resumable download and persistence contracts
         run: python3 -B scripts/ci/r03_contract.py --check
       - name: Enforce R04 GitHub Actions exact-identity and source contract

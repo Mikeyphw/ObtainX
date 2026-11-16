@@ -8,6 +8,8 @@ import 'package:http/http.dart';
 import 'package:obtainium/app_sources/gradle_app_id.dart';
 import 'package:obtainium/services/r04_github_actions.dart';
 import 'package:obtainium/services/r04_actions_archive_integrity.dart';
+import 'package:obtainium/services/r04_actions_redirect_policy.dart';
+import 'package:obtainium/widgets/r04_actions_history_dialog.dart';
 import 'package:obtainium/app_sources/html.dart';
 import 'package:obtainium/components/generated_form_model.dart';
 import 'package:obtainium/custom_errors.dart';
@@ -192,6 +194,9 @@ class GitHub extends AppSource {
   static const String r04BranchKey = 'r04Branch';
   static const String r04RunIdKey = 'r04RunId';
   static const String r04ArtifactFilterKey = 'r04ArtifactNamePattern';
+  static const String r04ArtifactIdKey = 'r04ArtifactId';
+  static const String r04RunAttemptKey = 'r04RunAttempt';
+  static const String r04CommitShaKey = 'r04CommitSha';
 
   static const String githubCredsKey = 'github-creds';
   static const String githubReqPrefixKey = 'GHReqPrefix';
@@ -299,6 +304,24 @@ class GitHub extends AppSource {
       GeneratedFormTextField(
         r04RunIdKey,
         label: 'Specific successful Actions run ID (optional)',
+        required: false,
+        assistIcon: Icons.history,
+        assistTooltip: 'Browse GitHub Actions run/artifact history',
+        assistAction: _browseR04ActionsHistory,
+      ),
+      GeneratedFormTextField(
+        r04RunAttemptKey,
+        label: 'Exact run attempt (from history; optional)',
+        required: false,
+      ),
+      GeneratedFormTextField(
+        r04CommitShaKey,
+        label: 'Exact source commit SHA (from history; optional)',
+        required: false,
+      ),
+      GeneratedFormTextField(
+        r04ArtifactIdKey,
+        label: 'Exact Actions artifact ID (optional)',
         required: false,
       ),
       GeneratedFormTextField(
@@ -469,7 +492,13 @@ class GitHub extends AppSource {
     if (token != null && token.isNotEmpty) {
       headers[HttpHeaders.authorizationHeader] = 'Bearer $token';
     }
-    if (forAPKDownload == true) {
+    final requestUri = Uri.tryParse(url);
+    if (requestUri != null && r04IsActionsMetadataApi(requestUri)) {
+      // GitHub's Actions ZIP endpoint returns a 302 to a one-minute signed
+      // storage URL. GitHub API v2026 uses the JSON media type for this hop.
+      headers[HttpHeaders.acceptHeader] = 'application/vnd.github+json';
+      headers['X-GitHub-Api-Version'] = '2026-03-10';
+    } else if (forAPKDownload == true) {
       headers[HttpHeaders.acceptHeader] = 'application/octet-stream';
     }
     if (headers.isNotEmpty) {
@@ -1463,10 +1492,77 @@ class GitHub extends AppSource {
     }
   }
 
+  static Future<void> _browseR04ActionsHistory(
+    BuildContext context,
+    FormValuesTextPatch patch,
+    Map<String, dynamic> values,
+  ) async {
+    final source = GitHub();
+    final chosen = await showDialog<R04ActionsHistoryItem>(
+      context: context,
+      builder: (dialogContext) => R04ActionsHistoryDialog(
+        initialRepositoryUrl: (values['url'] ?? values['sourceUrl'] ??
+          values['appUrl'] ?? '').toString(),
+        initialBranch: (values[r04BranchKey] ?? '').toString(),
+        initialWorkflow: (values[r04WorkflowKey] ?? '').toString(),
+        loadHistory: (repositoryUrl, branch, workflow) async {
+          final uri = Uri.tryParse(repositoryUrl);
+          if (uri == null || uri.scheme != 'https' ||
+              uri.host != 'github.com' || uri.userInfo.isNotEmpty ||
+              uri.hasPort || uri.hasQuery || uri.hasFragment ||
+              uri.pathSegments.length != 2 ||
+              uri.pathSegments.any((s) =>
+                !RegExp(r'^[A-Za-z0-9_.-]+$').hasMatch(s))) {
+            throw const R04ActionsFailure('invalid GitHub repository');
+          }
+          final settings = SettingsProvider();
+          await settings.initializeSettings();
+          final merged = await source.buildMergedSettings(values, settings);
+          if ((merged[githubReqPrefixKey] ?? '').toString().isNotEmpty ||
+              merged['allowInsecure'] == true) {
+            throw const R04ActionsFailure(
+              'Actions browsing requires direct HTTPS with certificate validation',
+            );
+          }
+          final api = Uri.https('api.github.com',
+            '/repos/${uri.pathSegments[0]}/${uri.pathSegments[1]}');
+          return R04GitHubActionsCatalog(
+            repoApi: api,
+            request: (requestUri) => source.sourceRequest(
+              requestUri.toString(), merged),
+          ).history(branch: branch, workflow: workflow);
+        },
+      ),
+    );
+    if (!context.mounted || chosen == null || !chosen.canSelect) {
+      return;
+    }
+    patch({
+      r04SourceModeKey: r04ModeActions,
+      r04BranchKey: chosen.branch,
+      r04WorkflowKey: chosen.workflowId.toString(),
+      r04RunIdKey: chosen.runId.toString(),
+      r04RunAttemptKey: chosen.runAttempt.toString(),
+      r04CommitShaKey: chosen.commitSha,
+      r04ArtifactIdKey: chosen.artifactId.toString(),
+      r04ArtifactFilterKey: '',
+    });
+  }
+
   Future<APKDetails> _fetchR04ActionsDetails(
     String standardUrl,
     Map<String, dynamic> additionalSettings,
   ) async {
+    final settingsProvider = SettingsProvider();
+    await settingsProvider.initializeSettings();
+    final merged = await buildMergedSettings(
+      additionalSettings, settingsProvider);
+    if ((merged[githubReqPrefixKey] ?? '').toString().isNotEmpty ||
+        merged['allowInsecure'] == true) {
+      throw const R04ActionsFailure(
+        'Actions source requires direct HTTPS and certificate validation',
+      );
+    }
     final api = await convertStandardUrlToAPIUrl(
       standardUrl, additionalSettings);
     final selection = await R04GitHubActionsCatalog(
@@ -1476,6 +1572,9 @@ class GitHub extends AppSource {
       workflow: additionalSettings[r04WorkflowKey] as String?,
       branch: additionalSettings[r04BranchKey] as String?,
       runId: additionalSettings[r04RunIdKey] as String?,
+      runAttempt: additionalSettings[r04RunAttemptKey] as String?,
+      commitSha: additionalSettings[r04CommitShaKey] as String?,
+      artifactId: additionalSettings[r04ArtifactIdKey] as String?,
       artifactNamePattern: additionalSettings[r04ArtifactFilterKey] as String?,
     );
     // GitHub Actions returns an artifact ZIP, not an APK. It enters the
@@ -1500,6 +1599,7 @@ class GitHub extends AppSource {
       'runAttempt': archive.runAttempt,
       'workflowId': archive.workflowId,
       'commitSha': archive.commitSha,
+      'expiresAt': archive.expiresAt.toUtc().toIso8601String(),
     };
     final candidate = MapEntry(archive.fileName, archive.archiveUrl.toString());
     final evidence = <String>[

@@ -20,7 +20,13 @@ RISK_GLOBS = (
     'lib/installers/**',
     'lib/providers/apps_provider_install.dart',
     'lib/providers/apps_provider.dart',
+    'lib/providers/source_provider.dart',
+    'lib/components/generated_form_renderer.dart',
     'lib/services/r03_*',
+    'lib/services/r04_*',
+    'lib/app_sources/github.dart',
+    'test/r04_*',
+    'scripts/ci/r04_*',
     'test/r03_*',
     'scripts/ci/r03_*',
 

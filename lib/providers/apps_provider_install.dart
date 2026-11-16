@@ -30,6 +30,7 @@ import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/providers/virustotal_provider.dart';
 import 'package:obtainium/services/artifact_file_work.dart';
+import 'package:obtainium/services/r04_actions_archive_integrity.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/services/install_precommit_gate.dart';
 import 'package:obtainium/services/r02f_p05_device_profile.dart';
@@ -751,7 +752,10 @@ extension AppsProviderInstall on AppsProvider {
           this.apkDir.path,
           useExisting: useExisting,
           headers: requestHeaders,
-          allowInsecure: app.settings.getBool('allowInsecure'),
+          // The Actions API and signed ZIP always require verified TLS even
+          // when a separate legacy source permits insecure certificates.
+          allowInsecure: app.additionalSettings[GitHub.r04SourceModeKey] ==
+              GitHub.r04ModeActions ? false : app.settings.getBool('allowInsecure'),
           logs: logs,
           cancellationToken: cancellationToken,
         );
@@ -761,7 +765,9 @@ extension AppsProviderInstall on AppsProvider {
       try {
         downloadedFile = await runDownload(headers);
       } catch (error) {
-        if (!shouldRetryGitHubDownloadWithoutAuthorization(
+        if (app.additionalSettings[GitHub.r04SourceModeKey] ==
+                GitHub.r04ModeActions ||
+            !shouldRetryGitHubDownloadWithoutAuthorization(
           source: source,
           headers: headers,
           error: error,
@@ -779,6 +785,16 @@ extension AppsProviderInstall on AppsProvider {
         );
         downloadedFile = await runDownload(unauthenticatedHeaders);
       }
+      // R04 P02: verify ZIP bytes before unzipping, APK inspection, UI
+      // approval, or any real Android installer session. Also rejects stale
+      // saved provenance and poisoned downloads reused from the local cache.
+      await verifyR04ActionsArchiveBeforeExtraction(
+        archive: downloadedFile,
+        additionalSettings: app.additionalSettings,
+        sourceUrl: app.url,
+        selectedAssetUrl: app.apkUrls[app.preferredApkIndex].value,
+        selectedAssetName: app.apkUrls[app.preferredApkIndex].key,
+      );
       if (apps[app.listingKey] != null) {
         apps[app.listingKey]!.downloadProgress = _remainingStepsProgress
             .toDouble();

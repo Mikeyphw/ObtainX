@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "repository": "Mikeyphw/ObtainX",
+  "base_branch": "feature/obtainx-r03-resumable-download-engine-20261115",
+  "event": "pull_request",
+  "required_workflows": [
+    {
+      "name": "ObtainX R00 / Source and Contract Integrity",
+      "workflow_id": 413437262
+    },
+    {
+      "name": "ObtainX R00 / Hosted Flutter Qualification",
+      "workflow_id": 413437265
+    },
+    {
+      "name": "ObtainX R02 / API 36 Hosted Emulator Bootstrap",
+      "workflow_id": 413666807
+    },
+    {
+      "name": "ObtainX R02 / RT02 Real System Installer API36",
+      "workflow_id": 413864665
+    },
+    {
+      "name": "ObtainX R02 / RT02B Negative Installer API36",
+      "workflow_id": 414136383
+    },
+    {
+      "name": "ObtainX R02 / RT02C Archive-to-Installer API36",
+      "workflow_id": 414158361
+    }
+  ],
+  "release_qualification": "separate"
+}

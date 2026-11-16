@@ -116,6 +116,10 @@ jobs:
         run: flutter test --no-pub test/r04_actions_history_test.dart
       - name: R04 history selection updates source mode dropdown and saved settings
         run: flutter test --no-pub test/r04_generated_form_patch_test.dart
+      - name: R05 receipt state and evidence invariants
+        run: flutter test --no-pub test/r05_operation_receipt_test.dart
+      - name: R05 persisted journal and restart regression
+        run: flutter test --no-pub test/r05_operation_journal_test.dart
       - name: Execute R01 adversarial archive fixtures first
         run: flutter test --no-pub test/archive_extraction_security_test.dart
       - name: Execute R02 bundle and split-session contract tests

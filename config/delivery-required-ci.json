@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repository": "Mikeyphw/ObtainX",
-  "base_branch": "feature/obtainx-r03-resumable-download-engine-20261115",
+  "base_branch": "feature/obtainx-r04-actions-source-native-20261115",
   "event": "pull_request",
   "required_workflows": [
     {

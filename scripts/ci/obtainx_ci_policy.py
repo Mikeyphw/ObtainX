@@ -19,14 +19,18 @@ SHA = re.compile(r'^[0-9a-f]{40}$')
 RISK_GLOBS = (
     'lib/installers/**',
     'lib/providers/apps_provider_install.dart',
+    'lib/widgets/r05_*',
     'lib/providers/apps_provider.dart',
     'lib/providers/source_provider.dart',
     'lib/components/generated_form_renderer.dart',
     'lib/services/r03_*',
     'lib/services/r04_*',
+    'lib/services/r05_*',
     'lib/app_sources/github.dart',
     'test/r04_*',
+    'test/r05_*',
     'scripts/ci/r04_*',
+    'scripts/ci/r05_*',
     'test/r03_*',
     'scripts/ci/r03_*',
 

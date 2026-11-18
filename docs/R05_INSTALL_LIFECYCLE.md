@@ -18,6 +18,16 @@ Each private application-support receipt records listing/package ID, source **ho
 - Existing R00 Python contract CI covers R05 source/CI wiring and mutation negatives.
 - All four API36 Android workflow path filters include R05 source, UI and tests.
 - The existing six required CI workflow policy remains intact; R05 changes the *base branch* to the R04 feature branch, for a stacked R05 PR.
+- The consolidated R04 source contract validates the *current stacked PR's*
+  R04 base branch; the historical R03-only branch assertion is obsolete for
+  R05. The six required workflow IDs, pull_request event, strict JSON schema,
+  and separate release qualification remain mandatory. An adversarial test
+  proves that changing the committed base back to R03 is rejected.
+- Full app-loading regression tests mock only the private path_provider
+  application-support directory using disposable test storage, and assert that
+  journal recovery actually runs. The production journal never falls back to
+  insecure temp storage and still fails closed when application storage is
+  unavailable.
 - No legacy HFxx/Pxx checks are deleted; existing security and regression coverage remains.
 
 The new source and tests are not a physical Android end-to-end acceptance certificate. `release_qualification=NOT_QUALIFIED`; physical device, all external installer targets, UI large-text/accessibility and release signing require independent proof. Devtool conditional-trigger registrar may still block native CI qualification despite green hosted runs; never work around that by removing path or type filters.

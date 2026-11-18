@@ -12,6 +12,8 @@ import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/services/r02_local_archive_policy.dart';
+import 'package:obtainium/services/r05_operation_journal.dart';
+import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/r02f_p05_device_profile.dart';
 import 'package:shared_storage/shared_storage.dart' as saf;
 import 'package:path_provider/path_provider.dart';
@@ -282,6 +284,27 @@ Future<void> showR02LocalArchiveImport(
         byteEvidenceQualified: exactBytes,
       );
       if (confirmed) {
+        final r05 = await R05OperationJournal.instance.uniqueUnresolved(listing);
+        if (r05 != null && r05.packageId == plan.packageName &&
+            (r05.expectedVersionCode == null ||
+             r05.expectedVersionCode == plan.versionCode) &&
+            current != null) {
+          final signatures = current.signingInfo?.apkContentSigners;
+          final signerHashes = signatures == null
+              ? const <String>[] : certificateHashesFromSignatures(signatures);
+          final observedSigner = signerHashes.isEmpty ? null
+              : signerHashes.first.replaceAll(':', '').toLowerCase();
+          if (r05.archiveSignerSha256 == null ||
+              r05.archiveSignerSha256 == observedSigner) {
+            await R05OperationJournal.instance.settleIfOpen(
+              r05.id, R05InstallStage.confirmed,
+              evidence: R05AndroidEvidence(
+                packageName: current.packageName ?? '',
+                versionCode: current.versionCode,
+                installedSignerSha256: observedSigner,
+                exactAttemptMatches: true));
+          }
+        }
         notice('R02 local installation verified: Android package, version and exact APK bytes match.');
       } else {
         notice('Installation not independently qualified. Check Android status or retry; no success claim.');

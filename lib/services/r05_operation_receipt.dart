@@ -145,6 +145,8 @@ class R05OperationReceipt {
     if (next == R05InstallStage.confirmed &&
         (evidence == null || !evidence.exactAttemptMatches ||
          evidence.packageName != packageId ||
+         (archiveSignerSha256 != null &&
+          evidence.installedSignerSha256 != archiveSignerSha256) ||
          (expectedVersionCode != null && evidence.versionCode != expectedVersionCode) ||
          (evidence.versionCode != null && evidence.versionCode! < 0))) {
       throw StateError('R05 confirmation needs independent matching Android evidence');

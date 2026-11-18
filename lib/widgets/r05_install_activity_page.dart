@@ -27,9 +27,16 @@ class _R05ExtraApprovalTileState extends State<R05ExtraApprovalTile> {
   Future<void> _load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (mounted) setState(() { enabled = prefs.getBool(r05ExtraApprovalPreference) ?? false; busy = false; });
+      if (mounted) {
+        setState(() {
+          enabled = prefs.getBool(r05ExtraApprovalPreference) ?? false;
+          busy = false;
+        });
+      }
     } catch (_) {
-      if (mounted) setState(() => busy = false);
+      if (mounted) {
+        setState(() => busy = false);
+      }
     }
   }
 
@@ -46,13 +53,19 @@ class _R05ExtraApprovalTileState extends State<R05ExtraApprovalTile> {
         if (!await prefs.setBool(r05ExtraApprovalPreference, value)) {
           throw StateError('Could not persist install approval preference');
         }
-        if (mounted) setState(() => enabled = value);
+        if (mounted) {
+          setState(() => enabled = value);
+        }
       } catch (_) {
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Extra approval preference could not be saved')),
-        );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Extra approval preference could not be saved')),
+          );
+        }
       } finally {
-        if (mounted) setState(() => busy = false);
+        if (mounted) {
+          setState(() => busy = false);
+        }
       }
     },
   );
@@ -79,16 +92,25 @@ class _R05InstallActivityPageState extends State<R05InstallActivityPage> {
   }
 
   Future<void> _reconcile() async {
-    if (_checking) return;
+    if (_checking) {
+      return;
+    }
     setState(() => _checking = true);
     try {
       await context.read<AppsProvider>().reconcileR05OperationReceipts();
     } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Reconciliation could not complete. No installation was assumed successful.')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Reconciliation could not complete. No installation was assumed successful.')),
+        );
+      }
     } finally {
-      if (mounted) setState(() { _checking = false; _reload(); });
+      if (mounted) {
+        setState(() {
+          _checking = false;
+          _reload();
+        });
+      }
     }
   }
 
@@ -103,11 +125,15 @@ class _R05InstallActivityPageState extends State<R05InstallActivityPage> {
     try {
       await provider.downloadAndInstallLatestApps(<String>[receipt.listingKey], context);
     } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Retry could not finish. Check the operation log.')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Retry could not finish. Check the operation log.')),
+        );
+      }
     } finally {
-      if (mounted) setState(_reload);
+      if (mounted) {
+        setState(_reload);
+      }
     }
   }
 
@@ -125,15 +151,21 @@ class _R05InstallActivityPageState extends State<R05InstallActivityPage> {
     body: FutureBuilder<List<R05OperationReceipt>>(
       future: _operations,
       builder: (context, snapshot) {
-        if (snapshot.hasError) return const Center(child: Text(
-          'Install history could not be read. Data was not erased; inspect the app diagnostics.',
-        ));
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        if (snapshot.hasError) {
+          return const Center(child: Text(
+            'Install history could not be read. Data was not erased; inspect the app diagnostics.',
+          ));
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
         final records = snapshot.data!;
-        if (records.isEmpty) return const Center(child: Text('No recorded installation attempts'));
+        if (records.isEmpty) {
+          return const Center(child: Text('No recorded installation attempts'));
+        }
         return ListView.separated(
           itemCount: records.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
+          separatorBuilder: (_, _) => const Divider(height: 1),
           itemBuilder: (context, index) {
             final record = records[index];
             final unresolved = record.stage == R05InstallStage.unknown ||

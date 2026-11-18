@@ -21,3 +21,21 @@ Each private application-support receipt records listing/package ID, source **ho
 - No legacy HFxx/Pxx checks are deleted; existing security and regression coverage remains.
 
 The new source and tests are not a physical Android end-to-end acceptance certificate. `release_qualification=NOT_QUALIFIED`; physical device, all external installer targets, UI large-text/accessibility and release signing require independent proof. Devtool conditional-trigger registrar may still block native CI qualification despite green hosted runs; never work around that by removing path or type filters.
+
+## R05 CI repair and compatibility contract (2026-11-16)
+
+The R02F/P03 native-session recovery invariant still applies: full app-list
+loads must invoke `recoverNativeInstallSessions()` after the R05 journal
+`recoverInterruptedOnce()` operation. The legacy source-anchor test is updated
+to check both independently, including mutation negatives. No R02 cancellation,
+installer, Android API36, R03 downloader or R04 Actions gate is removed.
+
+The R05 receipt confirmation state machine now requires the installed APK
+signer fingerprint to match the archived signer when the latter is known.
+Missing/nullable package or signer information is preserved as missing evidence,
+not replaced with the claimed package ID. Analyzer lint and nullable plugin
+bridges are corrected without modifying the platform installer API.
+
+Local source/mutation self-tests are not Flutter compile, native Devtool
+validation, hosted CI, physical Android evidence or release acceptance.
+The separate Devtool conditional-trigger registrar remains outside R05.

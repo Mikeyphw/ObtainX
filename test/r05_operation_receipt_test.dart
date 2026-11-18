@@ -48,6 +48,27 @@ void main() {
     expect(done.installedSignerSha256, digest);
     expect(() => done.transition(R05InstallStage.unknown), throwsStateError);
   });
+  test('known APK signer requires matching installed signer to confirm', () {
+    final signed = R05OperationReceipt.start(
+      id: 'r05_signed_123456789abcdef0', listingKey: 'store:package',
+      packageId: 'com.example.app', backend: 'system', kind: 'apk',
+      fileNames: <String>['base.apk'], expectedVersionCode: 123,
+      archiveSignerSha256: digest, now: DateTime.utc(2026, 11, 16),
+    );
+    expect(() => signed.transition(R05InstallStage.confirmed,
+      evidence: const R05AndroidEvidence(packageName: 'com.example.app',
+        exactAttemptMatches: true, versionCode: 123)), throwsStateError);
+    expect(() => signed.transition(R05InstallStage.confirmed,
+      evidence: const R05AndroidEvidence(packageName: 'com.example.app',
+        exactAttemptMatches: true, versionCode: 123,
+        installedSignerSha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')),
+      throwsStateError);
+    final result = signed.transition(R05InstallStage.confirmed,
+      evidence: const R05AndroidEvidence(packageName: 'com.example.app',
+        exactAttemptMatches: true, versionCode: 123, installedSignerSha256: digest));
+    expect(result.stage, R05InstallStage.confirmed);
+  });
+
   test('reject malformed JSON, signed URLs, unsafe filenames and forged timestamps', () {
     final good = begin();
     for (final change in <void Function(Map<String, dynamic>)>[

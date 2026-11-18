@@ -11,7 +11,8 @@ import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:path_provider/path_provider.dart';
 
 class R05OperationJournal {
-  R05OperationJournal({Directory? testingRoot}) : _testingRoot = testingRoot;
+  R05OperationJournal({Directory? testingRoot}) : this._internal(testingRoot);
+  R05OperationJournal._internal(this._testingRoot);
   static final R05OperationJournal instance = R05OperationJournal();
   static const int maxOperations = 512;
   static const int maxReceiptBytes = 64 * 1024;
@@ -203,7 +204,9 @@ class R05OperationJournal {
           (item.stage == R05InstallStage.pending ||
            item.stage == R05InstallStage.awaitingApproval ||
            item.stage == R05InstallStage.handedOff ||
-           item.stage == R05InstallStage.unknown)) return item;
+           item.stage == R05InstallStage.unknown)) {
+        return item;
+      }
     }
     return null;
   });

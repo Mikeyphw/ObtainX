@@ -299,7 +299,7 @@ Future<void> showR02LocalArchiveImport(
             await R05OperationJournal.instance.settleIfOpen(
               r05.id, R05InstallStage.confirmed,
               evidence: R05AndroidEvidence(
-                packageName: current.packageName,
+                packageName: current.packageName ?? '',
                 versionCode: current.versionCode,
                 installedSignerSha256: observedSigner,
                 exactAttemptMatches: true));

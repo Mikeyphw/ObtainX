@@ -380,7 +380,7 @@ extension AppsProviderInstall on AppsProvider {
   String? _r05InstalledSigner(PackageInfo info) {
     final signing = info.signingInfo;
     final hashes = signing == null ? const <String>[] :
-        certificateHashesFromSignatures(signing.apkContentSigners);
+        certificateHashesFromSignatures(signing.apkContentSigners ?? const <List<int>>[]);
     return hashes.isEmpty ? null : hashes.first.replaceAll(':', '').toLowerCase();
   }
 
@@ -411,7 +411,7 @@ extension AppsProviderInstall on AppsProvider {
           (attempt.archiveSignerSha256 == null ||
               _r05InstalledSigner(observed) == attempt.archiveSignerSha256)) {
         await journal.settleIfOpen(attempt.id, R05InstallStage.confirmed,
-          evidence: R05AndroidEvidence(packageName: observed.packageName,
+          evidence: R05AndroidEvidence(packageName: observed.packageName ?? '',
             exactAttemptMatches: true, versionCode: observed.versionCode,
             installedSignerSha256: _r05InstalledSigner(observed)));
       } else {
@@ -465,11 +465,17 @@ extension AppsProviderInstall on AppsProvider {
     for (final attempt in await journal.list()) {
       if (attempt.stage == R05InstallStage.confirmed ||
           attempt.stage == R05InstallStage.failed ||
-          attempt.stage == R05InstallStage.cancelled) continue;
+          attempt.stage == R05InstallStage.cancelled) {
+        continue;
+      }
       final entry = apps[attempt.listingKey];
-      if (entry == null || entry.app.id != attempt.packageId) continue;
+      if (entry == null || entry.app.id != attempt.packageId) {
+        continue;
+      }
       final unique = await journal.uniqueUnresolved(attempt.listingKey);
-      if (unique?.id != attempt.id) continue;
+      if (unique?.id != attempt.id) {
+        continue;
+      }
       final pending = InstallReleaseSnapshot.fromJson(
         entry.app.additionalSettings[pendingInstallReleaseKey],
       );
@@ -477,9 +483,13 @@ extension AppsProviderInstall on AppsProvider {
       if (observed == null ||
           !p04PendingMatchesInstalledPackage(entry.app, pending, observed) ||
           (attempt.expectedVersionCode != null &&
-           attempt.expectedVersionCode != observed.versionCode)) continue;
+           attempt.expectedVersionCode != observed.versionCode) ||
+          (attempt.archiveSignerSha256 != null &&
+           _r05InstalledSigner(observed) != attempt.archiveSignerSha256)) {
+        continue;
+      }
       await journal.settleIfOpen(attempt.id, R05InstallStage.confirmed,
-        evidence: R05AndroidEvidence(packageName: observed.packageName,
+        evidence: R05AndroidEvidence(packageName: observed.packageName ?? '',
           versionCode: observed.versionCode, exactAttemptMatches: true,
           installedSignerSha256: _r05InstalledSigner(observed)));
     }
@@ -622,7 +632,7 @@ extension AppsProviderInstall on AppsProvider {
              _r05InstalledSigner(installedInfo) == r05.archiveSignerSha256)) {
           await R05OperationJournal.instance.settleIfOpen(r05.id,
             R05InstallStage.confirmed,
-            evidence: R05AndroidEvidence(packageName: installedInfo.packageName,
+            evidence: R05AndroidEvidence(packageName: installedInfo.packageName ?? '',
               versionCode: installedInfo.versionCode,
               exactAttemptMatches: true,
               installedSignerSha256: _r05InstalledSigner(installedInfo)));
@@ -1607,14 +1617,14 @@ extension AppsProviderInstall on AppsProvider {
       // Native stock mode keeps the owned session cancellable while
       // awaiting Android approval. Other installer modes seal irreversibly.
       final activeInstaller = getInstaller();
-      if (!sealInstallHandoff(preparationGate,
-          nativeCancelable: activeInstaller.modeKey == 'system')) {
-        throw const CancellationException();
-      }
       if (activeInstaller.modeKey == 'system') {
         await R05OperationJournal.instance.settleIfOpen(
             r05.id, R05InstallStage.awaitingApproval,
             reason: 'Android session may require approval');
+      }
+      if (!sealInstallHandoff(preparationGate,
+          nativeCancelable: activeInstaller.modeKey == 'system')) {
+        throw const CancellationException();
       }
       result = await activeInstaller.installApk(
         allAPKs,

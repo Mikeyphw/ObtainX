@@ -24,6 +24,29 @@ class R02FP03ContractTests(unittest.TestCase):
         with self.assertRaises(ValueError, msg='mutant not rejected: '+name):
             contract.verify_sources(changed)
 
+    def test_native_recovery_remains_scheduled_after_r05_journal_recovery(self):
+        path = 'lib/providers/apps_provider_lifecycle.dart'
+        self.deny('native session recovery',
+                  'unawaited(recoverNativeInstallSessions());',
+                  '// native installer recovery lost', path)
+        self.deny('R05 receipt recovery',
+                  'await R05OperationJournal.instance.recoverInterruptedOnce();',
+                  '// receipt recovery lost', path)
+        # There are THREE singleId guards in apps_provider_lifecycle.dart.
+        # Mutate the unique native recovery block, not the first unrelated
+        # pending-removal guard. A non-scoped replacement is a false negative.
+        recovery_block = """if (singleId == null) {
+      await R05OperationJournal.instance.recoverInterruptedOnce();
+      unawaited(recoverNativeInstallSessions());
+    }"""
+        self.assertEqual(self.clean[path].count(recovery_block), 1)
+        self.deny('only full-list recovery', recovery_block,
+                  recovery_block.replace('if (singleId == null)',
+                                         'if (singleId != null)', 1), path)
+        self.deny('R05 journal before native recovery',
+                  'await R05OperationJournal.instance.recoverInterruptedOnce();\n      unawaited(recoverNativeInstallSessions());',
+                  'unawaited(recoverNativeInstallSessions());\n      await R05OperationJournal.instance.recoverInterruptedOnce();', path)
+
     def test_no_stale_owner_bypass(self):
         self.deny('identity', 'if (!identical(_gates[gate.listingKey], gate)) return false;',
                   'if (false) return false;', 'lib/services/install_precommit_gate.dart')

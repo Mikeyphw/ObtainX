@@ -32,6 +32,7 @@ import 'package:obtainium/main.dart';
 import 'package:obtainium/pages/apps.dart';
 import 'package:obtainium/pages/settings.dart';
 import 'package:obtainium/providers/apps_provider.dart';
+import 'package:obtainium/widgets/r02f_p03_cancel_button.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -715,7 +716,7 @@ class _DownloadProgressAction extends StatelessWidget {
     // dismissed installer is indistinguishable from one still working, so the
     // page must not be stuck spinning with no way out until the timer expires.
     final bool isAwaitingThirdPartyInstall = dp == -4;
-    final bool isInstalling = dp == -1 || isAwaitingThirdPartyInstall;
+    final bool isInstalling = dp == -1 || dp == -5 || isAwaitingThirdPartyInstall;
     final bool isFlaggedState = dp == -3;
     final bool isBusy = isScanning || isInstalling;
     final String bytesLabel = !isBusy && !isFlaggedState && totalBytes != null
@@ -836,6 +837,12 @@ class _DownloadProgressAction extends StatelessWidget {
               onPressed: () =>
                   context.read<AppsProvider>().cancelDownload(appId),
               child: Text(tr('cancel')),
+            ),
+          )
+        else if (context.watch<AppsProvider>().canCancelInstallPreparation(appId))
+          Center(
+            child: R02fP03CancelButton(
+              listingKey: appId, label: tr('cancel'),
             ),
           )
         else if (isAwaitingThirdPartyInstall)
@@ -3678,6 +3685,18 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
       final String markInstalledLabel = sizeAnnotated(tr('markInstalled'));
       final String markUpdatedLabel = sizeAnnotated(tr('markUpdated'));
 
+      if (app != null && appsProvider.isNativeInstallOutcomeUncertain(app.listingKey)) {
+        // A terminal unknown result is neither an install success nor an
+        // abandoned session. Keep an explicit warning, not a phantom Cancel.
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+          child: Text(
+            'Installer outcome unverified. Check the installed version before retrying.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: actionTheme.colorScheme.error),
+          ),
+        );
+      }
       // #2 — inline progress button replaces the action button while
       // downloading/installing. The live bar is its own widget so the ~4 Hz
       // progress ticks don't rebuild the whole page (see [_DownloadProgressAction]

@@ -288,6 +288,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private var installWatcher: InstallWatcher? = null
+    private var r02fP03Bridge: R02fP03SessionBridge? = null
     private val downloadKeepAwakeLock = Any()
     private var downloadKeepAwakeCount = 0
     private var downloadWakeLock: PowerManager.WakeLock? = null
@@ -444,6 +445,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        r02fP03Bridge = R02fP03SessionBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         installerChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
         installerChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -698,6 +700,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        r02fP03Bridge?.detach()
+        r02fP03Bridge = null
         resetNotificationChannel(null)
         installerChannel = null
         super.cleanUpFlutterEngine(flutterEngine)

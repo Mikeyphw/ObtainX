@@ -48,6 +48,7 @@ import 'package:obtainium/pages/home.dart';
 import 'package:obtainium/pages/settings.dart';
 import 'package:obtainium/folders/app_folder.dart';
 import 'package:obtainium/providers/apps_provider.dart';
+import 'package:obtainium/widgets/r02f_p03_cancel_button.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -1078,7 +1079,8 @@ class _AppListItem extends StatelessWidget {
           downloadProgress != null && activeDownloadProgress == -4;
       final bool isInstalling =
           isAwaitingThirdPartyInstall ||
-          (downloadProgress != null && activeDownloadProgress == -1);
+          (downloadProgress != null &&
+              (activeDownloadProgress == -1 || activeDownloadProgress == -5));
       final bool isBusy = isScanning || isInstalling;
       final double? progressValue = isBusy
           ? null
@@ -1092,7 +1094,8 @@ class _AppListItem extends StatelessWidget {
                 'percentProgress',
                 args: [activeDownloadProgress.toInt().toString()],
               ),
-        button: !isBusy || isAwaitingThirdPartyInstall,
+        button: !isBusy || isAwaitingThirdPartyInstall ||
+            context.watch<AppsProvider>().canCancelInstallPreparation(app.listingKey),
         child: SizedBox.square(
           dimension: 48,
           child: Stack(
@@ -1123,6 +1126,12 @@ class _AppListItem extends StatelessWidget {
                   onPressed: () => context.read<AppsProvider>().cancelDownload(
                     app.listingKey,
                   ),
+                )
+              else if (context.watch<AppsProvider>()
+                  .canCancelInstallPreparation(app.listingKey))
+                R02fP03CancelButton(
+                  listingKey: app.listingKey,
+                  label: tr('cancel'), compact: true,
                 )
               else if (isAwaitingThirdPartyInstall)
                 IconButton.filledTonal(

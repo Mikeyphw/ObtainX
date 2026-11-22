@@ -6,6 +6,8 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/installers/installer.dart';
+import 'package:obtainium/installers/r02f_p03_cancellable_stock.dart';
+import 'package:obtainium/services/install_precommit_gate.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
@@ -115,6 +117,13 @@ class StockInstaller extends Installer {
     required String appId,
     Map<String, dynamic> installOptions = const {},
   }) async {
+    final owner = installOptions['r02fP03Gate'];
+    if (owner is InstallPrecommitGate && owner.nativeCancelable) {
+      return R02fP03CancellableStock.instance.install(
+        apkFilePaths, appId: appId, owner: owner,
+      );
+    }
+    // Existing background/legacy path is deliberately untouched.
     final code = await AndroidPackageInstaller.installApk(
       apkFilePath: apkFilePaths.join(','),
     );

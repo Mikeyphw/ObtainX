@@ -25,6 +25,8 @@ import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/http/obtainx_user_agent.dart';
 import 'package:obtainium/http/response_bytes.dart';
 import 'package:obtainium/services/app_check_store.dart';
+import 'package:obtainium/services/install_precommit_gate.dart';
+import 'package:obtainium/installers/r02f_p03_cancellable_stock.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/notifications_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
@@ -1346,6 +1348,16 @@ class AppsProvider with ChangeNotifier {
   // Active per-app download cancellation tokens, keyed by app ID.
   final Map<String, CancellationToken> _downloadCancellations = {};
 
+  /// UI-owned pre-handoff gates survive route changes via provider state.
+  final InstallPrecommitRegistry _installPrecommit = InstallPrecommitRegistry();
+  /// Native pending sessions survive a killed Flutter process.
+  final Map<String, String> recoveredNativeInstallIds = {};
+  /// Terminal uncertainty must never masquerade as a cancellable session.
+  final Set<String> uncertainNativeInstallListings = <String>{};
+
+  bool isNativeInstallOutcomeUncertain(String listingKey) =>
+      uncertainNativeInstallListings.contains(listingKey);
+
   /// Non-null when the provider failed to initialize. Callers can check this
   /// before assuming the provider is in a usable state.
   String? initError;
@@ -1591,6 +1603,135 @@ class AppsProvider with ChangeNotifier {
     if (entry != null && entry.downloadProgress != null) {
       entry.downloadProgress = null;
     }
+    notify();
+  }
+
+  /// The UI can cancel while preparing, but never claim cancellation
+  /// after the platform handoff is sealed. The previous package is untouched
+  /// when a pre-handoff cancellation is accepted.
+  bool canCancelInstallPreparation(String listingKey) =>
+      _installPrecommit.canCancel(listingKey) ||
+      recoveredNativeInstallIds.containsKey(listingKey);
+
+  InstallPrecommitGate beginInstallPreparation(String listingKey) {
+    final gate = _installPrecommit.begin(listingKey);
+    notify();
+    return gate;
+  }
+
+  bool cancelInstallPreparation(String listingKey) {
+    if (_installPrecommit.requestCancel(listingKey)) {
+      notify();
+      return true; // Request accepted; Android may still report UNKNOWN.
+    }
+    final id = recoveredNativeInstallIds[listingKey];
+    if (id == null) return false;
+    // Hide the button during this request; restore only on UNKNOWN.
+    recoveredNativeInstallIds.remove(listingKey);
+    notify();
+    unawaited(_cancelRecoveredInstall(listingKey, id));
+    return true;
+  }
+
+  Future<void> _cancelRecoveredInstall(String listingKey, String id) async {
+    String status = 'unknown';
+    try {
+      status = await R02fP03CancellableStock.instance.cancelRecovered(id);
+    } catch (error) {
+      unawaited(logs.add('P03 recovered cancel uncertain: $error'));
+    }
+    final entry = apps[listingKey];
+    if (entry == null) return;
+    if (status == 'cancelled') {
+      uncertainNativeInstallListings.remove(listingKey);
+      final pending = InstallReleaseSnapshot.fromJson(
+        entry.app.additionalSettings[pendingInstallReleaseKey],
+      );
+      if (pending != null) {
+        entry.app = discardPendingInstall(entry.app, pending);
+        await saveApps([entry.app], attemptToCorrectInstallStatus: false);
+      }
+      if (entry.downloadProgress == -5) entry.downloadProgress = null;
+    } else {
+      // A session may already be committed or abandoned, making cancellation
+      // impossible. Preserve its pending receipt without claiming success.
+      try {
+        final active = await R02fP03CancellableStock.instance.pending();
+        if (active?['id'] == id && active?['sessionExists'] == true) {
+          recoveredNativeInstallIds[listingKey] = id;
+        } else {
+          uncertainNativeInstallListings.add(listingKey);
+          if (entry.downloadProgress == -5) entry.downloadProgress = null;
+        }
+      } catch (error) {
+        recoveredNativeInstallIds[listingKey] = id;
+        unawaited(logs.add('P03 post-cancel recovery uncertain: $error'));
+      }
+    }
+    notify();
+  }
+
+  Future<void> recoverNativeInstallSessions() async {
+    if (_isBg || _disposed) return;
+    try {
+      final snapshot = await R02fP03CancellableStock.instance.snapshot();
+      final active = snapshot['active'] as Map<String, dynamic>?;
+      final terminal = snapshot['terminal'] as Map<String, dynamic>?;
+      if (terminal != null) {
+        final key = terminal['listingKey']?.toString();
+        if (key != null && key != active?['listingKey']?.toString() &&
+            apps[key] != null &&
+            terminal['outcome']?.toString() == 'unknown') {
+          uncertainNativeInstallListings.add(key);
+          // A finalized native session cannot be cancelled. Reconcile
+          // observed installed package state separately; never clear pending
+          // source/asset provenance based only on this terminal callback.
+          recoveredNativeInstallIds.remove(key);
+          if (apps[key]?.downloadProgress == -5) {
+            apps[key]!.downloadProgress = null;
+          }
+          unawaited(logs.add('P03 recovery UNKNOWN for $key: independent package verification required'));
+        }
+      }
+      if (active == null) {
+        notify();
+        return;
+      }
+      final listingKey = active['listingKey']?.toString();
+      final id = active['id']?.toString();
+      if (listingKey == null || id == null || apps[listingKey] == null) return;
+      if (_installPrecommit.canCancel(listingKey)) return;
+      if (active['sessionExists'] != true) {
+        // No longer abandonable: do not keep showing a fake Cancel action.
+        recoveredNativeInstallIds.remove(listingKey);
+        uncertainNativeInstallListings.add(listingKey);
+        if (apps[listingKey]?.downloadProgress == -5) {
+          apps[listingKey]!.downloadProgress = null;
+        }
+        notify();
+        return;
+      }
+      recoveredNativeInstallIds[listingKey] = id;
+      final entry = apps[listingKey]!;
+      entry.downloadProgress ??= -5;
+      notify();
+    } catch (error) {
+      unawaited(logs.add('P03 restart session reconciliation inconclusive: $error'));
+    }
+  }
+
+  bool sealInstallHandoff(InstallPrecommitGate? gate, {
+    bool nativeCancelable = false,
+  }) {
+    if (gate == null) return true; // Background/direct call has no UI cancellation owner.
+    final allowed = _installPrecommit.sealForHandoff(gate,
+        nativeCancelable: nativeCancelable);
+    notify();
+    return allowed;
+  }
+
+  void endInstallPreparation(String listingKey, InstallPrecommitGate gate) {
+    _installPrecommit.finish(listingKey, gate);
     notify();
   }
 

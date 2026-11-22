@@ -1074,6 +1074,21 @@ extension AppsProviderInstall on AppsProvider {
         obbFiles.map((file) => file.path).toList(),
         plan.packageName,
       );
+      validateStagedObbPaths(
+        obbFiles.map((file) => file.path).toList(), plan.packageName,
+        extractionRoot: dir.extracted.path,
+      );
+      // Android 11+ restricts direct Android/obb writes. The legacy file
+      // branch could silently return after a cancelled SAF picker and still
+      // report the APK installed. Refuse before any APK session instead.
+      if (obbFiles.isNotEmpty && !installer.wantsContainerHandoff) {
+        final sdk = (await DeviceInfoPlugin().androidInfo).version.sdkInt;
+        if (sdk >= 30) {
+          throw const FormatException(
+            'OBB payload cannot be installed by this backend on Android 11+',
+          );
+        }
+      }
 
       if (installer.wantsContainerHandoff) {
         // Hand off the original bundle file (XAPK/ZIP/tarball) to the
@@ -1897,11 +1912,20 @@ extension AppsProviderInstall on AppsProvider {
       ));
     }
     final device = await DeviceInfoPlugin().androidInfo;
+    final dispatcher = WidgetsBinding.instance.platformDispatcher;
+    final uiLocales = dispatcher.locales.map((locale) => locale.toLanguageTag())
+        .toList(growable: false);
+    final views = dispatcher.views;
+    final int? uiDensityDpi = views.isNotEmpty
+        ? (views.first.devicePixelRatio * 160).round()
+        : null;
     final plan = resolveInstallBundlePlan(
       members: members,
       format: format,
       supportedAbis: device.supportedAbis,
       deviceSdkVersion: device.version.sdkInt,
+      deviceLocales: uiLocales,
+      deviceDensityDpi: uiDensityDpi,
       expectedPackageName: expectedPackageName,
     );
     final baseInfo = infoByPath[plan.baseApkPath];

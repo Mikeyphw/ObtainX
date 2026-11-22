@@ -59,7 +59,8 @@ class R02HF02Contracts(unittest.TestCase):
 
     def test_stale_collection_if_rejected(self):
         self.mutate('lib/services/install_bundle_plan.dart',
-                    '[...nonAbi, ?abiMember]', '[...nonAbi, if (abiMember != null) abiMember]')
+                    '[...nonAbi, ?abiMember, ...selectedLocales, ?densityMember]',
+                    '[...nonAbi, if (abiMember != null) abiMember, ...selectedLocales, ?densityMember]')
 
     def test_golden_triage_on_any_failure_rejected(self):
         self.mutate('.github/workflows/obtainx-r00-flutter.yml',

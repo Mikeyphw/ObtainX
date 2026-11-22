@@ -38,6 +38,8 @@ jobs:
         run: flutter test --no-pub test/archive_extraction_security_test.dart
       - name: Execute R02 bundle and split-session contract tests
         run: flutter test --no-pub test/r02_install_bundle_plan_test.dart
+      - name: Execute RT02D device-aware split and OBB stage contracts
+        run: flutter test --no-pub test/r02d_device_compatibility_test.dart
       - name: Execute full Flutter test suite
         id: full_flutter_tests
         run: |

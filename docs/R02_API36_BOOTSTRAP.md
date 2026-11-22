@@ -1,0 +1,117 @@
+# R02 RT01 — API 36 Hosted Emulator Bootstrap
+
+This is **NOT a split-install E2E qualification**. It is a source-pinned first
+stage to establish reproducible Android 16 emulator boot and actual ObtainX
+debug APK installation, installed APK bytes, native MainActivity start, stable
+running process and screenshot evidence. It does not exercise the Flutter
+installer flow, split APK application, OBB handoff, user consent, cancellation,
+or failure recovery through ObtainX.
+
+## Trusted emulator reference
+
+Source reference: `Mikeyphw/Cinderbox-Companion`, especially
+`.github/workflows/r48-real-activity-acceptance.yml` and
+`scripts/devtool/r48_emulator_ci.sh`. Reuse only its proven hosted Linux
+KVM + ReactiveCircus pinned API 36 x86_64/Google APIs configuration, with
+SDK provision and disk preflight; do not copy game-specific tests.
+
+ObtainX R02 certified source parent: `dd297f3e0e503e1a1b59b0ce2a0b629e05808204`,
+R02 source and Flutter CI runs `42872288443` and `42872288271` (success).
+R01 base remains `3a57cfdced5940d3cdebd2396ba9c86c21d4926c`.
+
+## R00 default-deny workflow inventory
+
+The R00 source contract retains its strict `EXPECTED_WORKFLOWS` allowlist and
+explicitly admits only `obtainx-r02-api36.yml` in addition to the two
+previously reviewed workflows. The original read-only permission, 40-character
+pinned action, no release/write and unexpected workflow checks remain mandatory.
+Updated R00 regression tests prove that the new workflow is required and that
+unreviewed workflows, mutable actions and release commands are still rejected.
+This is an additive control, **not** a wildcard or a relaxation of R00.
+
+## Qualification and evidence boundaries
+
+- Only `ubuntu-24.04` with `/dev/kvm`, `Android 36`, x86_64, Google APIs,
+  Flutter `3.47.6`, and ephemeral `emulator-5554` are permitted.
+- Only `flutter build apk --debug --flavor normal --no-pub` is built.
+  No production signing credentials, public releases, merges or packages from
+  external mirrors are accessed.
+- Require `dev.bikram.obtainx.debug` as the package ID, verify the debug APK's
+  cert, refuse a preinstalled copy, install it, compare the installed base APK
+  SHA-256 to the exact built artifact, launch `MainActivity`, check its process
+  remains alive, and capture one app screenshot. The image is **evidence, not
+  a visual acceptance test**.
+- Initialize a fail-closed NOT_RUN JSON receipt before provisioning. Allowlist
+  only `receipt.json` and `app_launch.png` in upload, with run SHA/ID binding.
+- Receipt fields explicitly mark physical device, ObtainX-driven split E2E,
+  release and publication qualification as **false**, even when emulator boot
+  succeeds. Workflow remains red on any missing evidence.
+- Source and mutation tests prohibit silent substitutions of emulator ABI/API,
+  physical device fallback, loss of APK identity/byte proof, and premature
+  claims of R02 full runtime acceptance.
+
+## Next R02 RT02 gate
+
+Add controlled, signed lab APK plus real base/config split inventory on the
+emulator. Drive installation through ObtainX's own session APIs and capture
+Android PackageManager installed splitNames, status, consent and cleanup. Do
+not label R02 fully runtime-qualified until that follow-up E2E gate succeeds.
+
+## RT01 HF02 — Android API 36 fresh-package probe
+
+Hosted run 42879069321 booted the Cinderbox-style Google APIs x86_64 emulator and built the debug APK, but the smoke script failed at an ADB operation with exit 1 and no stderr. The original script did not log the failing command. A plausible first failing operation is `pm path` on a fresh (absent) package: Android may return exit 1 without any output. This remains a hypothesis until rerun evidence identifies the exact stage.
+
+HF02 accepts only `pm path` exit status 0 or 1 **with empty stdout/stderr**, and only when a *second independent* successful `cmd package list packages --user 0 <exact package>` query is also empty. Existing installations, query errors, nonzero codes other than 1, ambiguous output and failed secondary queries all refuse. Each emulator stage is logged and command errors include the exact operation and bounded stdout/stderr; no installation evidence is asserted on failure.
+
+The only permitted qualification after a fully green run is **hosted API 36 debug APK boot and byte identity**, not user-device acceptance, ObtainX-driven package installation, split install, a release signature, or publication.
+
+## RT01 HF03 — Real activity state instead of `am start -W` text
+
+On hosted run 42884264556 (commit 601e1caa883cefaf32e0c49138bddfb23a4e477e),
+Android 16 booted, the debug APK installed, and the installed APK's SHA-256
+matched the build. The final failure was `MainActivity did not launch`
+at `START_OBTAINX_MAIN_ACTIVITY`, **before** any process/foreground probe.
+The `am start -W` output was discarded by the old assertion, so this record
+does not prove whether a real activity launch or only a text-format mismatch
+was responsible.
+
+HF03 logs a bounded launch-output summary and rejects explicit ActivityManager
+errors, but does not infer a successful launch from any `Status:` or `Complete`
+banner. It checks that an exact ObtainX main-process PID appears, that the real
+`MainActivity` is currently resumed (`dumpsys activity activities`) or
+focused (`dumpsys window windows`), and that both PID and foreground proof
+remain valid after a stability interval. Absent PID is retryable only for an
+empty `pidof` exit status 1; ambiguous ADB results always refuse. Both runtime
+proof and screenshot hash are required in the independent receipt verifier.
+Synthetic unit tests cover actual resumed/focused states, wrong package/activity,
+non-top activity records, missing/stale PID and bypass mutations.
+
+**No test is weakened.** This is still emulator bootstrap only; actual
+ObtainX-driven split installation (RT02), physical-device acceptance, release
+and publication remain unqualified.
+
+## RT01 HF04 — API 36 startup stabilization and failure evidence
+
+On 2026-11-10, run `42888027381` at commit
+`f87f14a78c53d6ad3002e132b3770e5c91b46796` passed source, Flutter,
+KVM, SDK, APK installation and exact installed-byte verification. It failed
+*after* `am start -W` reported `Status: timeout` and the first foreground
+observation was lost five seconds later. That observation alone cannot prove
+whether a first-run system dialog, an app crash, or a transient task transition
+was responsible.
+
+HF04 follows Cinderbox-Companion's hosted real-activity-evidence approach:
+launch without Android's `-W` cold-start ten-second status timeout, require
+repeated exact real resumed/focused `MainActivity` observations tied to a stable
+PID, and allow **at most one** explicit task re-foregrounding while the same
+process is still alive. A perpetual permission dialog, unrelated foreground,
+process restart, ambiguous ADB reply or missing device proof still fails.
+Screenshot capture requires a final app-foreground observation before **and
+after** capture, with exact installed APK SHA-256. A failing run records only
+an allowlisted source-bound failure category, never raw device/account logs,
+and never uploads an `app_launch.png` labelled success. Existing production,
+split-install and release denials remain mandatory.
+
+Hosted emulator execution remains pending until the new source commit is
+pushed and GitHub Actions completes successfully. RT01 is **NOT** RT02
+ObtainX-driven split-install E2E qualification.

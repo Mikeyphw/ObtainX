@@ -18,6 +18,10 @@ EXPECTED_WORKFLOWS = {
     'obtainx-r00-flutter.yml',
     # Reviewed, read-only, SHA-pinned, emulator-only workflow (R02 RT01).
     'obtainx-r02-api36.yml',
+    # Reviewed disposable RT02 installer workflow; no release or secrets.
+    'obtainx-r02-rt02.yml',
+    # Reviewed RT02B fail-closed Android 16 rejection gate; test-only APKs.
+    'obtainx-r02-rt02b.yml',
 }
 LEGACY_WORKFLOWS = {
     'build.yml', 'release.yml', 'pr-base-guard.yml',

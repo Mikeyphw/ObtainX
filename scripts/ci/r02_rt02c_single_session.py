@@ -14,6 +14,8 @@ import threading
 import time
 from pathlib import Path
 from r02_rt02_hosted import FixtureServer
+from obtainx_ci_optimization_opt06_rt02c_polling import should_probe_runner
+from r02c_watchdog import RT02CWatchdog
 
 CASES = ('apks', 'apkm', 'xapk', 'zip', 'tar.gz', 'traversal', 'ambiguous')
 POSITIVE = CASES[:5]
@@ -74,6 +76,9 @@ class SingleSession:
         self.failure = None
         self.flutter_log = out / 'rt02c-single-session.private.log'
         self.app_installed = False
+        self.runner_probe_last = None
+        self.runner_probe_count = 0
+        self.runner_probe_skipped = 0
         self.launches = 0
         self.last_progress = 0.0
 
@@ -86,9 +91,15 @@ class SingleSession:
                 self.failure = category
 
     def snapshot(self):
+        # The control-server thread may begin a case while the host polls.
+        # Capture the monotonic clock AND case start under the same lock;
+        # an earlier host clock sample would otherwise produce negative elapsed.
         with self.lock:
-            return (self.active, self.phase, self.called, self.taps,
-                    self.call_at, self.next_index, self.failure)
+            now = time.monotonic()
+            active = self.active
+            case_elapsed = now - self.case_started_at if active is not None else None
+            return (now, active, self.phase, self.called, self.taps,
+                    self.call_at, self.next_index, self.failure, case_elapsed)
 
     def transition(self, route: str, data: dict):
         with self.lock:
@@ -188,28 +199,53 @@ class SingleSession:
                 '--dart-define=OX_R02C_BASE_SHA=' + self.inv['signed_base_sha256'],
                 '--dart-define=OX_R02C_SPLIT_SHA=' + self.inv['signed_split_sha256']]
         started = time.monotonic()
-        timeout_at = started + 6000  # One bounded runtime for all seven cases.
+        watchdog = RT02CWatchdog(started)  # Bounded, phase-aware real runtime.
         with self.flutter_log.open('wb') as target:
             p = subprocess.Popen(args, stdin=subprocess.DEVNULL,
                                  stdout=target, stderr=subprocess.STDOUT)
             try:
                 while p.poll() is None:
-                    now = time.monotonic()
-                    active, phase, called, taps, call_at, idx, failure = self.snapshot()
+                    (now, active, phase, called, taps, call_at, idx,
+                     failure, case_elapsed) = self.snapshot()
                     if failure:
                         raise self.H.Refused('single-session boundary refused: ' + failure)
-                    self.need(now < timeout_at, 'bounded single-session Flutter timeout')
+                    observed_phase = phase if active else self.H.stage(self.flutter_log)
+                    failure_code = watchdog.tick(
+                        now=now, observed_phase=observed_phase, completed_cases=idx,
+                        active=active is not None,
+                        case_elapsed=case_elapsed)
+                    if failure_code:
+                        # Only bounded, non-sensitive phase/elapsed evidence leaves
+                        # the CI runner. Private Flutter logs remain unpublished.
+                        current_case = active or (CASES[idx] if idx < len(CASES) else CASES[-1])
+                        self.H.progress(self.out, current_case, observed_phase,
+                                        int(now-started), taps if active else 0)
+                        raise self.H.Refused('OX_RT02C_WATCHDOG_REFUSED ' + failure_code +
+                                             ' case=' + current_case +
+                                             ' phase=' + observed_phase +
+                                             ' elapsed=' + str(int(now-started)) +
+                                             ' runner_seen=' + ('1' if self.app_installed else '0') +
+                                             ' runner_probes=' + str(self.runner_probe_count))
                     self.need(call_at is None or now - call_at < 240,
                               'bounded real installer request timeout')
                     if not self.app_installed:
-                        probe = self.base.command(['adb', '-s', self.base.SERIAL,
-                                                   'shell', 'pm', 'path', self.base.APP],
-                                                  allow_failure=True)
-                        if (probe.returncode == 0 and
-                                probe.stdout.strip().startswith(b'package:')):
-                            self.base.adb('shell', 'appops', 'set', self.base.APP,
-                                          'REQUEST_INSTALL_PACKAGES', 'allow')
-                            self.app_installed = True
+                        # No need to poll Android every second while Gradle
+                        # is compiling the Flutter runner. Outside that
+                        # phase, eligibility polling remains immediate.
+                        runner_stage = self.H.stage(self.flutter_log)
+                        if should_probe_runner(now, self.runner_probe_last, runner_stage):
+                            self.runner_probe_last = now
+                            self.runner_probe_count += 1
+                            probe = self.base.command(['adb', '-s', self.base.SERIAL,
+                                                       'shell', 'pm', 'path', self.base.APP],
+                                                      allow_failure=True)
+                            if (probe.returncode == 0 and
+                                    probe.stdout.strip().startswith(b'package:')):
+                                self.base.adb('shell', 'appops', 'set', self.base.APP,
+                                              'REQUEST_INSTALL_PACKAGES', 'allow')
+                                self.app_installed = True
+                        else:
+                            self.runner_probe_skipped += 1
                     # Never interfere with startup/Gradle. Never tap unless Dart
                     # explicitly reached StockInstaller for the current case.
                     if self.app_installed and active and called and taps == 0:
@@ -238,6 +274,10 @@ class SingleSession:
                 self.need(self.failure is None, 'boundary failure after Flutter exit')
                 self.receipt['flutter_launches'] = self.launches
                 self.receipt['session_log_sha256'] = self.H.sha(self.flutter_log)
+                self.receipt['runner_probe_count'] = self.runner_probe_count
+                self.receipt['runner_probe_skipped'] = self.runner_probe_skipped
+                print('OX_OPT06_RT02C_RUNNER_PROBES_COUNT=' + str(self.runner_probe_count) +
+                      ' SKIPPED=' + str(self.runner_probe_skipped), flush=True)
             finally:
                 if p.poll() is None:
                     p.terminate()

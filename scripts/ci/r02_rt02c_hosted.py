@@ -216,6 +216,10 @@ def verify(out:Path)->int:
         'publication_allowed':False,'backend':'production StockInstaller'}
     for key,value in expected.items():need(obj.get(key)==value,'source-bound receipt invalid: '+key)
     need(obj.get('flutter_launches')==1,'exactly one Flutter test launch required')
+    for key,count in (('runner_probe_count',obj.get('runner_probe_count')),
+                      ('runner_probe_skipped',obj.get('runner_probe_skipped'))):
+        need(type(count) is int and 0<=count<=6000,
+             'missing or invalid bounded OPT06 runner polling receipt: '+key)
     need(re.fullmatch(r'[0-9a-f]{64}',obj.get('session_log_sha256','')) is not None,
          'missing single-session log digest')
     cases=obj.get('cases')

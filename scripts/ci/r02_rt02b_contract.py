@@ -52,20 +52,31 @@ def inspect(root:Path=ROOT)->list[str]:
                  'key.unlink(missing_ok=True)',"'release_qualified':False",
                  "previous['files'].items()", "'source_sha':sha"),
         DART:('IntegrationTestWidgetsFlutterBinding.ensureInitialized()',
-              "negativeCase!='signature_mismatch' && negativeCase!='downgrade'",
+              'for (final testCase in negativeCases)',
+              'OX_R02B_WRONG_SHA256', 'OX_R02B_DOWNGRADE_SHA256',
               'StockInstaller(SettingsProvider()).installApk(',
               'resolveInstallBundlePlan(', 'sha256.convert(bytes).toString()!=fixtureDigest',
               'expect(result.isError,isTrue',
+              'await awaitHostAck(testCase)',
+              'OX_R02B_EVENT=$testCase:REJECTED',
+              'OX_R02B_EVENT=$testCase:ACKED',
               'OX_R02_RT02_DART_STAGE=INSTALL_CALL',
               'OX_R02_RT02_DART_STAGE=INSTALL_RETURNED'),
         HOST:("CASES=('signature_mismatch','downgrade')",'baseline_unchanged(fixtures)',
               'base.adb(\'install\',\'-t\'',
               'base._tap_confirmed_install_dialog()',
               "'STOCK_INSTALLER_CALL'", 'stock_installer_error_observed',
-              "'status':'NOT_RUN'", "receipt['status']='PASS_TWO_REAL_ANDROID_REJECTIONS'",
+              "'status':'NOT_RUN'", "'PASS_TWO_REAL_ANDROID_REJECTIONS'",
               "'physical_device_qualified':False", "'full_r02_matrix_qualified':False",
               "'release_qualified':False", "'publication_allowed':False",
-              'bounded Flutter negative-test timeout',"d['status']='FAILED'",'rt02b-progress.json'),
+              'bounded Flutter negative-test timeout',"d['status']='FAILED'",'rt02b-progress.json',
+              'EVENTS=tuple((case,step) for case in CASES',
+              "for step in ('START','INSTALL_CALL','REJECTED','ACKED')",
+              'state.acks[pending].set()',
+              'proof=baseline_unchanged(fixtures)',
+              "'flutter_launches':1", "'host_acknowledgement_order':list(CASES)",
+              'session_log_sha256', 'events_from_log(log)',
+              'start_new_session=True'),
         DOC:('NOT full R02', 'Production StockInstaller','No merges','No releases',
              'source-pinned', 'wrong certificate', 'downgrade'),
         BASEHOST:("APP='dev.bikram.obtainx.debug'",'def installed_state(',
@@ -103,10 +114,23 @@ def inspect(root:Path=ROOT)->list[str]:
         errors.append('Android installed bytes unchanged proof missing')
     if 'orig_cert!=wrong_cert' not in f or "extra['original_cert_sha256']!=extra['wrong_cert_sha256']" not in h:
         errors.append('cert mismatch evidence missing')
-    if 'for case in CASES:' not in h or 'baseline_unchanged(fixtures)' not in h:
-        errors.append('both independent negative device checks required')
-    if 'if installed and phase==\'STOCK_INSTALLER_CALL\' and taps==0' not in h:
+    if ("EVENTS=tuple((case,step) for case in CASES" not in h or
+            "for step in ('START','INSTALL_CALL','REJECTED','ACKED')" not in h or
+            'proof=baseline_unchanged(fixtures)' not in h or
+            'state.acks[pending].set()' not in h):
+        errors.append('both independent negative device checks and host barrier required')
+    if "if installed and phase=='STOCK_INSTALLER_CALL' and taps[pending]==0" not in h:
         errors.append('unbounded or pre-Dart UI probe prohibited')
+    if (h.count("args=['flutter','test'")!=1 or
+            h.count('subprocess.Popen(args')!=1 or
+            "'flutter_launches':1" not in h or
+            'events==EVENTS[:len(events)]' not in h or
+            "sequence==EVENTS and done==list(CASES)" not in h):
+        errors.append('OPT05 single Flutter session and ordered case proof absent')
+    if (d.count('StockInstaller(SettingsProvider()).installApk(')!=1 or
+            'await awaitHostAck(testCase)' not in d or
+            'wrongDigest==downgradeDigest' not in d):
+        errors.append('OPT05 distinct runtime-bound signed fixtures and host ack required')
     if 'key.unlink(missing_ok=True)' not in f:
         errors.append('ephemeral wrong-signing key deletion missing')
     try:

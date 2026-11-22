@@ -108,7 +108,9 @@ class HF06FlutterPreDartRecovery(unittest.TestCase):
         import inspect
         source=inspect.getsource(H.one_scenario)
         self.assertIn('attempt==1 and not dart_started and tap_count==0',source)
-        self.assertLess(source.index('empty_or_expected_package()'),source.index('continue'))
+        self.assertIn('empty_or_expected_package()',source)
+        self.assertIn("installed_state(1,False,out/'fixtures')",source)
+        self.assertIn("if scenario=='split':",source)
         self.assertIn("phase in ('FLUTTER_STARTING','GRADLE_BUILD','TEST_APK_INSTALL')",source)
 
     def test_hf06_failure_does_not_mark_installer_pass(self):
@@ -121,11 +123,16 @@ class ReceiptAndPackageProof(unittest.TestCase):
     def setUp(self):
         self.t=tempfile.TemporaryDirectory(prefix='ox-rt02-proof-');self.out=Path(self.t.name)
         self.sha='a'*40;self.run='1234'
-        self.valid={'schema':1,'status':'PASS_TWO_ANDROID_SYSTEM_SESSIONS','source_sha':self.sha,
+        self.valid={'schema':2,'status':'PASS_TWO_ANDROID_SYSTEM_SESSIONS','source_sha':self.sha,
                     'run_id':self.run,'hosted_emulator_only':True,
                     'physical_device_qualified':False,'full_r02_matrix_qualified':False,
                     'release_qualified':False,'publication_allowed':False,
                     'installer_backend':'production StockInstaller',
+                    'flutter_launches':1,
+                    'host_acknowledgement_order':['standalone','split'],
+                    'dart_event_order':[f'{case}:{stage}' for case in ('standalone','split')
+                                        for stage in ('START','INSTALL_CALL','INSTALL_RETURNED','ACKED')],
+                    'session_log_sha256':'e'*64,
                     'scenarios':[{'scenario':'standalone','version_code':1,'installed_path_count':1,
                         'config_x86_64_present':False,'android_confirmations':1,
                         'approval_path':'explicit_dialog'},

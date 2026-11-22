@@ -15,11 +15,14 @@ on:
       - 'android/**'
       - '.github/workflows/**'
       - 'scripts/ci/r02_rt02**'
+      - 'scripts/ci/r02_sdk_retry.py'
       - 'scripts/ci/obtainx_ci_policy.py'
+      - 'scripts/ci/*optimization*'
       - 'scripts/ci/r00_source_contract.py'
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - 'docs/SECURITY_RELEASE_POLICY.md'
+    types: [opened, reopened, synchronize, labeled, unlabeled]
   workflow_dispatch:
 
 permissions:
@@ -31,8 +34,11 @@ concurrency:
 
 jobs:
   rt02b-negative-install:
+    if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'ci:development-only') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 100
+    env:
+      GRADLE_OPTS: -Dorg.gradle.caching=true -Dorg.gradle.parallel=true -Dorg.gradle.workers.max=2
     steps:
       - name: Checkout exact source commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
@@ -50,6 +56,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            android/gradle/wrapper/gradle-wrapper.properties
+            android/**/*.gradle*
       - name: Set up Flutter 3.47.6
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # pinned v2
         with:
@@ -70,7 +80,7 @@ jobs:
           test -c /dev/kvm || { echo OX_R02_RT02_KVM_MISSING >&2; exit 1; }
           if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then sudo chmod a+rw /dev/kvm; fi
           test -r /dev/kvm && test -w /dev/kvm || { echo OX_R02_RT02_KVM_REFUSED >&2; exit 1; }
-          sdkmanager --install 'platforms;android-36' 'build-tools;35.0.0' 'system-images;android-36;google_apis;x86_64'
+          python3 -B scripts/ci/r02_sdk_retry.py 'platforms;android-36' 'build-tools;35.0.0' 'system-images;android-36;google_apis;x86_64'
           avd_root="${ANDROID_AVD_HOME:-$HOME/.android/avd}"
           mkdir -p "$avd_root"
           available_kib="$(df -Pk "$avd_root" | awk 'END {print $4}')"
@@ -101,15 +111,33 @@ jobs:
           ram-size: 2048M
           disk-size: 3072M
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           script: bash -c 'set -euo pipefail; python3 -B scripts/ci/r02_rt02b_hosted.py run --out "$RUNNER_TEMP/obtainx-rt02b"'
       - name: Independently verify negative Android package-state receipts
         shell: bash
         run: |
           set -euo pipefail
           python3 -B scripts/ci/r02_rt02b_hosted.py verify --out "$RUNNER_TEMP/obtainx-rt02b"
+      - name: Record only bounded receipt hashes before artifact upload
+        if: always()
+        shell: bash
+        env:
+          OX_EVIDENCE_ROOT: ${{ runner.temp }}/obtainx-rt02b
+        run: |
+          set -euo pipefail
+          printf 'ObtainX evidence hashes only; source=%s; uploads remain mandatory\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          for f in "$OX_EVIDENCE_ROOT"/*.json "$OX_EVIDENCE_ROOT"/fixtures/*inventory.json; do
+            if [[ -f "$f" && ! -L "$f" ]]; then
+              n="$(wc -c < "$f")"
+              if [[ "$n" =~ ^[0-9]+$ ]] && (( n <= 131072 )); then
+                printf '%s (%s bytes): ' "$(basename "$f")" "$n" >> "$GITHUB_STEP_SUMMARY"
+                sha256sum "$f" | awk '{print $1}' >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
+          done
       - name: Publish minimized emulator-only evidence even on failure
         if: always()
+        timeout-minutes: 3
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # pinned v4
         with:
           name: obtainx-r02-rt02b-rejection-${{ github.sha }}

@@ -36,13 +36,16 @@ jobs:
         run: flutter analyze lib test
       - name: Execute R01 adversarial archive fixtures first
         run: flutter test --no-pub test/archive_extraction_security_test.dart
+      - name: Execute R02 bundle and split-session contract tests
+        run: flutter test --no-pub test/r02_install_bundle_plan_test.dart
       - name: Execute full Flutter test suite
+        id: full_flutter_tests
         run: |
           set -o pipefail
           flutter test --no-pub --reporter expanded 2>&1 | tee "$RUNNER_TEMP/ox-full-tests.log"
       - name: Triage known app-row golden drift without changing qualification
         id: golden_triage
-        if: ${{ failure() }}
+        if: ${{ failure() && steps.full_flutter_tests.outcome == 'failure' }}
         run: |
           python3 scripts/ci/r01_hf02_golden_triage.py "$RUNNER_TEMP/ox-full-tests.log" test/goldens/R01_HF02_TRIAGE.json
           flutter test --no-pub --update-goldens test/apps_scroll_work_test.dart

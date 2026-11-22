@@ -31,8 +31,10 @@ def inspect(root: Path=ROOT) -> list[str]:
           'flutter build apk --debug --flavor normal --no-pub')
     for needle in must:
         if needle not in s:problems.append('Required CI gate missing: '+needle)
-    if 'if: ${{ failure() }}' not in s or 'id: golden_triage' not in s:
-        problems.append('Diagnostic golden generation must be failure-only')
+    if ('id: full_flutter_tests' not in s or
+        "if: ${{ failure() && steps.full_flutter_tests.outcome == 'failure' }}" not in s or
+        'id: golden_triage' not in s):
+        problems.append('Diagnostic golden generation requires full Flutter suite failure')
     golden=root/'test/apps_scroll_work_test.dart'
     if not golden.is_file() or golden.read_text().count('matchesGoldenFile(')!=3:
         problems.append('Strict app-row golden matcher was changed or removed')

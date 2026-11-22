@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "fork": "Mikeyphw/ObtainX",
+  "qualified_prior_phase": "R01",
+  "r01_qualified_head": "3a57cfdced5940d3cdebd2396ba9c86c21d4926c",
+  "r01_qualified_run": 42859288599,
+  "r01_main_merged": false,
+  "device_runtime_qualified": false,
+  "release_authorized": false,
+  "implementation_phase": "R02 package discovery + atomic install session plans"
+}

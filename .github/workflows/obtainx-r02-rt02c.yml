@@ -32,6 +32,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          # Reuse authenticated Gradle wrapper/dependency artifacts across CI runs.
+          # Not a runtime speedup claim until a new source-bound benchmark passes.
+          cache: gradle
+          cache-dependency-path: |
+            android/gradle/wrapper/gradle-wrapper.properties
+            android/**/*.gradle*
       - name: Set up Flutter 3.47.6
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # pinned v2
         with:

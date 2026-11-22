@@ -40,6 +40,8 @@ jobs:
         run: flutter test --no-pub test/r02_install_bundle_plan_test.dart
       - name: Execute RT02D device-aware split and OBB stage contracts
         run: flutter test --no-pub test/r02d_device_compatibility_test.dart
+      - name: Execute RT02E verified OBB delivery and cancellation contracts
+        run: flutter test --no-pub test/r02e_verified_obb_delivery_test.dart
       - name: Execute full Flutter test suite
         id: full_flutter_tests
         run: |

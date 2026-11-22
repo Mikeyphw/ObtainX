@@ -53,6 +53,14 @@ class RT02DSourceMutations(unittest.TestCase):
         self.mutate(MOD.PLANNER,"path.split('/').contains('..')",'false')
     def test_no_obb_host_fallback(self):
         self.mutate(MOD.PROVIDER,'OBB payload cannot be installed by this backend on Android 11+', 'continue without OBB')
+    def test_android11_preinstall_sdk_gate_cannot_be_disabled(self):
+        self.mutate(MOD.PROVIDER,
+            'if (sdk >= 30) {\n          throw const FormatException(',
+            'if (sdk >= 999) {\n          throw const FormatException(')
+    def test_android11_runtime_sdk_gate_cannot_be_disabled(self):
+        self.mutate(MOD.PROVIDER,
+            'if (sdkInt >= _androidApiLevelR) {\n      throw const FormatException(',
+            'if (sdkInt >= 999) {\n      throw const FormatException(')
     def test_no_noncontainer_obb_guard_bypass(self):
         self.mutate(MOD.PROVIDER,'obbFiles.isNotEmpty && !installer.wantsContainerHandoff','false')
     def test_no_r02d_flutter_skip(self):

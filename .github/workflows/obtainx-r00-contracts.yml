@@ -2,7 +2,7 @@ name: ObtainX R00 / Source and Contract Integrity
 
 on:
   push:
-    branches: [main, 'feature/**', 'fix/**', 'bootstrap/**']
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -34,6 +34,8 @@ jobs:
         run: python3 scripts/ci/r02d_source_contract.py --check
       - name: Enforce RT02E OBB verified delivery and CI cache contracts
         run: python3 -B scripts/ci/r02e_source_contract.py --check
+      - name: Enforce RT02F external handoff and targeted CI source contract
+        run: python3 -B scripts/ci/r02f_source_contract.py --check
       - name: Enforce R02 HF02 analyzer and golden-triage contracts
         run: python3 scripts/ci/r02_hf02_contract.py --check
       - name: Enforce R02 API36 emulator source/evidence staleness contracts

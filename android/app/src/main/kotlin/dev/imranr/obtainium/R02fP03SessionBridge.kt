@@ -328,10 +328,25 @@ internal class R02fP03SessionBridge(
         val existedBeforeCancel = try { installer.getSessionInfo(op.sessionId) != null }
             catch (_: Exception) { false }
         if (existedBeforeCancel) {
-            try {
-                installer.abandonSession(op.sessionId)
-                abandoned = installer.getSessionInfo(op.sessionId) == null
-            } catch (_: Exception) { /* Session may have crossed the commit boundary. */ }
+            // Retry only while the owned session existed before Cancel. Never
+            // classify a pre-absent Android session as our native abandon.
+            for (attempt in 0 until 3) {
+                try {
+                    installer.abandonSession(op.sessionId)
+                } catch (_: Exception) {
+                    // A commit boundary may have moved; query the real session.
+                }
+                abandoned = try {
+                    installer.getSessionInfo(op.sessionId) == null
+                } catch (_: Exception) { false }
+                if (abandoned || !op.cancelWindowAccepted) break
+                if (attempt < 2) {
+                    try { Thread.sleep(150L) } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        break
+                    }
+                }
+            }
         }
         // The session may have crossed commit before a cancellation request.
         // Never advertise rollback from a state whose commit result was not

@@ -180,6 +180,17 @@ void main() {
       } else if (terminal['outcome'] != 'cancelled') {
         debugPrint('OX_P03_DART_CANCEL_DIAGNOSTIC=OTHER_NON_CANCELLED');
       }
+      // Preserve the original P04A fixed-code failure classifier alongside
+      // HF11 closure-origin and installed-byte assertions.
+      if (terminal?['outcome'] != 'cancelled') {
+        final terminalCode = switch (terminal?['outcome']) {
+          'unknown' => 'UNKNOWN',
+          'error' => 'ERROR',
+          null => 'MISSING',
+          _ => 'UNEXPECTED',
+        };
+        debugPrint('OX_P03_DART_NATIVE_TERMINAL=$terminalCode');
+      }
       expect(terminal?['outcome'], 'cancelled',
           reason: 'Native abandon and original APK integrity must be established');
       expect(terminal?['cancelRequested'], isTrue);

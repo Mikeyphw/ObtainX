@@ -151,8 +151,8 @@ def run(out: Path) -> int:
                 process.kill();process.wait(timeout=20)
                 raise Refused('Flutter runtime P03 timed out in '+stage)
         text=log.read_text('utf-8','replace')
-        # Flutter may finish before the next three-second progress iteration;
-        # report the actual last Dart milestone from the full private log.
+        # Flutter can terminate before the next progress tick. Report only
+        # the final fixed milestone, never private log lines or device data.
         final_stage = stage
         for marker, label in reversed(tuple(zip(MARKERS, (
             'APP_ROUTE_OWNER_SURVIVED', 'PRODUCTION_PROVIDER_INSTALL_STARTED',
@@ -169,6 +169,10 @@ def run(out: Path) -> int:
                           '; private_log_sha256='+diag['private_log_sha256'])
         for marker in MARKERS:
             need(text.count(marker) == 1, 'missing/duplicate real UI marker: '+marker)
+        first_party = text.count('OX_P03_DART_CLOSURE=FIRST_PARTY_ABANDON') == 1
+        android_abort = text.count('OX_P03_DART_CLOSURE=ANDROID_ABORT_OBSERVED') == 1
+        need(first_party != android_abort,
+             'exclusive, source-bound native/Android cancellation origin unproven')
         need(P03Handler.foreground_count == 1,
              'host never observed Android approval and returned to actual app UI')
         after = rt02c.baseline_v1(fixtures)
@@ -180,7 +184,8 @@ def run(out: Path) -> int:
                    'v2_base_sha256':sha(fixtures/'base_v2.apk'),
                    'v2_split_sha256':sha(fixtures/'config.x86_64.apk'),
                    'ui_cancel_widget_tapped':True,
-                   'native_session_abandoned_from_application':True,
+                   'native_session_abandoned_from_application':first_party,
+                   'android_abort_observed_before_cancel':android_abort,
                    'android_approval_observed':True,'external_or_root_installer_used':False,
                    'installed_v1_signed_bytes_preserved':True,
                    'flutter_log_sha256':sha(log),
@@ -215,9 +220,13 @@ def static_evidence(out: Path, source: str, runid: str) -> dict:
     need(obj.get('baseline_before') == obj.get('baseline_after'),
          'P03 before/after v1 baseline mismatch')
     need(all(obj.get(k) is True for k in (
-        'ui_cancel_widget_tapped','native_session_abandoned_from_application',
-        'android_approval_observed','installed_v1_signed_bytes_preserved')),
-        'missing real UI/Android proof')
+        'ui_cancel_widget_tapped','android_approval_observed',
+        'installed_v1_signed_bytes_preserved')),
+         'missing real UI/Android proof')
+    need(type(obj.get('native_session_abandoned_from_application')) is bool and
+         type(obj.get('android_abort_observed_before_cancel')) is bool and
+         obj['native_session_abandoned_from_application'] != obj['android_abort_observed_before_cancel'],
+         'exclusive native versus Android abort evidence missing')
     need(all(obj.get(k) is False for k in (
         'raw_logs_uploaded','physical_device_qualified',
         'external_or_root_installer_used','external_shizuku_dhizuku_qualified',

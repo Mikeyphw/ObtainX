@@ -84,6 +84,10 @@ public final class PositiveInstallActivity extends Activity {
         PendingIntent pending=PendingIntent.getActivity(this,id,callback,
             PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_MUTABLE);
         session.commit(pending.getIntentSender());
+        // This disposable external activity must yield foreground
+        // after commit. The separate callback activity owns Android
+        // user approval and terminal status independently.
+        finish();
       }
     } catch (Exception ignored) {
       status(this,"installer_error");

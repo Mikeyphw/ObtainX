@@ -111,6 +111,16 @@ def run(out:Path)->int:
         argv=['flutter','test','integration_test/r02f_p04b_p02_external_positive_test.dart',
               '-d',base.SERIAL,'--flavor','normal','--no-pub','--reporter','expanded',
               '--dart-define=OX_P04B_P02_BASE_SHA='+inv['files']['base_v2.apk']['sha256']]
+        # Safe liveness signals: fixed codes only. Never upload Flutter logs.
+        safe_target_statuses = frozenset((
+            'started', 'approval_pending', 'user_approval_requested',
+            'system_status_success', 'system_status_failure',
+            'installer_error', 'missing_approval_intent',
+            'approval_launch_failed', 'refused_content_grant'))
+        last_target_status = 'not_observed'
+        foreground_restored = False
+        last_progress = 0.0
+        started = time.monotonic()
         with log.open('wb') as writer:
             process=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=writer,stderr=subprocess.STDOUT)
             deadline=time.monotonic()+720
@@ -120,15 +130,44 @@ def run(out:Path)->int:
                 observed=None
                 try:observed=target_observation()
                 except (Refused,base.Refused,subprocess.TimeoutExpired,ValueError,ET.ParseError):pass
+                if observed is not None and observed.get('status') in safe_target_statuses:
+                    last_target_status = observed['status']
                 if approvals==0 and observed is not None and observed.get('status') in (
                         'approval_pending','user_approval_requested'):
                     if approve_if_verified():
                         approvals+=1
                         print('OX_P04B_P02_REAL_SYSTEM_APPROVAL_TAPPED',flush=True)
+                # Only a genuine, observed Android terminal success
+                # permits returning ObtainX to foreground. Never
+                # tap approval early, invent status, or restart a
+                # session. CLEAR_TOP|SINGLE_TOP retains Flutter state.
+                if (approvals==1 and not foreground_restored and
+                        observed is not None and
+                        observed.get('status')=='system_status_success'):
+                    base.adb('shell','am','start','-f','0x24000000','-n',
+                             base.APP+'/dev.imranr.obtainium.MainActivity',timeout=30)
+                    foreground_restored = True
+                    print('OX_P04B_P02_VERIFIED_SUCCESS_FOREGROUND_RESTORED',flush=True)
+                if time.monotonic()-last_progress >= 25:
+                    # Only constant stage markers are read; private
+                    # diagnostic log text must never enter console.
+                    private_tail = log.read_text('utf8','replace')[-65536:]
+                    stage = ('dart_returned' if MARKERS[-1] in private_tail else
+                             'dart_handoff' if MARKERS[0] in private_tail else
+                             'flutter_launch')
+                    print('OX_P04B_P02_PROGRESS stage='+stage+
+                          ' target='+last_target_status+
+                          ' approvals='+str(approvals)+
+                          ' foreground='+str(int(foreground_restored))+
+                          ' elapsed_s='+str(int(time.monotonic()-started)),flush=True)
+                    last_progress=time.monotonic()
                 time.sleep(3)
             if process.poll() is None:
                 process.kill();process.wait(timeout=15)
-                raise Refused('hosted Flutter external positive test timed out')
+                raise Refused('hosted Flutter external positive test timed out' +
+                              ' target='+last_target_status+
+                              ' approvals='+str(approvals)+
+                              ' foreground='+str(int(foreground_restored)))
         private=log.read_text('utf8','replace')
         need(process.returncode==0 and 'All tests passed!' in private and
              all(private.count(marker)==1 for marker in MARKERS),

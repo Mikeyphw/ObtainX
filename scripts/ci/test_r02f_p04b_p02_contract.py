@@ -25,7 +25,7 @@ class P04BPositiveSourceMutations(unittest.TestCase):
     def test_05_no_session_fsync(self):self.mutate(C.TARGET,'session.fsync(output)','// no fsync')
     def test_06_no_sha_bound_dart(self):self.mutate(C.DART,'sha256.convert(bytes).toString() != _sha','false')
     def test_07_no_false_dart_success(self):self.mutate(C.DART,'expect(result.isSuccess, isFalse)','expect(result.isSuccess, isTrue)')
-    def test_08_no_android_approval(self):self.mutate(C.HOST,'approvals==1','approvals>=0')
+    def test_08_no_android_approval(self):self.mutate(C.HOST,"need(approvals==1,'system PackageInstaller approval not observed exactly once')","need(approvals>=0,'system PackageInstaller approval not observed exactly once')")
     def test_09_no_package_bytes(self):self.mutate(C.HOST,'package_observation(fx,2)','package_observation(fx,1)')
     def test_10_no_target_receipt(self):self.mutate(C.HOST,"'status':'system_status_success'","'status':'approval_pending'")
     def test_11_no_source_bound_target(self):self.mutate(C.HOST,"obj['target_sha256']==tv['sha256']==sha(fx/target.APK)","obj['target_sha256']==tv['sha256']")
@@ -33,4 +33,21 @@ class P04BPositiveSourceMutations(unittest.TestCase):
     def test_13_no_ci_guard_drop(self):self.mutate(C.SOURCE,'run: python3 -B scripts/ci/r02f_p04b_p02_contract.py --check','run: echo omitted')
     def test_14_no_runtime_drop(self):self.mutate(C.RUNTIME,'python3 -B scripts/ci/r02f_p04b_p02_hosted.py run --out','python3 -B scripts/ci/other.py run --out')
     def test_15_no_false_scope(self):self.mutate(C.DOC,'**NOT_QUALIFIED**','**PASS**')
+    def test_16_target_must_finish_after_session_commit(self):
+        self.mutate(C.TARGET,'        finish();\n      }\n    } catch',
+                    '        // left foreground\n      }\n    } catch')
+    def test_17_foreground_must_wait_for_status_success(self):
+        self.mutate(C.HOST,"observed.get('status')=='system_status_success'",
+                    "observed.get('status')=='approval_pending'")
+    def test_18_no_missing_bounded_progress(self):
+        self.mutate(C.HOST,'OX_P04B_P02_PROGRESS','UNBOUNDED_DEBUG_LOG')
+    def test_19_foreground_action_required(self):
+        self.mutate(C.HOST,"base.adb('shell','am','start','-f','0x24000000','-n',",
+                    "base.adb('shell','am','start','-f','0x0','-n',")
+    def test_20_early_foreground_without_verified_approval_refused(self):
+        self.mutate(C.HOST,'if (approvals==1 and not foreground_restored and',
+                    'if (approvals>=0 and not foreground_restored and')
+    def test_21_target_operation_inserted_before_finish_refused(self):
+        self.mutate(C.TARGET,'        finish();\n      }\n    } catch',
+                    '        status(this,"still_active");\n        finish();\n      }\n    } catch')
 if __name__=='__main__':unittest.main()

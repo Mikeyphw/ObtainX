@@ -34,6 +34,10 @@ def inspect(root:Path=ROOT)->list[str]:
         if s=='Installer.abandonSession':continue
         check(s in t,'positive target missing '+s)
     check('installer.abandonSession(id)' in t,'session cleanup on failure missing')
+    commit_marker = 'session.commit(pending.getIntentSender());'
+    post_commit = (t.split(commit_marker, 1)[1] if t.count(commit_marker)==1 else '')
+    check(bool(re.match(r'\n(?:[ \t]*//[^\n]*\n)*[ \t]*finish\(\);(?=\n)', post_commit)),
+          'positive target must finish immediately after session commit')
     check('Runtime.getRuntime().exec(' not in t and 'ProcessBuilder(' not in t and
           'pm install' not in t and 'su -c' not in t,
           'positive target attempted privileged shell path')
@@ -61,6 +65,14 @@ def inspect(root:Path=ROOT)->list[str]:
         check(s in h,'real positive Android observation/gate missing '+s)
     for s in ("obj['target_sha256']", "obj['after']=={'version_code':2", 'obj[\'system_approval_taps\']==1'):
         check(s in h,'positive independent verifier missing '+s)
+    check("observed.get('status')=='system_status_success'" in h and
+          'foreground_restored = True' in h and
+          "base.adb('shell','am','start','-f','0x24000000','-n'," in h and
+          'OX_P04B_P02_PROGRESS' in h and
+          'safe_target_statuses' in h and
+          "need(approvals==1,'system PackageInstaller approval not observed exactly once')" in h and
+          'if (approvals==1 and not foreground_restored and' in h,
+          'positive hosted lifecycle/allowlisted state/approval proof missing')
     check('return True' not in h[h.index('def verify('):] and
           'base.adb(' not in h[h.index('def verify('):],
           'post-emulator verifier must be offline and fail closed')

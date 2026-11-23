@@ -1,0 +1,383 @@
+#!/usr/bin/env python3
+"""Hosted API36 external positive installation with independent signed bytes.
+
+Receives Android user approval in ephemeral emulator only. No privileged/root
+installer and no physical-device writes. Raw Flutter logs never uploaded.
+"""
+from __future__ import annotations
+import argparse,hashlib,json,re,subprocess,sys,threading,time,xml.etree.ElementTree as ET
+from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+from pathlib import Path
+import r02_rt02_hosted as base
+import r02f_p04b_p02_target as target
+
+RECEIPT='r02f-p04b-p02-positive.json'
+STATUS='PASS_EXTERNAL_TARGET_SYSTEM_APPROVAL_AND_SIGNED_V2_BYTES'
+PORT=18784
+MARKERS=('OX_P04B_P02_REAL_EXTERNAL_HANDOFF_STARTED',
+         'OX_P04B_P02_REAL_EXTERNAL_BRIDGE_NO_FALSE_SUCCESS_PASS')
+PKG='dev.bikram.obtainx.rt02.fixture'
+class Refused(RuntimeError): pass
+def need(ok,msg):
+    if not ok:raise Refused(msg)
+def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
+
+# Bounded, runner-only diagnostic schema. Never upload the Flutter log itself.
+DIAGNOSTIC='r02f-p04b-p02-diagnostics.json'
+TARGET_STATES=frozenset({
+    'started','approval_pending','user_approval_requested',
+    'system_status_success','system_status_failure','installer_error',
+    'refused_content_grant','missing_approval_intent','approval_launch_failed',
+})
+FAILURE_STATES=frozenset({
+    'system_status_failure','installer_error','refused_content_grant',
+    'missing_approval_intent','approval_launch_failed',
+})
+
+def normalize_target_status(observation):
+    value=observation.get('status') if isinstance(observation,dict) else None
+    return value if value in TARGET_STATES else 'unrecognized_or_missing'
+
+# Never upload private Flutter output. Classify only narrowly enumerated
+# tool failure types and exact non-sensitive milestone markers.
+FLUTTER_FAILURE_CATEGORIES=(
+    ('DEVICE_DISCONNECTED', ('lost connection to device','device disconnected',
+                             'device went offline')),
+    ('PLATFORM_CHANNEL', ('missingpluginexception','platformexception(')),
+    ('DART_TEST_ASSERTION', ('testfailure','expected:','which:')),
+    ('DART_UNHANDLED', ('unhandled exception','[e] exception was thrown',
+                        'uncaught exception')),
+    ('FLUTTER_RUNNER', ('compilation failed','failed to build',
+                        'could not start the dart vm')),
+    ('ANDROID_RUNTIME', ('fatal exception:','process crash',
+                         'activity has been destroyed')),
+    ('TIMEOUT', ('timeoutexception','test timed out','deadline exceeded')),
+)
+
+def private_flutter_failure_kind(path):
+    if not path.is_file(): return 'NO_PRIVATE_LOG'
+    # Tail only: keep memory bounded even on broken, runaway Flutter logging.
+    with path.open('rb') as file:
+        file.seek(0,2)
+        file.seek(max(0,file.tell()-98304))
+        tail=file.read(98304).decode('utf8','replace').lower()
+    for kind,patterns in FLUTTER_FAILURE_CATEGORIES:
+        if any(pattern in tail for pattern in patterns):return kind
+    return 'UNCLASSIFIED_PRIVATE_FAILURE'
+
+def failure_report(out,source,runid,stage,started,approvals,last_status,
+                   polling_errors,approval_scans,foreground_recovered,log,reason,
+                   flutter_exit_code=None):
+    # Only invariant stage identifiers, bounded counts and a hash of private
+    # output are retained; raw stdout, UI XML, stack traces and URLs are not.
+    approved_stages={'INSTALL_DISPOSABLE_TARGET','PREPARE_FLUTTER',
+        'FLUTTER_BUILD','WAITING_FOR_HANDOFF','HANDOFF_STARTED',
+        'APPROVAL_PENDING','USER_APPROVAL_REQUESTED',
+        'ANDROID_INSTALL_COMPLETED','FLUTTER_BRIDGE_COMPLETED',
+        'FOREGROUND_RECOVERY','FLUTTER_EXIT_EARLY',
+        'APPROVAL_ACTIVITY_LAUNCH','UNCLASSIFIED'}
+    stage=stage if stage in approved_stages else 'UNCLASSIFIED'
+    log_hash=sha(log) if log is not None and log.is_file() else None
+    data={'schema':1,'status':'REFUSED_NOT_QUALIFIED',
+          'source_sha':source,'run_id':runid,'stage':stage,
+          'reason':reason if reason in ('TIMEOUT','TARGET_FAILURE','FLUTTER_FAILURE',
+             'APPROVAL_MISSING','PACKAGE_MISMATCH','OTHER') else 'OTHER',
+          'elapsed_seconds':min(max(0,int(time.monotonic()-started)),3600),
+          'approval_taps':approvals,
+          'target_status':last_status if last_status in TARGET_STATES else 'unrecognized_or_missing',
+          'target_poll_failures':polling_errors,'approval_scans':approval_scans,
+          'foreground_recovered':bool(foreground_recovered),
+          'private_log_sha256':log_hash,
+          'flutter_failure_kind':private_flutter_failure_kind(log) if log is not None else 'NO_PRIVATE_LOG',
+          'flutter_exit_code':flutter_exit_code if type(flutter_exit_code) is int and
+                                  0<=flutter_exit_code<=255 else None,
+          'real_android_positive_qualified':False,
+          'release_qualified':False,'raw_logs_uploaded':False}
+    path=out/DIAGNOSTIC
+    path.write_text(json.dumps(data,sort_keys=True,indent=2)+'\n')
+    print('OX_P04B_P02_DIAGNOSTIC_REFUSAL stage='+stage+
+          ' reason='+data['reason']+' target_status='+data['target_status']+
+          ' taps='+str(approvals)+' poll_failures='+str(polling_errors)+
+          ' scans='+str(approval_scans)+
+          ' log_sha256='+str(log_hash),flush=True)
+    return data
+class FixtureServer(BaseHTTPRequestHandler):
+    apk:Path
+    def log_message(self,*args):pass
+    def do_GET(self):
+        if self.path!='/base_v2.apk':self.send_error(404);return
+        raw=self.apk.read_bytes();need(300<len(raw)<16*1024*1024,'fixture size invalid')
+        self.send_response(200);self.send_header('Content-Type','application/vnd.android.package-archive')
+        self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
+
+def package_observation(fixtures:Path,version:int)->dict:
+    paths=base.adb('shell','pm','path',PKG,timeout=25).splitlines()
+    need(len(paths)==1 and paths[0].startswith('package:/data/app/') and paths[0].endswith('/base.apk'),
+         'PackageManager did not report one expected signed base APK')
+    match=re.fullmatch(r'package:(/data/app/[A-Za-z0-9_+./~=-]+/base\.apk)',paths[0])
+    need(match is not None,'unexpected installed package path')
+    digest=base.adb('shell','sha256sum',match.group(1),timeout=60).split()
+    expected=sha(fixtures/('base_v1.apk' if version==1 else 'base_v2.apk'))
+    need(len(digest)==2 and digest[0]==expected,'installed signed APK bytes differ')
+    data=base.adb('shell','dumpsys','package',PKG,timeout=55)
+    versions=re.findall(r'\bversionCode=(\d+)\b',data)
+    need(str(version) in versions and str(3-version) not in versions,
+         'expected Android versionCode not proven')
+    return {'version_code':version,'base_sha256':expected,'split_count':0}
+
+def target_observation()->dict:
+    raw=base.adb('shell','run-as',target.PACKAGE,'cat','shared_prefs/p04b_positive.xml',timeout=25)
+    need(raw.lstrip().startswith('<?xml') and len(raw)<4096,'target receipt missing or unbounded')
+    root=ET.fromstring(raw);need(root.tag=='map','target receipt malformed')
+    out={x.attrib.get('name'):x.text for x in root if x.tag=='string'}
+    need(set(out)=={'sha256','status'},'target receipt fields unexpected')
+    return out
+
+def approve_if_verified()->bool:
+    # Emulator-only verification of an actual PackageInstaller-owned dialog.
+    # Refuse generic screen tapping or uncontrolled permission grants.
+    try:
+        base.adb('shell','uiautomator','dump','/sdcard/p04b-approval.xml',timeout=20)
+        xml=base.adb('shell','cat','/sdcard/p04b-approval.xml',timeout=20)
+        root=ET.fromstring(xml)
+    except (Exception,subprocess.TimeoutExpired):return False
+    for node in root.iter('node'):
+        item=node.attrib
+        pkg=item.get('package','')
+        title=item.get('text','').strip().lower()
+        if pkg not in ('com.google.android.packageinstaller','com.android.packageinstaller',
+                       'com.google.android.permissioncontroller',
+                       'com.android.permissioncontroller'):
+            continue
+        if title not in ('install','update','continue','install app','update app'):
+            continue
+        if item.get('clickable')!='true' or item.get('enabled')!='true':continue
+        m=re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',item.get('bounds',''))
+        if m is None:continue
+        x1,y1,x2,y2=map(int,m.groups())
+        if not (0<=x1<x2<=2000 and 0<=y1<y2<=3000):continue
+        base.adb('shell','input','tap',str((x1+x2)//2),str((y1+y2)//2),timeout=15)
+        return True
+    return False
+
+def run(out:Path)->int:
+    source,runid=base.host_check()
+    need(out.is_absolute() and out.is_dir() and not out.is_symlink(),'CI evidence root invalid')
+    fx=out/'fixtures'; inv=json.loads((fx/'fixture_inventory.json').read_text())
+    tv=json.loads((fx/'p04b_positive_inventory.json').read_text())
+    need(inv.get('source_sha')==source and tv.get('source_sha')==source and
+         tv.get('package')==target.PACKAGE and tv.get('activity')==target.ACTIVITY,
+         'signed fixture source/target identity drift')
+    need(tv.get('requires_system_user_approval') is True and
+         tv.get('only_disposable_fixture_install') is True and
+         tv.get('signed_disposable_target') is True,
+         'target is not scoped to disposable system user approval')
+    for name,want in ((target.APK,tv['sha256']),
+                      ('base_v1.apk',inv['files']['base_v1.apk']['sha256']),
+                      ('base_v2.apk',inv['files']['base_v2.apk']['sha256'])):
+        need(sha(fx/name)==want,'source-bound signed fixture mutated')
+    dest=out/RECEIPT;need(not dest.exists() and not dest.is_symlink(),'stale positive receipt')
+    server=None;process=None;approvals=0
+    stage='INSTALL_DISPOSABLE_TARGET';last_status='unrecognized_or_missing'
+    polling_errors=0;approval_scans=0;foreground_recovered=False
+    approval_activity_started=False
+    started=time.monotonic()
+    log=out/'r02f-p04b-p02-private.log'
+    try:
+        base.adb('install','-r','-t',str(fx/target.APK),timeout=90)
+        base.adb('shell','appops','set',target.PACKAGE,'REQUEST_INSTALL_PACKAGES','allow',timeout=30)
+        base.adb('install','-r','-t',str(fx/'base_v1.apk'),timeout=90)
+        before=package_observation(fx,1)
+        # One reviewable, mutation-tested entry point for both the foreground
+        # recovery barrier and final independently verified v2 observation.
+        def observe_signed_v2():
+            return package_observation(fx,2)
+        FixtureServer.apk=fx/'base_v2.apk'
+        server=ThreadingHTTPServer(('127.0.0.1',PORT),FixtureServer)
+        threading.Thread(target=server.serve_forever,daemon=True).start()
+        base.adb('reverse',f'tcp:{PORT}',f'tcp:{PORT}')
+        stage='PREPARE_FLUTTER'
+        argv=['flutter','test','integration_test/r02f_p04b_p02_external_positive_test.dart',
+              '-d',base.SERIAL,'--flavor','normal','--no-pub','--reporter','expanded',
+              '--dart-define=OX_P04B_P02_BASE_SHA='+inv['files']['base_v2.apk']['sha256']]
+        with log.open('wb') as writer:
+            process=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=writer,stderr=subprocess.STDOUT)
+            deadline=time.monotonic()+420
+            next_report=0
+            terminal_observed_at=None
+            while time.monotonic()<deadline:
+                # The Flutter call may finish before a separate Android
+                # PackageInstaller approval callback arrives. Continue its
+                # independent system verification after Flutter exits.
+                # A failed Flutter runner is NOT an install result. First
+                # observe the disposable Android state for precise diagnostics.
+                elapsed=int(time.monotonic()-started)
+                tail=log.read_text('utf8','replace')[-32000:]
+                if MARKERS[-1] in tail:stage='FLUTTER_BRIDGE_COMPLETED'
+                elif MARKERS[0] in tail:stage='HANDOFF_STARTED'
+                elif 'Running Gradle task' in tail and stage=='PREPARE_FLUTTER':stage='FLUTTER_BUILD'
+                # ADB reads only the disposable CI target's small shared-pref
+                # receipt; failed reads are measured rather than ignored.
+                observed=None
+                try:observed=target_observation()
+                except (Refused,base.Refused,subprocess.TimeoutExpired,ValueError,ET.ParseError):
+                    polling_errors+=1
+                if observed is not None:
+                    last_status=normalize_target_status(observed)
+                    need(last_status in TARGET_STATES,'unrecognized disposable target state')
+                    if last_status in FAILURE_STATES:
+                        stage='UNCLASSIFIED'
+                        raise Refused('disposable external target reported '+last_status)
+                    if last_status=='approval_pending':stage='APPROVAL_PENDING'
+                    if last_status=='user_approval_requested':stage='USER_APPROVAL_REQUESTED'
+                    if last_status=='system_status_success':
+                        stage='ANDROID_INSTALL_COMPLETED'
+                        if terminal_observed_at is None:terminal_observed_at=time.monotonic()
+                if process.poll() is not None and process.returncode != 0:
+                    stage='FLUTTER_EXIT_EARLY'
+                    raise Refused('Flutter external handoff exited unsuccessfully')
+                if (process.poll() is not None and approvals>0 and
+                    last_status=='system_status_success'):
+                    break
+                # Only scan when the disposable native callback has actually
+                # requested system approval, not merely after session.commit().
+                if approvals==0 and observed is not None and observed.get('status') in (
+                        'user_approval_requested',):
+                    # This is a native PackageInstaller callback, not the
+                    # earlier "approval_pending" status written before commit.
+                    # Host only summons the disposable target's already-
+                    # prepared approval UI; neither shell nor Dart installs.
+                    if not approval_activity_started:
+                        stage='APPROVAL_ACTIVITY_LAUNCH'
+                        base.adb('shell','am','start','-a',
+                                 'dev.bikram.obtainx.P04B_POSITIVE_SHOW_APPROVAL',
+                                 '-n',target.PACKAGE+'/'+target.ACTIVITY,timeout=30)
+                        approval_activity_started=True
+                        print('OX_P04B_P02_NATIVE_CALLBACK_APPROVAL_UI_REQUESTED',flush=True)
+                    approval_scans+=1
+                    if approve_if_verified():
+                        approvals+=1
+                        print('OX_P04B_P02_REAL_SYSTEM_APPROVAL_TAPPED',flush=True)
+                # The disposable installer may finish its Activity without
+                # returning focus to the Flutter test. Only restore focus when
+                # the actual system status AND signed installed bytes confirm v2;
+                # CLEAR_TOP/SINGLE_TOP keeps the original test activity alive.
+                if (last_status=='system_status_success' and approvals>0 and
+                    not foreground_recovered and process.poll() is None and
+                    terminal_observed_at is not None and
+                    time.monotonic()-terminal_observed_at>=5):
+                    observe_signed_v2()
+                    stage='FOREGROUND_RECOVERY'
+                    base.adb('shell','am','start','-f','0x24000000','-n',
+                             base.APP+'/dev.imranr.obtainium.MainActivity',timeout=30)
+                    foreground_recovered=True
+                    print('OX_P04B_P02_SIGNED_V2_VERIFIED_FLUTTER_FOCUS_RETURNED',flush=True)
+                if elapsed>=next_report:
+                    print('OX_P04B_P02_PROGRESS stage='+stage+' elapsed='+str(elapsed)+
+                          's target='+last_status+' approvals='+str(approvals)+
+                          ' scans='+str(approval_scans)+
+                          ' poll_errors='+str(polling_errors),flush=True)
+                    next_report=elapsed+25
+                time.sleep(3)
+            if process.poll() is None:
+                process.kill();process.wait(timeout=15)
+                raise Refused('hosted Flutter external positive test timed out stage='+stage)
+            need(approvals>0 and last_status=='system_status_success',
+                 'hosted external install approval/status timed out stage='+stage)
+        private=log.read_text('utf8','replace')
+        need(process.returncode==0 and 'All tests passed!' in private and
+             all(private.count(marker)==1 for marker in MARKERS),
+             'production Flutter external handoff test refused; private log retained')
+        need(approvals==1,'system PackageInstaller approval not observed exactly once')
+        # The PackageInstaller terminal callback can arrive after Flutter has
+        # returned from its broadcast waiter. This is a bounded observation,
+        # NEVER a synthetic success on timeout.
+        terminal_deadline=time.monotonic()+30
+        terminal={}
+        while time.monotonic()<terminal_deadline:
+            terminal=target_observation()
+            if terminal.get('status')=='system_status_success':break
+            time.sleep(0.5)
+        need(terminal=={
+             'sha256':inv['files']['base_v2.apk']['sha256'],
+             'status':'system_status_success'},
+             'disposable third-party target did not report Android status success')
+        after=observe_signed_v2()
+        need(before['version_code']==1 and after['version_code']==2 and
+             before['base_sha256'] != after['base_sha256'],
+             'independent signed v1 to v2 package replacement not proved')
+        receipt={'schema':1,'status':STATUS,'source_sha':source,'run_id':runid,
+                 'target_component':target.ACTIVITY,'target_sha256':tv['sha256'],
+                 'v2_sha256':inv['files']['base_v2.apk']['sha256'],
+                 'target_received_sha256':target_observation()['sha256'],
+                 'before':before,'after':after,'system_approval_taps':approvals,
+                 'flutter_log_sha256':sha(log),'external_mode':'production_native_intent',
+                 'android_install_status_verified':True,'signed_bytes_verified':True,
+                 'dart_handoff_not_success':True,'physical_device_qualified':False,
+                 'shizuku_qualified':False,'dhizuku_qualified':False,
+                 'release_qualified':False,'raw_logs_uploaded':False}
+        dest.write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
+        print('OX_P04B_P02_REAL_EXTERNAL_SYSTEM_APPROVED_SIGNED_V2_BYTES_PASS',flush=True)
+        return 0
+    except (OSError,ValueError,KeyError,TypeError,Refused,base.Refused,subprocess.TimeoutExpired) as exc:
+        # The independent positive receipt remains absent. This cannot be
+        # misread as runtime approval or a release qualification.
+        reason='TIMEOUT' if 'timed out' in str(exc).lower() else (
+            'TARGET_FAILURE' if 'target' in str(exc).lower() else (
+            'PACKAGE_MISMATCH' if 'package' in str(exc).lower() else 'OTHER'))
+        failure_report(out,source,runid,stage,started,approvals,last_status,
+                       polling_errors,approval_scans,foreground_recovered,log,reason,
+                       process.returncode if process is not None else None)
+        raise
+    finally:
+        if process is not None and process.poll() is None:process.kill();process.wait(timeout=15)
+        if server is not None:server.shutdown();server.server_close()
+        base.adb('reverse','--remove',f'tcp:{PORT}',allow_failure=True)
+        base.adb('shell','pm','uninstall',target.PACKAGE,allow_failure=True)
+        base.adb('shell','pm','uninstall',PKG,allow_failure=True)
+
+def verify(out:Path)->int:
+    source,runid=base.identity_check()
+    p=out/RECEIPT
+    need(out.is_absolute() and p.is_file() and not p.is_symlink() and 100<p.stat().st_size<8192,
+         'positive receipt missing or invalid')
+    obj=json.loads(p.read_text())
+    fields={'schema','status','source_sha','run_id','target_component','target_sha256',
+            'v2_sha256','target_received_sha256','before','after','system_approval_taps',
+            'flutter_log_sha256','external_mode','android_install_status_verified',
+            'signed_bytes_verified','dart_handoff_not_success','physical_device_qualified',
+            'shizuku_qualified','dhizuku_qualified','release_qualified','raw_logs_uploaded'}
+    need(set(obj)==fields and obj['schema']==1 and obj['status']==STATUS and
+         obj['source_sha']==source and str(obj['run_id'])==runid and
+         obj['target_component']==target.ACTIVITY,'positive receipt schema/source drift')
+    fx=out/'fixtures';inv=json.loads((fx/'fixture_inventory.json').read_text())
+    tv=json.loads((fx/'p04b_positive_inventory.json').read_text())
+    need(inv.get('source_sha')==source and tv.get('source_sha')==source and
+         tv.get('requires_system_user_approval') is True and
+         tv.get('only_disposable_fixture_install') is True,
+         'positive fixture inventory source/safety drift')
+    need(obj['target_sha256']==tv['sha256']==sha(fx/target.APK) and
+         obj['v2_sha256']==obj['target_received_sha256']==
+         inv['files']['base_v2.apk']['sha256']==sha(fx/'base_v2.apk'),
+         'positive signed fixture/package provenance mismatch')
+    need(obj['before']=={'version_code':1,'base_sha256':sha(fx/'base_v1.apk'),'split_count':0} and
+         obj['after']=={'version_code':2,'base_sha256':sha(fx/'base_v2.apk'),'split_count':0},
+         'independently verified before/after installed bytes missing')
+    need(obj['system_approval_taps']==1 and obj['external_mode']=='production_native_intent' and
+         all(obj[k] is True for k in ('android_install_status_verified','signed_bytes_verified',
+                                      'dart_handoff_not_success')) and
+         all(obj[k] is False for k in ('physical_device_qualified','shizuku_qualified',
+                                       'dhizuku_qualified','release_qualified','raw_logs_uploaded')),
+         'system approval/package evidence missing or false qualification')
+    need(obj['flutter_log_sha256']==sha(out/'r02f-p04b-p02-private.log'),
+         'private Flutter runtime log SHA changed')
+    print('OX_P04B_P02_POSITIVE_RECEIPT_INDEPENDENT_OFFLINE_VERIFY_PASS',flush=True)
+    return 0
+
+def main():
+    p=argparse.ArgumentParser();p.add_argument('command',choices=['run','verify']);
+    p.add_argument('--out',type=Path,required=True);a=p.parse_args()
+    try:return run(a.out) if a.command=='run' else verify(a.out)
+    except (OSError,ValueError,KeyError,TypeError,Refused,base.Refused,subprocess.TimeoutExpired) as e:
+        print('OX_P04B_P02_REFUSED '+str(e),file=sys.stderr,flush=True);return 2
+if __name__=='__main__':raise SystemExit(main())

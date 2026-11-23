@@ -786,6 +786,33 @@ class _GeneratedFormState extends State<GeneratedForm> {
           controller.text = value;
         }
       });
+      // Assist patches may change a dropdown (Actions mode) as well as text
+      // fields. Rebuild only the patched dropdowns with a fresh form-field
+      // key, so the on-screen selection never disagrees with saved values.
+      for (var r = 0; r < widget.items.length; r++) {
+        for (var e = 0; e < widget.items[r].length; e++) {
+          final item = widget.items[r][e];
+          if (item is GeneratedFormDropdown && patches.containsKey(item.key)) {
+            formInputs[r][e] = KeyedSubtree(
+              key: ValueKey('r04-assist-${item.key}-${values[item.key]}'),
+              child: _ThemePinnedDropdownFormField(
+                formItem: item,
+                outlinedInputFields: widget.outlinedInputFields,
+                outlinedFieldsExternalLabels: widget.outlinedFieldsExternalLabels,
+                outlinedFieldBorderRadius:
+                    widget.outlinedFieldBorderRadius ?? 12,
+                value: values[item.key],
+                onChanged: (dynamic nextValue) {
+                  setState(() {
+                    values[item.key] = nextValue ?? item.opts!.first.key;
+                    someValueChanged();
+                  });
+                },
+              ),
+            );
+          }
+        }
+      }
     });
     someValueChanged();
   }

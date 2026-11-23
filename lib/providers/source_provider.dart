@@ -45,6 +45,7 @@ import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/app_sources/githubstars.dart';
 import 'package:obtainium/http/obtainx_user_agent.dart';
 import 'package:obtainium/http/source_request_session.dart';
+import 'package:obtainium/services/r04_actions_redirect_policy.dart';
 import 'package:obtainium/http/response_bytes.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
@@ -2248,6 +2249,10 @@ class HttpService {
     HttpClient? sharedClient,
   }) async {
     var currentUrl = Uri.parse(url);
+    // Only the exact GitHub artifact API URL enters this narrower redirect
+    // policy. Other app sources retain their existing redirect semantics.
+    final r04Protected = r04IsCanonicalArtifactDownload(currentUrl);
+    var r04StorageHop = false;
     var redirectCount = 0;
     List<Cookie> cookies = [];
     final httpClient =
@@ -2269,13 +2274,20 @@ class HttpService {
             throw TimeoutException(tr('unexpectedError'), responseTimeout);
           },
         );
-        withDefaultObtainXUserAgent(requestHeaders).forEach((
+        // A private-repository PAT is valid ONLY for api.github.com.
+        // Never forward bearer/cookie/custom headers to signed storage.
+        final hopHeaders = r04Protected && r04StorageHop
+            ? r04ArtifactStorageHeaders(requestHeaders)
+            : requestHeaders;
+        withDefaultObtainXUserAgent(hopHeaders).forEach((
           String headerName,
           String headerValue,
         ) {
           request.headers.set(headerName, headerValue);
         });
-        request.cookies.addAll(cookies);
+        if (!r04Protected || !r04StorageHop) {
+          request.cookies.addAll(cookies);
+        }
         request.followRedirects = false;
         if (postBody != null) {
           request.headers.contentType = ContentType.json;
@@ -2293,9 +2305,14 @@ class HttpService {
             (response.statusCode >= 300 && response.statusCode <= 399)) {
           final location = response.headers.value(HttpHeaders.locationHeader);
           if (location != null) {
-            currentUrl = Uri.parse(ensureAbsoluteUrl(location, currentUrl));
+            final nextUrl = Uri.parse(ensureAbsoluteUrl(location, currentUrl));
+            if (r04Protected) {
+              r04ValidateArtifactRedirect(currentUrl, nextUrl);
+              r04StorageHop = true;
+            }
+            currentUrl = nextUrl;
             redirectCount++;
-            cookies = response.cookies;
+            cookies = r04Protected ? <Cookie>[] : response.cookies;
             await response.timeout(responseTimeout).drain<void>();
             continue;
           }

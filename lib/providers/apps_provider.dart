@@ -7,7 +7,6 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:android_package_manager/android_package_manager.dart';
 // Uses the pinned plugin's wire format for queries dispatched on our worker.
@@ -25,6 +24,7 @@ import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/http/obtainx_user_agent.dart';
 import 'package:obtainium/http/response_bytes.dart';
 import 'package:obtainium/services/app_check_store.dart';
+import 'package:obtainium/services/r03_download_engine.dart';
 import 'package:obtainium/services/install_precommit_gate.dart';
 import 'package:obtainium/installers/r02f_p03_cancellable_stock.dart';
 import 'package:obtainium/providers/logs_provider.dart';
@@ -56,15 +56,9 @@ export 'apps_provider_updates.dart';
 
 // Named constants for magic numbers and hardcoded values
 const int _defaultRetries = 3;
-const int _retryDelaySeconds = 5;
 const int _partialHashCheckStartingSize = 1024;
 const int _partialHashCheckLowerLimit = 128;
 const int _partialHashCheckDecrement = 256;
-const int _maxDownloadPolls = 43;
-const int _downloadPollIntervalSeconds = 7;
-const int _progressUpdateIntervalMs = 1000;
-const int _downloadBufferSize = 32 * 1024;
-const int _downloadProgressFallback = 30;
 const int _bgUpdateMaxAttempts = 4;
 const int _bgUpdateMaxRetryWaitSeconds = 30;
 const int _bgClientExceptionRetryWaitSeconds = 15 * 60;
@@ -341,42 +335,35 @@ Future<File> downloadFileWithRetry(
   LogsProvider? logs,
   CancellationToken? cancellationToken,
 }) async {
-  try {
-    return await downloadFile(
-      url,
-      fileName,
-      fileNameHasExt,
-      onProgress,
-      destDir,
-      useExisting: useExisting,
-      headers: headers,
-      allowInsecure: allowInsecure,
-      logs: logs,
-      cancellationToken: cancellationToken,
-    );
-  } catch (e) {
-    // A cancellation is not one of the retryable error types, so it naturally
-    // falls through to rethrow below.
-    if (retries > 0 &&
-        (e is ClientException ||
-            e is SocketException ||
-            e is TimeoutException)) {
-      await Future.delayed(const Duration(seconds: _retryDelaySeconds));
-      return await downloadFileWithRetry(
-        url,
-        fileName,
-        fileNameHasExt,
-        onProgress,
-        destDir,
-        useExisting: useExisting,
-        headers: headers,
-        retries: (retries - 1),
-        allowInsecure: allowInsecure,
-        logs: logs,
-        cancellationToken: cancellationToken,
+  int remaining = retries;
+  while (true) {
+    cancellationToken?.throwIfCancelled();
+    try {
+      return await downloadFile(
+        url, fileName, fileNameHasExt, onProgress, destDir,
+        useExisting: useExisting, headers: headers, allowInsecure: allowInsecure,
+        logs: logs, cancellationToken: cancellationToken,
       );
-    } else {
-      rethrow;
+    } catch (error) {
+      final int? code = error is ObtainiumError && error.code == 'HTTP_ERROR'
+          ? error.data['statusCode'] as int?
+          : null;
+      final transient = error is ClientException || error is SocketException ||
+          error is TimeoutException || (code != null && r03CanRetryHttpStatus(code));
+      if (!transient || remaining <= 0) rethrow;
+      final int attempt = retries - remaining;
+      remaining--;
+      final int jitter = Random().nextInt(800);
+      final int fromHttp = error is ObtainiumError
+          ? (error.data['retryAfterSeconds'] as int? ?? 0)
+          : 0;
+      final int delayMs = max(fromHttp * 1000,
+          min(60000, (1 << attempt) * 1200 + jitter));
+      await Future.any<void>([
+        Future<void>.delayed(Duration(milliseconds: delayMs)),
+        if (cancellationToken != null) cancellationToken.whenCancelled,
+      ]);
+      cancellationToken?.throwIfCancelled();
     }
   }
 }
@@ -599,72 +586,7 @@ void deleteFile(File file) {
   }
 }
 
-/// Waits for a concurrent download to finish by polling the temp file size.
-/// Returns the completed file if one is available, or null if a fresh download is needed.
-Future<File?> _waitForConcurrentDownload(
-  File tempDownloadedFile,
-  File downloadedFile,
-  LogsProvider? logs,
-  CancellationToken? cancellationToken,
-) async {
-  unawaited(
-    logs?.add(
-      'Partial download exists - will wait: ${tempDownloadedFile.uri.pathSegments.last}',
-    ),
-  );
-  int currentTempFileSize = await tempDownloadedFile.length();
-  int pollCount = 0;
-  while (pollCount < _maxDownloadPolls) {
-    pollCount++;
-    cancellationToken?.throwIfCancelled();
-    await Future.any([
-      Future<void>.delayed(
-        const Duration(seconds: _downloadPollIntervalSeconds),
-      ),
-      if (cancellationToken != null) cancellationToken.whenCancelled,
-    ]);
-    cancellationToken?.throwIfCancelled();
-    if (tempDownloadedFile.existsSync()) {
-      final int newTempFileSize;
-      try {
-        newTempFileSize = await tempDownloadedFile.length();
-      } on FileSystemException {
-        return downloadedFile.existsSync() ? downloadedFile : null;
-      }
-      if (newTempFileSize > currentTempFileSize) {
-        currentTempFileSize = newTempFileSize;
-        unawaited(
-          logs?.add(
-            'Existing partial download still in progress: ${tempDownloadedFile.uri.pathSegments.last}',
-          ),
-        );
-      } else {
-        unawaited(
-          logs?.add(
-            'Ignoring existing partial download: ${tempDownloadedFile.uri.pathSegments.last}',
-          ),
-        );
-        break;
-      }
-    } else {
-      return downloadedFile.existsSync() ? downloadedFile : null;
-    }
-  }
-  if (downloadedFile.existsSync()) {
-    unawaited(
-      logs?.add(
-        'Existing partial download completed - not repeating: ${tempDownloadedFile.uri.pathSegments.last}',
-      ),
-    );
-    return downloadedFile;
-  }
-  unawaited(
-    logs?.add(
-      'Existing partial download not in progress: ${tempDownloadedFile.uri.pathSegments.last}',
-    ),
-  );
-  return null;
-}
+// R03 coalesces exact request identities and validates every persisted part.
 
 /// Downloads a file to [destDir] with progress reporting, resuming partial downloads when supported.
 Future<File> downloadFile(
@@ -713,307 +635,86 @@ Future<File> _downloadFile(
   LogsProvider? logs,
   CancellationToken? cancellationToken,
 }) async {
-  final reqHeaders = withDefaultObtainXUserAgent(headers);
-  final responseClient = createHttpClient(allowInsecure);
-  IOSink? sink;
-  void abortDownload() {
-    responseClient.close(force: true);
+  final requestHeaders = withDefaultObtainXUserAgent(headers);
+  if (requestHeaders.keys.any((key) =>
+      key.toLowerCase() == 'range' || key.toLowerCase() == 'if-range')) {
+    throw const FormatException('R03 cannot accept a source-defined byte range');
   }
-
+  final responseClient = createHttpClient(allowInsecure);
+  void abortDownload() => responseClient.close(force: true);
   cancellationToken?.addListener(abortDownload);
   try {
     cancellationToken?.throwIfCancelled();
-    var response = (await HttpService().sourceRequestStreamResponse(
-      'GET',
-      url,
-      reqHeaders,
-      {'allowInsecure': allowInsecure},
-      sharedClient: responseClient,
-    )).value.value;
-    final resHeaders = <String, String>{};
-    response.headers.forEach((name, values) {
-      resHeaders[name] = values.join(', ');
-    });
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw ObtainiumError(
-        response.reasonPhrase,
-        code: 'HTTP_ERROR',
-        data: {'statusCode': response.statusCode},
-      )..url = url;
-    }
-
-    // Use the headers to decide what the file extension is, and
-    // whether it supports partial downloads (range request), and
-    // what the total size of the file is (if provided)
-    final String? suggestedFileName =
-        extractDownloadFileNameFromContentDisposition(
-          resHeaders['content-disposition'],
-        );
-    String ext =
-        suggestedFileName != null &&
-            AppSource.isApkOrContainerFile(
-              suggestedFileName,
-              includeArchives: true,
-              includeTarballs: true,
-            )
-        ? suggestedFileName.split('.').last
-        : 'apk';
-    if (ext.endsWith('"')) {
-      ext = ext.substring(0, ext.length - 1);
-    }
-    final urlPath = Uri.tryParse(url)?.path ?? url;
-    if (AppSource.isApkOrContainerFile(urlPath)) {
-      // Preserve the real extension (.apk/.xapk/.apkm/.apks) so XAPK/APKS
-      // bundles are still detected and extracted downstream rather than forced
-      // to .apk and handed to the APK parser.
-      ext = urlPath.split('.').last.toLowerCase();
-    } else if (ext == 'attachment') {
-      ext = 'apk';
-    }
-    fileName = fileNameHasExt
-        ? fileName
-        : fileName.split('/').last; // Ensure the fileName is a file name
-    File downloadedFile = File('$destDir/$fileName.$ext');
-    if (fileNameHasExt) {
-      // If the user says the filename already has an ext, ignore whatever you inferred from above
-      downloadedFile = File('$destDir/$fileName');
-    }
-
-    bool rangeFeatureEnabled = false;
-    if (resHeaders['accept-ranges']?.isNotEmpty == true) {
-      rangeFeatureEnabled =
-          resHeaders['accept-ranges']?.trim().toLowerCase() == 'bytes';
-    }
-    // If you have an existing file that is usable,
-    // decide whether you can use it (either return full or resume partial)
-    int? fullContentLength =
-        response.contentLength < 0 ||
-            response.compressionState ==
-                HttpClientResponseCompressionState.decompressed
-        ? null
-        : response.contentLength;
-    if (useExisting && await downloadedFile.exists()) {
-      final length = await downloadedFile.length();
-      if (fullContentLength == null || length == fullContentLength) {
-        return downloadedFile;
-      } else {
-        useExisting = false;
+    Future<HttpClientResponse> fetch(Map<String, String> requestHeaders) async =>
+        (await HttpService().sourceRequestStreamResponse(
+          'GET', url, requestHeaders, {'allowInsecure': allowInsecure},
+          sharedClient: responseClient,
+        )).value.value;
+    final firstResponse = await fetch(requestHeaders);
+    final suggested = extractDownloadFileNameFromContentDisposition(
+      firstResponse.headers.value('content-disposition'));
+    String extensionOf(String rawName) {
+      final lower = rawName.toLowerCase();
+      for (final suffix in const [
+        '.tar.gz', '.tar.xz', '.tar.bz2', '.tar.raw',
+        '.xapk', '.apkm', '.apks', '.apk', '.zip',
+      ]) {
+        if (lower.endsWith(suffix)) return suffix;
       }
+      return '.apk';
     }
-
-    final File tempDownloadedFile = File('${downloadedFile.path}.part');
-
-    // If there is already a temp file, a download may already be in progress - account for this (see #2073)
-    final bool tempFileExists = await tempDownloadedFile.exists();
-    if (tempFileExists && useExisting) {
-      final result = await _waitForConcurrentDownload(
-        tempDownloadedFile,
-        downloadedFile,
-        logs,
-        cancellationToken,
-      );
-      if (result != null) return result;
-    }
-
-    // If the range feature is not available (or you need to start a ranged req from 0),
-    // complete the already-started request, else cancel it and start a ranged request,
-    // and open the file for writing in the appropriate mode
-    int rangeStart = 0;
-    if (useExisting && rangeFeatureEnabled && fullContentLength != null) {
-      try {
-        rangeStart = await tempDownloadedFile.length();
-      } on FileSystemException {
-        // No resumable partial file.
-      }
-    }
-    if (fullContentLength != null && rangeStart >= fullContentLength) {
-      rangeStart = 0;
-    }
-    bool sentRangeRequest = false;
-    if (rangeFeatureEnabled && fullContentLength != null && rangeStart > 0) {
-      reqHeaders.addAll({
-        'range': 'bytes=$rangeStart-${fullContentLength - 1}',
-      });
-      // Only a resume needs a second request. Cancel the initial body without
-      // downloading it, then reopen at the partial file's byte offset.
-      await response.listen((_) {}).cancel();
-      response = (await HttpService().sourceRequestStreamResponse(
-        'GET',
-        url,
-        reqHeaders,
-        {'allowInsecure': allowInsecure},
-        sharedClient: responseClient,
-      )).value.value;
-      sentRangeRequest = true;
-    }
-    // If we requested a byte range to resume a partial download but the server
-    // ignored it and returned the full file (200 instead of 206 Partial
-    // Content), appending would corrupt the file - discard the partial data and
-    // start the download over from the beginning.
-    if (sentRangeRequest && response.statusCode == HttpStatus.ok) {
-      rangeStart = 0;
-      fullContentLength =
-          response.contentLength < 0 ||
-              response.compressionState ==
-                  HttpClientResponseCompressionState.decompressed
-          ? null
-          : response.contentLength;
-    }
-    if (sentRangeRequest && response.statusCode == HttpStatus.partialContent) {
-      final contentRange = response.headers.value(
-        HttpHeaders.contentRangeHeader,
-      );
-      final range = contentRange == null
-          ? null
-          : RegExp(r'^bytes (\d+)-(\d+)/(\d+)$').firstMatch(contentRange);
-      if (range == null ||
-          int.tryParse(range.group(1)!) != rangeStart ||
-          int.tryParse(range.group(3)!) != fullContentLength ||
-          int.tryParse(range.group(2)!) != fullContentLength! - 1) {
-        throw ObtainiumError(
-          tr('downloadFailed'),
-          code: 'INVALID_CONTENT_RANGE',
-        );
-      }
-    }
-    var received = 0;
-    double? progress;
-    DateTime? lastProgressUpdate; // Track last progress update time
-    if (rangeStart > 0 && fullContentLength != null) {
-      received = rangeStart;
-    }
-
-    const downloadUIUpdateInterval = Duration(
-      milliseconds: _progressUpdateIntervalMs,
+    final uri = Uri.tryParse(url);
+    final pathName = uri != null && uri.pathSegments.isNotEmpty
+        ? uri.pathSegments.last : url;
+    final ext = extensionOf(
+      AppSource.isApkOrContainerFile(pathName,
+        includeArchives: true, includeTarballs: true)
+          ? pathName
+          : suggested ?? 'download.apk',
     );
-    const downloadBufferSizeLocal = _downloadBufferSize;
-
-    // Check status code BEFORE finishing the download stream so we can
-    // abort early on errors and avoid wasting bandwidth reading a body
-    // the server already rejected.
-    if (response.statusCode < 200 || response.statusCode > 299) {
-      throw ObtainiumError(
-        response.reasonPhrase.isNotEmpty
-            ? response.reasonPhrase
-            : tr(
-                'errorWithHttpStatusCode',
-                args: [response.statusCode.toString()],
-              ),
-        code: 'HTTP_ERROR',
-        data: <String, dynamic>{'statusCode': response.statusCode},
-      )..url = url;
-    }
-
-    sink = tempDownloadedFile.openWrite(
-      mode: rangeStart > 0 ? FileMode.writeOnlyAppend : FileMode.writeOnly,
+    final safeBase = sanitizeDownloadFileName(fileName);
+    if (safeBase == null) throw const FormatException('Unsafe download file name');
+    final finalName = fileNameHasExt ? safeBase : '$safeBase$ext';
+    final downloadedFile = File('$destDir/$finalName');
+    final privateSupport = await getApplicationSupportDirectory();
+    final engine = R03DownloadEngine(
+      journalDirectory: Directory('${privateSupport.path}/r03-download-journal'),
     );
-    final downloadBuffer = BytesBuilder();
     try {
-      await response
-          .timeout(sourceResponseTimeout)
-          .map((chunk) {
-            cancellationToken?.throwIfCancelled();
-            received += chunk.length;
-            final now = DateTime.now();
-            if (onProgress != null &&
-                (lastProgressUpdate == null ||
-                    now.difference(lastProgressUpdate!) >=
-                        downloadUIUpdateInterval)) {
-              progress = fullContentLength != null
-                  ? (received / fullContentLength * 100).clamp(0, 100)
-                  : _downloadProgressFallback.toDouble();
-              onProgress(progress, received, fullContentLength);
-              lastProgressUpdate = now;
-            }
-            return chunk;
-          })
-          .transform(
-            StreamTransformer<List<int>, List<int>>.fromHandlers(
-              handleData: (List<int> data, EventSink<List<int>> s) {
-                downloadBuffer.add(data);
-                if (downloadBuffer.length >= downloadBufferSizeLocal) {
-                  s.add(downloadBuffer.takeBytes());
-                }
-              },
-              handleDone: (EventSink<List<int>> s) {
-                if (downloadBuffer.isNotEmpty) {
-                  s.add(downloadBuffer.takeBytes());
-                }
-                s.close();
-              },
-            ),
-          )
-          .pipe(sink);
-    } catch (e) {
-      // Release the file handle, ignoring "file already closed" races that can
-      // happen when the stream is torn down mid-write. The .part file is kept so
-      // the download can be resumed later.
-      try {
-        await sink.close();
-      } catch (_) {
-        sink = null;
-      }
-      // Surface a cancellation as such (even if the underlying stream error was
-      // a file/socket error caused by the abort) so callers handle it silently.
-      if (e is CancellationException ||
-          (cancellationToken?.isCancelled ?? false)) {
-        throw const CancellationException();
-      }
+      return await engine.download(
+        source: Uri.parse(url), destination: downloadedFile,
+        headers: requestHeaders, firstResponse: firstResponse, fetch: fetch,
+        isCancelled: () => cancellationToken?.isCancelled ?? false,
+        useExisting: useExisting,
+        onProgress: (progress, received, total) {
+          onProgress?.call(progress, received, total);
+        },
+      );
+    } on R03DownloadHttpException catch (error) {
+      throw ObtainiumError('HTTP ${error.statusCode}', code: 'HTTP_ERROR',
+        data: <String, dynamic>{
+          'statusCode': error.statusCode,
+          if (error.retryAfterSeconds != null)
+            'retryAfterSeconds': error.retryAfterSeconds,
+        },
+      )..url = url;
+    } on R03InvalidEntityException catch (error) {
+      cancellationToken?.throwIfCancelled();
+      throw ObtainiumError(error.reason, code: 'R03_ENTITY_INVALID')..url = url;
+    } catch (_) {
+      // A canceled native stream can surface as SocketException instead of
+      // CancellationException when the owner closes its HTTP client.
+      cancellationToken?.throwIfCancelled();
       rethrow;
     }
-    await sink.close();
-    sink = null;
-    cancellationToken?.throwIfCancelled();
-    if (fullContentLength != null && received != fullContentLength) {
-      throw ObtainiumError(tr('downloadFailed'), code: 'INCOMPLETE_DOWNLOAD');
-    }
-    progress = null;
-    if (onProgress != null) {
-      onProgress(progress, null, null);
-    }
-    try {
-      if (tempDownloadedFile.existsSync()) {
-        if (downloadedFile.existsSync()) {
-          try {
-            tempDownloadedFile.renameSync(downloadedFile.path);
-          } catch (firstErr) {
-            try {
-              downloadedFile.deleteSync();
-              tempDownloadedFile.renameSync(downloadedFile.path);
-            } catch (secondErr) {
-              unawaited(
-                logs?.add(
-                  'Rename of temp download failed: $firstErr / $secondErr. Temp file left at ${tempDownloadedFile.path}',
-                  level: LogLevel.warning,
-                ),
-              );
-            }
-          }
-        } else {
-          tempDownloadedFile.renameSync(downloadedFile.path);
-        }
-      }
-    } on FileSystemException {
-      // File disappeared between existence check and operation.
-      // The temp file may have been cleaned up by another process.
-      // Return the downloaded file if it still exists; otherwise the
-      // caller will re-download.
-      if (!downloadedFile.existsSync() && !tempDownloadedFile.existsSync()) {
-        rethrow;
-      }
-    }
-    return downloadedFile;
   } catch (_) {
+    // The first GET can fail while waiting for response headers. Convert an
+    // owner-requested cancellation; never mask a genuine HTTP/network error.
     cancellationToken?.throwIfCancelled();
     rethrow;
   } finally {
     cancellationToken?.removeListener(abortDownload);
     responseClient.close(force: true);
-    unawaited(
-      sink?.close().catchError((_) {
-        logs?.add('Failed to close download sink', level: LogLevel.warning);
-      }),
-    );
   }
 }
 

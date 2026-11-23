@@ -79,6 +79,24 @@ Future<Directory> _tempDirectory() async {
   return directory;
 }
 
+/// Production R03 stores its receipts under Application Support (never a
+/// public download folder). A desktop Flutter test needs to provide that
+/// platform method explicitly; do not weaken the production private path.
+Future<Directory> _downloadTestDirectory() async {
+  final directory = await _tempDirectory();
+  const channel = MethodChannel('plugins.flutter.io/path_provider');
+  final messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  messenger.setMockMethodCallHandler(channel, (call) async {
+    if (call.method != 'getApplicationSupportDirectory') {
+      throw MissingPluginException('Unsupported path_provider method');
+    }
+    return '${directory.path}/r03-private-support';
+  });
+  addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+  return directory;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
@@ -318,7 +336,7 @@ void main() {
   test(
     'fresh downloads reuse the first GET and keep the exact file bytes',
     () async {
-      final directory = await _tempDirectory();
+      final directory = await _downloadTestDirectory();
       await HttpOverrides.runWithHttpOverrides(() async {
         final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
         addTearDown(() => server.close(force: true));
@@ -345,7 +363,7 @@ void main() {
   );
 
   test('cancel interrupts a download waiting for response headers', () async {
-    final directory = await _tempDirectory();
+    final directory = await _downloadTestDirectory();
     await HttpOverrides.runWithHttpOverrides(() async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => server.close(force: true));
@@ -411,7 +429,7 @@ void main() {
   test(
     'cancel releases a download waiting on an existing partial file',
     () async {
-      final directory = await _tempDirectory();
+      final directory = await _downloadTestDirectory();
       final partial = await File(
         '${directory.path}/app.apk.part',
       ).writeAsBytes([1, 2]);
@@ -420,9 +438,12 @@ void main() {
         addTearDown(() => server.close(force: true));
         final served = Completer<void>();
         server.listen((request) async {
-          request.response.add(List.filled(10, 1));
-          await request.response.close();
-          served.complete();
+          // Deliver response headers and a prefix, but keep the stream open.
+          // A completed 10-byte download cannot be cancelled retroactively.
+          request.response.contentLength = 100000;
+          request.response.add(List.filled(4096, 1));
+          await request.response.flush();
+          if (!served.isCompleted) served.complete();
         });
         final token = CancellationToken();
         final download = downloadFile(
@@ -438,10 +459,13 @@ void main() {
           throwsA(isA<CancellationException>()),
         );
         await served.future;
-        await Future<void>.delayed(const Duration(milliseconds: 100));
         token.cancel();
         await assertion.timeout(const Duration(seconds: 2));
-        expect(await partial.readAsBytes(), [1, 2]);
+        expect(await File('${directory.path}/app.apk').exists(), isFalse);
+        // The untrusted orphan may be truncated or replaced with new partial
+        // data, but it must never be published as a complete APK.
+        expect(await partial.exists(), isTrue);
+        expect(await partial.length(), lessThan(100000));
       }, _RealHttpOverrides());
     },
   );
@@ -449,7 +473,7 @@ void main() {
   test(
     'HTTP-compressed downloads validate the decoded artifact correctly',
     () async {
-      final directory = await _tempDirectory();
+      final directory = await _downloadTestDirectory();
       await HttpOverrides.runWithHttpOverrides(() async {
         final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
         addTearDown(() => server.close(force: true));
@@ -676,81 +700,91 @@ void main() {
     },
   );
 
+  // R03 cannot treat a 40-byte orphan as resumable: there is no authenticated
+  // private receipt, and no SHA-verified 1MiB checkpoint. True 206/If-Range
+  // resume, changed ETag, bad ranges and 416 are exercised by the dedicated
+  // R03 deterministic HttpServer suite with real persisted checkpoints.
   for (final behavior in [
     'resume',
     'ignore-range',
     'wrong-range',
     'failed-resume',
   ]) {
-    test(
-      'partial download handles $behavior without corrupting the APK',
-      () async {
-        final directory = await _tempDirectory();
-        final content = List.generate(200, (index) => index);
-        final partial = await File(
-          '${directory.path}/app.apk.part',
-        ).writeAsBytes(content.take(40).toList());
-        await HttpOverrides.runWithHttpOverrides(() async {
-          final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-          addTearDown(() => server.close(force: true));
-          final ranges = <String?>[];
-          server.listen((request) async {
-            final range = request.headers.value(HttpHeaders.rangeHeader);
-            ranges.add(range);
-            request.response.headers.set(
-              HttpHeaders.acceptRangesHeader,
-              'bytes',
-            );
-            if (range != null && behavior == 'failed-resume') {
+    test('orphan .part cannot authorize Range ($behavior server)', () async {
+      final directory = await _downloadTestDirectory();
+      final content = List<int>.generate(200, (index) => index);
+      final orphan = await File('${directory.path}/app.apk.part')
+          .writeAsBytes(List<int>.filled(40, 255));
+      await HttpOverrides.runWithHttpOverrides(() async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        final ranges = <String?>[];
+        server.listen((request) async {
+          final range = request.headers.value(HttpHeaders.rangeHeader);
+          ranges.add(range);
+          // A range would be unauthorized without a verified journal.
+          // Simulate adversarial servers that react differently to Range.
+          if (range != null) {
+            if (behavior == 'failed-resume') {
               request.response.statusCode = HttpStatus.serviceUnavailable;
-              await request.response.close();
-              return;
-            }
-            if (range != null && behavior != 'ignore-range') {
+            } else if (behavior == 'wrong-range') {
               request.response.statusCode = HttpStatus.partialContent;
               request.response.headers.set(
-                HttpHeaders.contentRangeHeader,
-                behavior == 'wrong-range'
-                    ? 'bytes 0-159/200'
-                    : 'bytes 40-199/200',
-              );
-              request.response.contentLength = 160;
+                HttpHeaders.contentRangeHeader, 'bytes 0-159/200');
               request.response.add(content.sublist(40));
             } else {
-              request.response.contentLength = content.length;
-              request.response.add(content);
+              request.response.statusCode = HttpStatus.partialContent;
+              request.response.headers.set(
+                HttpHeaders.contentRangeHeader, 'bytes 40-199/200');
+              request.response.add(content.sublist(40));
             }
-            await request.response.close();
-          });
-          final download = downloadFile(
-            'http://127.0.0.1:${server.port}/app.apk',
-            'app.apk',
-            true,
-            null,
-            directory.path,
-          );
-          if (behavior == 'wrong-range' || behavior == 'failed-resume') {
-            await expectLater(
-              download,
-              throwsA(
-                isA<ObtainiumError>().having(
-                  (error) => error.code,
-                  'code',
-                  behavior == 'wrong-range'
-                      ? 'INVALID_CONTENT_RANGE'
-                      : 'HTTP_ERROR',
-                ),
-              ),
-            );
-            expect(await partial.readAsBytes(), content.take(40).toList());
-            expect(await File('${directory.path}/app.apk').exists(), isFalse);
           } else {
-            expect(await (await download).readAsBytes(), content);
+            request.response.contentLength = content.length;
+            request.response.add(content);
           }
-          expect(ranges, [null, 'bytes=40-199']);
-        }, _RealHttpOverrides());
-      },
-    );
+          await request.response.close();
+        });
+        final downloaded = await downloadFile(
+          'http://127.0.0.1:${server.port}/app.apk',
+          'app.apk', true, null, directory.path,
+        );
+        expect(await downloaded.readAsBytes(), content);
+        expect(ranges, [null], reason: 'no verified .part block');
+        expect(await orphan.exists(), isFalse);
+      }, _RealHttpOverrides());
+    });
+  }
+
+  for (final responseCode in [
+    HttpStatus.partialContent,
+    HttpStatus.serviceUnavailable,
+  ]) {
+    test('unsolicited HTTP $responseCode never publishes an APK', () async {
+      final directory = await _downloadTestDirectory();
+      await HttpOverrides.runWithHttpOverrides(() async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        final ranges = <String?>[];
+        server.listen((request) async {
+          ranges.add(request.headers.value(HttpHeaders.rangeHeader));
+          request.response.statusCode = responseCode;
+          if (responseCode == HttpStatus.partialContent) {
+            request.response.headers.set(
+              HttpHeaders.contentRangeHeader, 'bytes 0-2/3');
+            request.response.add([1, 2, 3]);
+          }
+          await request.response.close();
+        });
+        await expectLater(
+          downloadFile('http://127.0.0.1:${server.port}/app.apk',
+              'app.apk', true, null, directory.path),
+          throwsA(isA<ObtainiumError>().having(
+              (error) => error.code, 'code', 'HTTP_ERROR')),
+        );
+        expect(ranges, [null]);
+        expect(await File('${directory.path}/app.apk').exists(), isFalse);
+      }, _RealHttpOverrides());
+    });
   }
 
   test(

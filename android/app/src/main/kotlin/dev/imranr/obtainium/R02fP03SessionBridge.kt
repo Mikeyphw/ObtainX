@@ -49,6 +49,9 @@ internal class R02fP03SessionBridge(
         val baseline: String,
         var state: String = "staged",
         var cancelRequested: Boolean = false,
+        // Android can abort its approval sheet when the app is foregrounded.
+        // Preserve the observed terminal status for a bounded user decision.
+        var androidAbortObserved: Boolean = false,
         var waiter: MethodChannel.Result? = null,
     ) {
         fun toJson() = JSONObject().apply {
@@ -59,6 +62,7 @@ internal class R02fP03SessionBridge(
             put("baseline", baseline)
             put("state", state)
             put("cancelRequested", cancelRequested)
+            put("androidAbortObserved", androidAbortObserved)
         }
     }
 
@@ -123,6 +127,7 @@ internal class R02fP03SessionBridge(
                 v.getString("id"), v.getString("listingKey"), v.getString("packageName"),
                 v.getInt("sessionId"), v.getString("baseline"),
                 v.getString("state"), v.optBoolean("cancelRequested", false),
+                v.optBoolean("androidAbortObserved", false),
             )
         } catch (_: Exception) {
             // Corrupt state is never treated as an abandoned or installed session.
@@ -304,15 +309,25 @@ internal class R02fP03SessionBridge(
                 return
             }
         }
+        // Do not call an already-gone Android session an app-native abandon.
+        // getSessionInfo() must show ownership before the abandon request.
         var abandoned = false
-        try {
-            installer.abandonSession(op.sessionId)
-            abandoned = installer.getSessionInfo(op.sessionId) == null
-        } catch (_: Exception) { /* Session may have crossed the commit boundary. */ }
+        val existedBeforeCancel = try { installer.getSessionInfo(op.sessionId) != null }
+            catch (_: Exception) { false }
+        if (existedBeforeCancel) {
+            try {
+                installer.abandonSession(op.sessionId)
+                abandoned = installer.getSessionInfo(op.sessionId) == null
+            } catch (_: Exception) { /* Session may have crossed the commit boundary. */ }
+        }
         // The session may have crossed commit before a cancellation request.
         // Never advertise rollback from a state whose commit result was not
         // observed. A second device observation catches delayed package writes.
         val cancellationWindow = op.state == "approval" || op.state == "staged"
+        // A foreground transition can deliver STATUS_FAILURE_ABORTED before
+        // the app-owned Cancel reaches this serialized worker. Only that
+        // observed Android status can qualify an already-absent session.
+        val androidAborted = synchronized(guard) { op.androidAbortObserved }
         val unchangedBeforeSettle = try { baselineStillProven(op) } catch (_: Exception) { false }
         if (abandoned && unchangedBeforeSettle) {
             try { Thread.sleep(600L) } catch (_: InterruptedException) {
@@ -322,11 +337,15 @@ internal class R02fP03SessionBridge(
         val stillAbsent = try { installer.getSessionInfo(op.sessionId) == null } catch (_: Exception) { false }
         val unchanged = unchangedBeforeSettle &&
             try { baselineStillProven(op) } catch (_: Exception) { false }
-        val outcome = if (abandoned && stillAbsent && unchanged && cancellationWindow) {
+        val closureProven = abandoned || (androidAborted && stillAbsent)
+        val outcome = if (closureProven && stillAbsent && unchanged && cancellationWindow) {
             "cancelled"
         } else "unknown"
-        if (outcome == "cancelled" || abandoned) {
-            finish(op, outcome, if (outcome == "unknown") "BASELINE_UNVERIFIED" else null)
+        if (outcome == "cancelled" || abandoned || (androidAborted && stillAbsent)) {
+            val closureProof = if (outcome != "cancelled") "none" else
+                if (abandoned) "native_abandon" else "android_abort"
+            finish(op, outcome, if (outcome == "unknown") "BASELINE_UNVERIFIED" else null,
+                closureProof, outcome == "cancelled")
         } else {
             // A sealed session may still be applying an APK. Keep its journal
             // and callback alive rather than manufacture a terminal rollback.
@@ -338,10 +357,12 @@ internal class R02fP03SessionBridge(
             }
         }
         answer(reply, mapOf("status" to outcome, "sessionAbandoned" to abandoned,
+            "androidAbortObserved" to androidAborted,
             "baselineBytesVerified" to unchanged))
     }
 
-    private fun finish(op: Operation, outcome: String, detail: String?) {
+    private fun finish(op: Operation, outcome: String, detail: String?,
+                       closureProof: String = "none", originalBytesVerified: Boolean = false) {
         val waiter: MethodChannel.Result?
         synchronized(guard) {
             if (current?.id != op.id) return
@@ -354,6 +375,9 @@ internal class R02fP03SessionBridge(
                 put("packageName", op.packageName)
                 put("sessionId", op.sessionId)
                 put("outcome", outcome)
+                put("closureProof", closureProof)
+                put("originalBytesVerified", originalBytesVerified)
+                put("cancelRequested", op.cancelRequested)
                 put("detail", detail ?: "")
                 put("baseline", op.baseline)
                 put("after", fingerprint(op.packageName))
@@ -425,6 +449,42 @@ internal class R02fP03SessionBridge(
                 // later foreground UI can cancel rather than assume success.
             }
             return
+        }
+        // Android sometimes aborts the pending approval sheet when ObtainX
+        // returns to the foreground. A callback arriving before the app-owned
+        // Cancel must not clear the active journal before Cancel is handled.
+        // No successful cancellation is asserted here: the cancel worker must
+        // still prove session closure and unchanged signed APK bytes twice.
+        if (status == PackageInstaller.STATUS_FAILURE_ABORTED) {
+            val deferred = synchronized(guard) {
+                if (current?.id != op.id || op.state != "approval" || op.cancelRequested) {
+                    false
+                } else {
+                    op.androidAbortObserved = true
+                    if (persist(op)) true else {
+                        op.androidAbortObserved = false
+                        false
+                    }
+                }
+            }
+            if (deferred) {
+                mainHandler.postDelayed({
+                    try {
+                        worker.execute {
+                            val unresolved = synchronized(guard) {
+                                current?.takeIf { it.id == op.id && !it.cancelRequested }
+                            }
+                            if (unresolved != null) {
+                                // No user Cancel occurred: never fabricate one.
+                                finish(unresolved, "unknown", "ANDROID_ABORT_NO_USER_CANCEL")
+                            }
+                        }
+                    } catch (_: java.util.concurrent.RejectedExecutionException) {
+                        // Activity replaced: restart reconciliation owns the journal.
+                    }
+                }, 4000L)
+                return
+            }
         }
         // Never hash installed APKs on Android's main thread. PackageManager
         // status alone is insufficient to prove the planned APK was installed.

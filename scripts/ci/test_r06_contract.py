@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -37,7 +38,27 @@ class R06SourceMutationTests(unittest.TestCase):
   self.mutated('lib/widgets/r05_install_activity_page.dart',
    'record.packageId == widget.packageId')
  def test_roadmap_digest(self):
-  self.mutated('docs/R00_BASELINE.json','roadmap_sha256')
+  # A JSON-aware mutation must change only the active roadmap digest value.
+  # Historic receipt fields may contain the same key suffix, unchanged.
+  with tempfile.TemporaryDirectory(prefix='ox-r06-digest-mut-') as d:
+   root=Path(d)
+   for f in module.FILES:
+    dst=root/f;dst.parent.mkdir(parents=True,exist_ok=True)
+    dst.write_bytes((ROOT/f).read_bytes())
+   target=root/'docs/R00_BASELINE.json'
+   baseline=json.loads(target.read_text(encoding='utf-8'))
+   digest=baseline['roadmap_sha256']
+   self.assertRegex(digest,r'^[0-9a-f]{64}$')
+   with contextlib.redirect_stdout(io.StringIO()) as baseline_output:
+    self.assertEqual(module.verify(root),0,'unmodified R06 fixture failed')
+   baseline['roadmap_sha256']=('0' if digest[0]!='0' else '1')+digest[1:]
+   target.write_text(json.dumps(baseline,sort_keys=True,indent=2)+'\n',encoding='utf-8')
+   reread=json.loads(target.read_text(encoding='utf-8'))
+   self.assertEqual(reread['prior_roadmap_sha256'],baseline['prior_roadmap_sha256'])
+   self.assertEqual(reread['roadmap_reconciliation'],baseline['roadmap_reconciliation'])
+   with contextlib.redirect_stdout(io.StringIO()) as changed_output:
+    self.assertNotEqual(module.verify(root),0)
+   self.assertIn('roadmap digest differs from R00 baseline',changed_output.getvalue())
  def test_stack_base_branch(self):
   self.mutated('config/delivery-required-ci.json',module.R05_BASE)
  def test_required_workflow_identity(self):

@@ -1,3 +1,15 @@
+# ObtainX — Post-consolidation reconciliation (23 November 2026)
+
+**Current authoritative GitHub baseline:** `main` at `bde1f1234c88a939477b988c5b5fd6fbcb6696a8`, merged through PR #28. The preceding R01–R04 stack (#15–#24) is contained in the accepted Git history; superseded PRs #16–#24 are closed, not separately merged. Existing security acceptance was source-specific and is not physical-device or release qualification.
+
+**Pre-merge CI:** six independent workflows passed on exact integration source `bdd26247bd7c9b3a2bbd8bcb66219bb4d58d0c8c` (R00 contracts `45245822651`, Flutter `45245823008`, API36 `45245822596`, RT02 `45245822338`, RT02B `45245822529`, RT02C `45245822723`). **Post-merge:** R00 push source integrity passed for `main` at `bde1f1234` (run `45247737093`). This is not CI24 or physical/release acceptance.
+
+**Current drafts:** R05 PR #25 (transactional installs, verifiable receipts, recovery) is rebased *logically by non-force merge* onto accepted `main`; R06 PR #26 (app details, clearer version decisions, install history) follows the updated R05 branch. Both PRs remain drafts with independent fresh exact-head six-workflow checks required. No draft was merged, no force push was used, and no Gradle was invoked locally. R06's historical 18 November snapshot below is retained for audit, but its old PR/main/CI states are superseded by this section.
+
+**Remaining overlays:** R05 — Transactional installs; R06 — App details and history; R07 — Activity Center; R08 — Source reliability; R09 — Discovery and app list; R10 — Settings and accessibility; R11 — Integrations, policy and history; R12 — Release qualification. Each remains independently subject to full implementation, regression and acceptance gates.
+
+---
+
 # ObtainX — Canonical Roadmap and Qualification Snapshot
 
 **Snapshot date:** 18 November 2026 (UTC; verified after 21:07 UTC)  

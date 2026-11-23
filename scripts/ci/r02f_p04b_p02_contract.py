@@ -77,6 +77,19 @@ def inspect(root:Path=ROOT)->list[str]:
         check(s in h,'real positive Android observation/gate missing '+s)
     for s in ("obj['target_sha256']", "obj['after']=={'version_code':2", 'obj[\'system_approval_taps\']==1'):
         check(s in h,'positive independent verifier missing '+s)
+    check("need(set(out) in ({'status'}, {'sha256','status'})," in h and
+          "need(out['status'] in allowed_status_only," in h and
+          "need(re.fullmatch(r'[0-9a-f]{64}',out['sha256'] or '') is not None," in h and
+          "need(out.get('status') in TARGET_STATES," in h,
+          'target receipt must permit safe pre-SHA states and reject untrusted statuses')
+    check("need(terminal=={\n             'sha256':inv['files']['base_v2.apk']['sha256'],\n             'status':'system_status_success'}," in h,
+          'terminal signed v2 SHA/status receipt mandatory')
+    check("if (process.poll() is not None and approvals>0 and" in h and
+          "last_status=='system_status_success'" in h and
+          "terminal_deadline=time.monotonic()+30" in h and
+          "after=observe_signed_v2()" in h and
+          "need(terminal=={\n             'sha256':inv['files']['base_v2.apk']['sha256'],\n             'status':'system_status_success'}," in h,
+          'post-Flutter independent Android installation observation missing')
     check('return True' not in h[h.index('def verify('):] and
           'base.adb(' not in h[h.index('def verify('):],
           'post-emulator verifier must be offline and fail closed')

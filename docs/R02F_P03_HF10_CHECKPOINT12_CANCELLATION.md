@@ -28,6 +28,23 @@ and hosted receipt distinguish those cases: `native_session_abandoned_from_appli
 versus `android_abort_observed_before_cancel` are exclusive booleans, never both.
 The native-Android origin is never mislabeled as an ObtainX-native abandon.
 
+## HF11 regression: post-Cancel STATUS_FAILURE_ABORTED (23 November 2026)
+
+PR #27 source `1fb0801dea7b0e07da3d08abdbcb578c7baf3b1b` still fails
+RT02C run `45165996590` at the real production AppPage Cancel assertion.
+The callback previously ignored `STATUS_FAILURE_ABORTED` when Cancel was already
+requested; it took the generic terminal UNKNOWN path instead of independently
+checking that Android closed the exact session while original signed APKs
+remained unchanged. This revision preserves the durable accepted-cancel window,
+reconciles a later matching abort, enforces session absence before/after
+settling and two original-byte observations, and resolves uncertain sessions to
+UNKNOWN on a bounded deadline. It does not turn Android status into install
+success or count a user cancellation when the UI was never tapped.
+
+The Dart integration test emits fixed allowlisted categories only for failure
+triage. No raw Flutter logs or device/package inventory are published. Full
+API36 hosted acceptance is still required at the new exact PR head.
+
 ## Required acceptance (NOT YET ATTESTED)
 
 - Native Devtool source-bound validation, apply, committed session, delivered PR.

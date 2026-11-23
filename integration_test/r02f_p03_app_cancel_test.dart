@@ -169,6 +169,17 @@ void main() {
       final snapshot = await R02fP03CancellableStock.instance.snapshot();
       final terminal = snapshot['terminal'] as Map<String, dynamic>?;
       expect(terminal?['id'], native['id']);
+      // Fixed-category diagnostics only: no paths, package inventory or
+      // Flutter exception fragments are published by the hosted workflow.
+      if (terminal == null) {
+        debugPrint('OX_P03_DART_CANCEL_DIAGNOSTIC=TERMINAL_MISSING');
+      } else if (terminal['outcome'] == 'unknown') {
+        debugPrint('OX_P03_DART_CANCEL_DIAGNOSTIC=TERMINAL_UNKNOWN');
+      } else if (terminal['outcome'] == 'error') {
+        debugPrint('OX_P03_DART_CANCEL_DIAGNOSTIC=TERMINAL_ERROR');
+      } else if (terminal['outcome'] != 'cancelled') {
+        debugPrint('OX_P03_DART_CANCEL_DIAGNOSTIC=OTHER_NON_CANCELLED');
+      }
       expect(terminal?['outcome'], 'cancelled',
           reason: 'Native abandon and original APK integrity must be established');
       expect(terminal?['cancelRequested'], isTrue);

@@ -86,6 +86,9 @@ RULES = {
         'val outcome = if (closureProven && stillAbsent && unchanged && cancellationWindow)',
         'status == PackageInstaller.STATUS_FAILURE_ABORTED',
         'op.androidAbortObserved = true',
+        'op.cancelWindowAccepted = op.state == "approval" || op.state == "staged"',
+        'reconcileLateAndroidAbort(op)',
+        'CANCEL_SETTLEMENT_UNPROVEN',
         'closureProof', 'originalBytesVerified',
         'PendingIntent.FLAG_MUTABLE',
         'PREFS = "obtainx_r02f_p03_sessions"',
@@ -231,7 +234,7 @@ def verify_sources(sources: dict[str,str]) -> None:
        'RESTART_ORPHAN_ANDROID_STATUS_' not in native or \
        'cancellationWindow' not in native:
         raise ValueError('OX_P03_REFUSED unsafe native rollback or orphan recovery')
-    if native.count('baselineStillProven(op)') != 3 or 'sourceDir' not in native:
+    if native.count('baselineStillProven(op)') != 5 or 'sourceDir' not in native:
         raise ValueError('OX_P03_REFUSED missing actual installed APK baseline check')
     hosted=sources['scripts/ci/r02f_p03_hosted.py']
     if "base.adb('shell','input','keyevent'" in hosted or "'install-abandon'" in hosted:

@@ -38,6 +38,22 @@ class RealCancelRaceContract(unittest.TestCase):
         self.assertIn("'android_abort_observed_before_cancel':android_abort",self.host)
         self.assertIn("'native_session_abandoned_from_application':first_party",self.host)
 
+    def test_late_abort_after_cancel_is_not_generic_unknown(self):
+        self.assertIn('if (op.cancelRequested) {', self.native)
+        self.assertIn('worker.execute { reconcileLateAndroidAbort(op) }', self.native)
+        self.assertIn('op.state != "approval" && op.state != "cancel_uncertain"', self.native)
+        self.assertIn('cancelWindowAccepted', self.native)
+        self.assertIn('absentBefore && absentAfter && unchangedBefore && unchangedAfter', self.native)
+        self.assertIn('CANCEL_SETTLEMENT_UNPROVEN', self.native)
+        self.assertIn('RESTART_SESSION_FINALIZED_UNOBSERVED', self.native)
+        self.assertNotIn('op.state != "approval" || op.cancelRequested', self.native)
+
+    def test_bounded_diagnostic_categories_only(self):
+        self.assertIn('OX_P03_DART_CANCEL_DIAGNOSTIC=TERMINAL_UNKNOWN', self.dart)
+        self.assertIn('OX_P03_DART_CANCEL_DIAGNOSTIC=TERMINAL_MISSING', self.dart)
+        self.assertIn('OX_P03_DART_CANCEL_DIAGNOSTIC=TERMINAL_ERROR', self.dart)
+        self.assertIn('OX_P03_DART_STAGE=APP_OWNED_CANCEL_RESULT_VERIFIED', self.dart)
+
     def test_original_real_android_acceptance_retained(self):
         self.assertIn('await tester.tap(realCancel)',self.dart)
         self.assertIn('provider.installApk(',self.dart)

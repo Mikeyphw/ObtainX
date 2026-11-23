@@ -63,6 +63,10 @@ class R06SourceMutationTests(unittest.TestCase):
   self.mutated('config/delivery-required-ci.json',module.R05_BASE)
  def test_required_workflow_identity(self):
   self.mutated('config/delivery-required-ci.json','413864665')
+ def test_r06_quick_actions_null_aware(self):
+  self.mutated('lib/pages/app.dart','?r06QuickActions,')
+ def test_r06_changelog_null_aware(self):
+  self.mutated('lib/pages/app.dart','?changeLogCard,')
  def test_negative_no_r06_api36_trigger(self):
   self.mutated('.github/workflows/obtainx-r02-api36.yml',"- 'lib/components/r06_*'")
  def test_negative_no_r06_rt02_trigger(self):

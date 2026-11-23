@@ -5424,8 +5424,8 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
           ?trackOnlyInstalledErrorCard,
           if (buttonsAtTop && actionButtonsWidget != null) actionButtonsWidget,
           versionCard,
-          if (r06QuickActions != null) r06QuickActions,
-          if (changeLogCard != null) changeLogCard,
+          ?r06QuickActions,
+          ?changeLogCard,
           ?securityCard,
           detailsCard,
           if (app?.app.additionalSettings['about'] is String &&

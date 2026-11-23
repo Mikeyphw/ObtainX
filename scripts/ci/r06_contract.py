@@ -54,7 +54,7 @@ def verify(root:Path=ROOT)->int:
   'R06VersionTile(', "ValueKey('r06-open-installed-app')",
   'app.installedInfo?.packageName == app.app.id',
   "ValueKey('r06-install-history')",'R05InstallActivityPage(', 'packageId: app.app.id,',
-  "ValueKey('r06-whats-new-action')",'if (changeLogCard != null) changeLogCard')
+  "ValueKey('r06-whats-new-action')",'?r06QuickActions,', '?changeLogCard,')
  contains('lib/components/r06_version_tile.dart',
   'class R06VersionTile extends StatelessWidget','Semantics(',
   "label: '$label: $value",'SelectableText(', 'Wrap(')

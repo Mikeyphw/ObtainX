@@ -215,6 +215,28 @@ void main() {
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   const channel = MethodChannel('dev.imranr.obtainium/device_apps');
+  // R05 recovery requests the private application-support directory on a full
+  // load. In Flutter widget tests there is no real Android path_provider
+  // service; supply only this method using an isolated disposable directory.
+  // Production R05OperationJournal still uses getApplicationSupportDirectory.
+  const supportChannel = MethodChannel('plugins.flutter.io/path_provider');
+  late Directory r05TestSupportDirectory;
+  setUpAll(() async {
+    r05TestSupportDirectory =
+        await Directory.systemTemp.createTemp('obtainx-r05-test-support-');
+    messenger.setMockMethodCallHandler(supportChannel, (call) async {
+      if (call.method == 'getApplicationSupportDirectory') {
+        return r05TestSupportDirectory.path;
+      }
+      throw MissingPluginException('Unexpected path_provider method: ${call.method}');
+    });
+  });
+  tearDownAll(() async {
+    messenger.setMockMethodCallHandler(supportChannel, null);
+    if (await r05TestSupportDirectory.exists()) {
+      await r05TestSupportDirectory.delete(recursive: true);
+    }
+  });
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
   test(
@@ -270,6 +292,12 @@ void main() {
       messenger.setMockMethodCallHandler(channel, (_) => stalled.future);
       await provider.loadApps(
         installedInfoTimeout: const Duration(milliseconds: 50),
+      );
+      expect(
+        await Directory('${r05TestSupportDirectory.path}/r05-install-operations')
+            .exists(),
+        isTrue,
+        reason: 'R05 recovery must actually access private journal storage',
       );
       expect(provider.apps[_app.id]!.app.installedVersion, '1.0');
       expect(provider.loadingApps, isFalse);

@@ -31,6 +31,9 @@ import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/providers/virustotal_provider.dart';
 import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/r04_actions_archive_integrity.dart';
+import 'package:obtainium/services/r05_operation_receipt.dart';
+import 'package:obtainium/services/r05_operation_journal.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/services/install_precommit_gate.dart';
 import 'package:obtainium/services/r02f_p05_device_profile.dart';
@@ -328,6 +331,200 @@ bool installerCanDowngrade({
 
 /// App download, install, and on-device package operations for [AppsProvider].
 extension AppsProviderInstall on AppsProvider {
+  /// R05 journal is the single durable state authority; Android/release
+  /// reconciliation remains independent and cannot be replaced by a timer.
+  Future<R05OperationReceipt> _r05BeginAttempt(
+    String listingKey, File primary, PackageInfo packageInfo, {
+    required String kind,
+    List<File> selected = const <File>[],
+  }) async {
+    final app = apps[listingKey]?.app;
+    if (app == null) throw StateError('Tracked listing disappeared before install');
+    final settings = app.additionalSettings;
+    int? positiveSetting(String key) {
+      final v = int.tryParse('${settings[key] ?? ''}');
+      return v != null && v > 0 ? v : null;
+    }
+    final sha = '${settings['r04CommitSha'] ?? ''}'.toLowerCase();
+    final sourceHost = Uri.tryParse(app.url)?.host;
+    final signers = packageInfo.signingInfo?.apkContentSigners;
+    final signerHashes = signers == null ? const <String>[] :
+        certificateHashesFromSignatures(signers);
+    final signer = signerHashes.isEmpty ? null :
+        signerHashes.first.replaceAll(':', '').toLowerCase();
+    // This SHA-256 is computed locally from the exact file before handoff,
+    // not inferred from a filename or substituted for installed APK proof.
+    final digest = await sha256FileOffIsolate(primary.path);
+    return R05OperationJournal.instance.begin(
+      listingKey: listingKey, packageId: app.id,
+      backend: getInstaller().modeKey, kind: kind,
+      fileNames: <String>[
+        primary.uri.pathSegments.last,
+        ...selected.map((f) => f.uri.pathSegments.last),
+      ],
+      sourceHost: sourceHost?.isEmpty == true ? null : sourceHost,
+      sourceBranch: settings['r04Branch'] is String
+          ? settings['r04Branch'] as String : null,
+      workflow: settings['r04Workflow'] is String
+          ? settings['r04Workflow'] as String : null,
+      runId: positiveSetting('r04RunId'),
+      runAttempt: positiveSetting('r04RunAttempt'),
+      artifactId: positiveSetting('r04ArtifactId'),
+      commitSha: RegExp(r'^[0-9a-f]{40}$').hasMatch(sha) ? sha : null,
+      downloadSha256: digest.toLowerCase(),
+      archiveSignerSha256: signer,
+      expectedVersionCode: packageInfo.versionCode,
+    );
+  }
+
+  String? _r05InstalledSigner(PackageInfo info) {
+    final signing = info.signingInfo;
+    final hashes = signing == null ? const <String>[] :
+        certificateHashesFromSignatures(signing.apkContentSigners ?? const <List<int>>[]);
+    return hashes.isEmpty ? null : hashes.first.replaceAll(':', '').toLowerCase();
+  }
+
+  Future<void> _r05CloseAttempt(
+    R05OperationReceipt attempt, InstallResult result,
+    InstallReleaseSnapshot? expectedRelease,
+  ) async {
+    final journal = R05OperationJournal.instance;
+    if (result.isError) {
+      await journal.settleIfOpen(attempt.id, R05InstallStage.failed,
+          androidCode: result.errorCode, reason: 'Android installer reported an error');
+    } else if (result.isCancelled) {
+      await journal.settleIfOpen(attempt.id, R05InstallStage.cancelled,
+          reason: 'Installer explicitly cancelled');
+    } else if (result.isHandedOff) {
+      await journal.settleIfOpen(attempt.id, R05InstallStage.handedOff,
+          reason: 'External or native handoff; confirmation remains pending');
+    } else if (result.isAlreadyInstalled) {
+      await journal.settleIfOpen(attempt.id, R05InstallStage.unknown,
+          reason: 'Android reported already installed or pending; not proof of this attempt');
+    } else if (result.isSuccess) {
+      final observed = await getInstalledInfo(attempt.packageId);
+      if (observed != null && expectedRelease != null &&
+          p04PendingMatchesInstalledPackage(apps[attempt.listingKey]!.app,
+              expectedRelease, observed) &&
+          (attempt.expectedVersionCode == null ||
+              observed.versionCode == attempt.expectedVersionCode) &&
+          (attempt.archiveSignerSha256 == null ||
+              _r05InstalledSigner(observed) == attempt.archiveSignerSha256)) {
+        await journal.settleIfOpen(attempt.id, R05InstallStage.confirmed,
+          evidence: R05AndroidEvidence(packageName: observed.packageName ?? '',
+            exactAttemptMatches: true, versionCode: observed.versionCode,
+            installedSignerSha256: _r05InstalledSigner(observed)));
+      } else {
+        await journal.settleIfOpen(attempt.id, R05InstallStage.unknown,
+          reason: 'Installer returned success but matching Android/release proof is missing');
+      }
+    }
+  }
+
+  Future<bool> _r05AdditionalApproval(R05OperationReceipt receipt,
+      {required bool interactive}) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(r05ExtraApprovalPreference) != true) return true;
+    await R05OperationJournal.instance.settleIfOpen(
+        receipt.id, R05InstallStage.awaitingApproval,
+        reason: 'Optional extra approval required');
+    final navigator = globalNavigatorKey.currentState;
+    if (!interactive || navigator == null || !navigator.mounted) {
+      // Preserve the file and review entry; no silent approval.
+      return false;
+    }
+    final accepted = await showDialog<bool>(
+      context: navigator.context, barrierDismissible: false,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Review installation'),
+        content: Text('Package: ${receipt.packageId}\n'
+            'Installer: ${receipt.backend}\n'
+            'Files: ${receipt.fileNames.length}\n'
+            'This optional approval does not replace Android security confirmation.'),
+        actions: <Widget>[
+          TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Not now')),
+          FilledButton(onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Continue to Android')),
+        ],
+      ),
+    );
+    if (accepted != true) {
+      await R05OperationJournal.instance.settleIfOpen(
+        receipt.id, R05InstallStage.cancelled,
+        reason: 'User declined additional approval');
+      return false;
+    }
+    return true;
+  }
+
+  /// Read-only package reconciliation for the R05 review screen. A package
+  /// broadcast without exact tracked release evidence never confirms.
+  Future<void> reconcileR05OperationReceipts() async {
+    final journal = R05OperationJournal.instance;
+    for (final attempt in await journal.list()) {
+      if (attempt.stage == R05InstallStage.confirmed ||
+          attempt.stage == R05InstallStage.failed ||
+          attempt.stage == R05InstallStage.cancelled) {
+        continue;
+      }
+      final entry = apps[attempt.listingKey];
+      if (entry == null || entry.app.id != attempt.packageId) {
+        continue;
+      }
+      final unique = await journal.uniqueUnresolved(attempt.listingKey);
+      if (unique?.id != attempt.id) {
+        continue;
+      }
+      final pending = InstallReleaseSnapshot.fromJson(
+        entry.app.additionalSettings[pendingInstallReleaseKey],
+      );
+      final observed = await getInstalledInfo(attempt.packageId);
+      if (observed == null ||
+          !p04PendingMatchesInstalledPackage(entry.app, pending, observed) ||
+          (attempt.expectedVersionCode != null &&
+           attempt.expectedVersionCode != observed.versionCode) ||
+          (attempt.archiveSignerSha256 != null &&
+           _r05InstalledSigner(observed) != attempt.archiveSignerSha256)) {
+        continue;
+      }
+      await journal.settleIfOpen(attempt.id, R05InstallStage.confirmed,
+        evidence: R05AndroidEvidence(packageName: observed.packageName ?? '',
+          versionCode: observed.versionCode, exactAttemptMatches: true,
+          installedSignerSha256: _r05InstalledSigner(observed)));
+    }
+  }
+
+  Future<void> _r05MarkUnknownIfStillPending(String listingKey, String reason) async {
+    final journal = R05OperationJournal.instance;
+    final attempt = await journal.latestUnresolved(listingKey);
+    if (attempt == null || attempt.stage == R05InstallStage.unknown) return;
+    await journal.settleIfOpen(attempt.id, R05InstallStage.unknown,
+        reason: reason);
+  }
+
+  /// Owns and observes the background future even when Android does not
+  /// complete its method-channel reply while this Activity is backgrounded.
+  Future<void> _r05TrackBackgroundInstall(String listingKey, Future<bool> operation) async {
+    try {
+      await operation;
+    } catch (error) {
+      try {
+        await _r05MarkUnknownIfStillPending(listingKey,
+            'Background installer future ended without verified resolution');
+        await logs.add('R05 background install failed for $listingKey: ${error.runtimeType}',
+            level: LogLevel.warning);
+      } catch (_) {
+        // The journal itself failed; keep the original operation error in logs.
+        try {
+          await logs.add('R05 journal unavailable for background install',
+              level: LogLevel.error);
+        } catch (_) {}
+      }
+    }
+  }
+
+
   /// Starts recording third-party installs the moment the system confirms them.
   ///
   /// [ExternalInstaller] cannot learn its own result — the target app never
@@ -364,6 +561,12 @@ extension AppsProviderInstall on AppsProvider {
       _awaitingThirdPartyInstallTimeout,
       () {
         thirdPartyInstallIndicatorTimers.remove(appId);
+        unawaited(_r05MarkUnknownIfStillPending(appId,
+            'External installer did not provide independent confirmation')
+            .catchError((Object error) async {
+              await logs.add('R05 receipt timeout could not be persisted: ${error.runtimeType}',
+                level: LogLevel.error);
+            }));
         final timedOutEntry = apps[appId];
         if (timedOutEntry?.downloadProgress ==
             _awaitingThirdPartyInstallSentinel) {
@@ -421,6 +624,19 @@ extension AppsProviderInstall on AppsProvider {
         }
         recoveredNativeInstallIds.remove(listingKey);
         uncertainNativeInstallListings.remove(listingKey);
+        final r05 = await R05OperationJournal.instance.uniqueUnresolved(listingKey);
+        if (r05 != null && r05.packageId == packageName &&
+            (r05.expectedVersionCode == null ||
+             r05.expectedVersionCode == installedInfo.versionCode) &&
+            (r05.archiveSignerSha256 == null ||
+             _r05InstalledSigner(installedInfo) == r05.archiveSignerSha256)) {
+          await R05OperationJournal.instance.settleIfOpen(r05.id,
+            R05InstallStage.confirmed,
+            evidence: R05AndroidEvidence(packageName: installedInfo.packageName ?? '',
+              versionCode: installedInfo.versionCode,
+              exactAttemptMatches: true,
+              installedSignerSha256: _r05InstalledSigner(installedInfo)));
+        }
         entry.app = recordConfirmedInstall(entry.app, pending, installedInfo);
         await saveApps([entry.app], attemptToCorrectInstallStatus: false);
       } else {
@@ -1165,7 +1381,14 @@ extension AppsProviderInstall on AppsProvider {
           // The original container is handed off, not one extracted split.
           final packageInfo = plannedInfo;
           release = dir.release?.withPackage(packageInfo);
+          final r05Container = await _r05BeginAttempt(
+              dir.appId, dir.file, packageInfo, kind: 'container-handoff');
           await _recordPendingInstall(dir.appId, release);
+          if (!await _r05AdditionalApproval(r05Container,
+              interactive: showMalwareScanDialog)) {
+            await _clearPendingInstall(dir.appId, release);
+            return false;
+          }
           // No await after this synchronous barrier: a route-level Cancel
           // cannot claim to undo a third-party handoff already dispatched.
           if (!sealInstallHandoff(preparationGate)) {
@@ -1176,6 +1399,7 @@ extension AppsProviderInstall on AppsProvider {
             appId: dir.appId,
             installOptions: installOptions,
           );
+          await _r05CloseAttempt(r05Container, result, release);
           if (result.isError || result.isCancelled) {
             await _clearPendingInstall(dir.appId, release);
           }
@@ -1377,7 +1601,15 @@ extension AppsProviderInstall on AppsProvider {
     // Persist intent before handoff. A broadcast or later device observation can
     // confirm it even if this background isolate never resumes after install.
     final installedRelease = file.release?.withPackage(newInfo);
+    final r05 = await _r05BeginAttempt(file.appId, file.file, newInfo,
+        kind: additionalAPKs.isEmpty ? 'apk' : 'split-session',
+        selected: additionalAPKs.map((x) => x.file).toList());
     await _recordPendingInstall(file.appId, installedRelease);
+    if (!await _r05AdditionalApproval(r05,
+        interactive: showMalwareScanDialog)) {
+      await _clearPendingInstall(file.appId, installedRelease);
+      return false;
+    }
     final allAPKs = [file.file.path];
     allAPKs.addAll(additionalAPKs.map((a) => a.file.path));
     final InstallResult result;
@@ -1385,6 +1617,11 @@ extension AppsProviderInstall on AppsProvider {
       // Native stock mode keeps the owned session cancellable while
       // awaiting Android approval. Other installer modes seal irreversibly.
       final activeInstaller = getInstaller();
+      if (activeInstaller.modeKey == 'system') {
+        await R05OperationJournal.instance.settleIfOpen(
+            r05.id, R05InstallStage.awaitingApproval,
+            reason: 'Android session may require approval');
+      }
       if (!sealInstallHandoff(preparationGate,
           nativeCancelable: activeInstaller.modeKey == 'system')) {
         throw const CancellationException();
@@ -1400,10 +1637,18 @@ extension AppsProviderInstall on AppsProvider {
             'r02fP03Gate': preparationGate,
         },
       );
+    } on CancellationException {
+      await R05OperationJournal.instance.settleIfOpen(r05.id,
+          R05InstallStage.cancelled, reason: 'Precommit cancellation');
+      await _clearPendingInstall(file.appId, installedRelease);
+      rethrow;
     } catch (_) {
+      await R05OperationJournal.instance.settleIfOpen(r05.id,
+          R05InstallStage.failed, reason: 'Installer threw before a reliable Android result');
       await _clearPendingInstall(file.appId, installedRelease);
       rethrow;
     }
+    await _r05CloseAttempt(r05, result, installedRelease);
     final bool installed = result.isSuccess;
     if (result.isError || result.isCancelled) {
       await _clearPendingInstall(file.appId, installedRelease);
@@ -2097,7 +2342,7 @@ extension AppsProviderInstall on AppsProvider {
               );
           if (!proceedAfterVerification) return;
           final baseline = await captureInstallBaseline(id);
-          unawaited(
+          unawaited(_r05TrackBackgroundInstall(id,
             installApk(
               downloadedFile,
               null,
@@ -2107,7 +2352,7 @@ extension AppsProviderInstall on AppsProvider {
               },
               skipMalwareScan: true,
             ),
-          );
+          ));
           sayInstalled = await waitForPackageInstall(
             id,
             baseline,
@@ -2122,6 +2367,8 @@ extension AppsProviderInstall on AppsProvider {
             ),
           );
           if (!sayInstalled) {
+            await _r05MarkUnknownIfStillPending(id,
+              'Native background confirmation poll exhausted');
             final latestInfo = await getInstalledInfo(id);
             unawaited(
               logs.add(
@@ -2165,14 +2412,14 @@ extension AppsProviderInstall on AppsProvider {
               );
           if (!proceedAfterVerification) return;
           final baseline = await captureInstallBaseline(id);
-          unawaited(
+          unawaited(_r05TrackBackgroundInstall(id,
             installApkDir(
               downloadedDir,
               null,
               needsBGWorkaround: true,
               skipPreInstallVerification: true,
             ),
-          );
+          ));
           sayInstalled = await waitForPackageInstall(
             id,
             baseline,
@@ -2187,6 +2434,8 @@ extension AppsProviderInstall on AppsProvider {
             ),
           );
           if (!sayInstalled) {
+            await _r05MarkUnknownIfStillPending(id,
+              'Native background confirmation poll exhausted');
             final latestInfo = await getInstalledInfo(id);
             unawaited(
               logs.add(

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:obtainium/services/r05_operation_journal.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -652,7 +653,10 @@ extension AppsProviderLifecycle on AppsProvider {
     }
     // Native PackageInstaller session ownership outlives Flutter process
     // death. Recovery is read-only until a user explicitly taps Cancel.
-    if (singleId == null) unawaited(recoverNativeInstallSessions());
+    if (singleId == null) {
+      await R05OperationJournal.instance.recoverInterruptedOnce();
+      unawaited(recoverNativeInstallSessions());
+    }
     // Deliberately after the load has been reported as finished, and not awaited:
     // nothing on screen waits for these writes.
     if (correctedInstallStatusIds.isNotEmpty) {

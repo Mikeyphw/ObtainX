@@ -57,7 +57,9 @@ RULES = {
         'element.downloadProgress != _recoveredNativeInstallSentinel',
     ),
     'lib/providers/apps_provider_lifecycle.dart': (
-        'if (singleId == null) unawaited(recoverNativeInstallSessions());',
+        'if (singleId == null) {',
+        'await R05OperationJournal.instance.recoverInterruptedOnce();',
+        'unawaited(recoverNativeInstallSessions());',
     ),
     'lib/pages/app.dart': (
         "import 'package:obtainium/widgets/r02f_p03_cancel_button.dart';",
@@ -201,6 +203,16 @@ def verify_sources(sources: dict[str,str]) -> None:
         for anchor in anchors:
             if anchor not in sources[path]:
                 raise ValueError('OX_P03_REFUSED missing protected anchor: '+path+' '+anchor)
+    # Source-bound R05 recovery must preserve R02 native session ownership.
+    lifecycle=sources['lib/providers/apps_provider_lifecycle.dart']
+    recovery=(
+        'if (singleId == null) {\n'
+        '      await R05OperationJournal.instance.recoverInterruptedOnce();\n'
+        '      unawaited(recoverNativeInstallSessions());\n'
+        '    }'
+    )
+    if recovery not in lifecycle:
+        raise ValueError('OX_P03_REFUSED R05/native restart recovery ordering lost')
     provider=sources['lib/providers/apps_provider_install.dart']
     if provider.count('preparationGate: installPreparationGate,') != 2 or \
        provider.count('preparationGate: preparationGate,') != 1 or \

@@ -65,6 +65,30 @@ class DiagnosticsTests(unittest.TestCase):
             self.M.classify('',1,'FLUTTER_STARTING','bad','123',b'')
         with self.assertRaises(ValueError):
             self.M.classify('',1,'FLUTTER_STARTING',self.sha,'../../file',b'')
+    def test_post_tap_checkpoint_classification_is_fixed_and_private(self):
+        self.assertEqual(len(self.M.POST_TAP_CHECKPOINTS),6)
+        text='\n'.join(self.M.POST_TAP_CHECKPOINTS[:3])+'\nprivate=/secret/token-KEEP-PRIVATE'
+        report=self.classify(text,stage='UI_CANCEL_TAPPED')
+        self.assertEqual(report['post_tap_checkpoint_indices'],[1,2,3])
+        self.assertFalse(report['duplicate_post_tap_checkpoints'])
+        self.assertNotIn('KEEP-PRIVATE',json.dumps(report))
+        self.assertFalse(report['android_live_audit_passed'])
+    def test_post_tap_duplicate_or_missing_cannot_be_success_receipt(self):
+        report=self.classify((self.M.POST_TAP_CHECKPOINTS[0]+'\n')*2,
+                             stage='UI_CANCEL_TAPPED')
+        self.assertTrue(report['duplicate_post_tap_checkpoints'])
+        self.assertEqual(report['post_tap_checkpoint_indices'],[])
+        self.assertEqual(report['status'],self.M.STATUS)
+        self.assertFalse(report['release_qualified'])
+    def test_post_tap_assertions_are_after_real_ui_tap(self):
+        dart=(HERE.parent.parent/'integration_test/r02f_p03_app_cancel_test.dart').read_text()
+        self.assertEqual(dart.count('await tester.tap(realCancel)'),1)
+        for checkpoint in self.M.POST_TAP_CHECKPOINTS:
+            expected="debugPrint('"+checkpoint+"')"
+            self.assertEqual(dart.count(expected),1)
+            self.assertGreater(dart.index(expected),dart.index('await tester.tap(realCancel)'))
+        self.assertIn("expect(terminal?['outcome'], 'cancelled'",dart)
+        self.assertIn("expect(terminal?['originalBytesVerified'], isTrue",dart)
     def test_private_bounded_writing_and_stale_refusal(self):
         with tempfile.TemporaryDirectory(prefix='p03-hf09-') as d:
             root=Path(d);p=root/'private.log';p.write_text('PlatformException token=DO-NOT-PRINT /very/private\n')

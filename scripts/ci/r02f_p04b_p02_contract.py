@@ -65,14 +65,27 @@ def inspect(root:Path=ROOT)->list[str]:
         check(s in h,'real positive Android observation/gate missing '+s)
     for s in ("obj['target_sha256']", "obj['after']=={'version_code':2", 'obj[\'system_approval_taps\']==1'):
         check(s in h,'positive independent verifier missing '+s)
-    check("observed.get('status')=='system_status_success'" in h and
+    check("signed_success = (approvals==1 and" in h and
+          "observed=={'status':'system_status_success','sha256':expected_v2}" in h and
           'foreground_restored = True' in h and
           "base.adb('shell','am','start','-f','0x24000000','-n'," in h and
           'OX_P04B_P02_PROGRESS' in h and
           'safe_target_statuses' in h and
           "need(approvals==1,'system PackageInstaller approval not observed exactly once')" in h and
-          'if (approvals==1 and not foreground_restored and' in h,
+          'if signed_success and not foreground_restored:' in h,
           'positive hosted lifecycle/allowlisted state/approval proof missing')
+    check("need(out['status'] in allowed_status_only," in h and
+          'post_flutter_deadline = None' in h and
+          'post_flutter_deadline = now + 120' in h and
+          'if flutter_done and post_flutter_deadline is None:' in h and
+          'if flutter_done and signed_success and foreground_restored:' in h and
+          "observed=={'status':'system_status_success','sha256':expected_v2}" in h and
+          'flutter_deadline=time.monotonic()+720' in h and
+          'while True:' in h and
+          'while process.poll() is None and time.monotonic()<deadline:' not in h,
+          'external host must observe native approval after Flutter process exit')
+    check("need(terminal=={\n             'sha256':inv['files']['base_v2.apk']['sha256'],\n             'status':'system_status_success'}," in h,
+          'final Android terminal status must bind success to signed v2 bytes')
     check('return True' not in h[h.index('def verify('):] and
           'base.adb(' not in h[h.index('def verify('):],
           'post-emulator verifier must be offline and fail closed')

@@ -50,7 +50,17 @@ def target_observation()->dict:
     need(raw.lstrip().startswith('<?xml') and len(raw)<4096,'target receipt missing or unbounded')
     root=ET.fromstring(raw);need(root.tag=='map','target receipt malformed')
     out={x.attrib.get('name'):x.text for x in root if x.tag=='string'}
-    need(set(out)=={'sha256','status'},'target receipt fields unexpected')
+    need(set(out) in ({'status'}, {'sha256','status'}),
+         'target receipt fields unexpected')
+    allowed_status_only = {'started','installer_error','refused_content_grant',
+                           'missing_approval_intent','approval_launch_failed',
+                           'system_status_failure'}
+    if 'sha256' in out:
+        need(re.fullmatch(r'[0-9a-f]{64}',out['sha256'] or '') is not None,
+             'target receipt SHA-256 malformed')
+    else:
+        need(out['status'] in allowed_status_only,
+             'SHA-bearing approval or success receipt missing SHA')
     return out
 
 def approve_if_verified()->bool:
@@ -123,34 +133,57 @@ def run(out:Path)->int:
         started = time.monotonic()
         with log.open('wb') as writer:
             process=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=writer,stderr=subprocess.STDOUT)
-            deadline=time.monotonic()+720
-            while process.poll() is None and time.monotonic()<deadline:
-                # Poll for an explicit PackageInstaller approval only after the
-                # disposable target reports that it committed its session.
+            # Flutter handoff and Android PackageInstaller completion are
+            # independent events. A successful Dart exit cannot end device
+            # approval observation or qualify a native install.
+            flutter_deadline=time.monotonic()+720
+            post_flutter_deadline = None
+            expected_v2 = inv['files']['base_v2.apk']['sha256']
+            while True:
+                now=time.monotonic()
                 observed=None
-                try:observed=target_observation()
-                except (Refused,base.Refused,subprocess.TimeoutExpired,ValueError,ET.ParseError):pass
+                try:
+                    observed=target_observation()
+                except (Refused,base.Refused,subprocess.TimeoutExpired,ValueError,ET.ParseError):
+                    pass
                 if observed is not None and observed.get('status') in safe_target_statuses:
                     last_target_status = observed['status']
-                if approvals==0 and observed is not None and observed.get('status') in (
-                        'approval_pending','user_approval_requested'):
+                if last_target_status in ('installer_error','refused_content_grant',
+                                          'missing_approval_intent','approval_launch_failed',
+                                          'system_status_failure'):
+                    raise Refused('external positive target terminal failure code='+last_target_status)
+                if (approvals==0 and observed is not None and
+                        observed.get('status') in ('approval_pending','user_approval_requested') and
+                        observed.get('sha256')==expected_v2):
                     if approve_if_verified():
                         approvals+=1
                         print('OX_P04B_P02_REAL_SYSTEM_APPROVAL_TAPPED',flush=True)
-                # Only a genuine, observed Android terminal success
-                # permits returning ObtainX to foreground. Never
-                # tap approval early, invent status, or restart a
-                # session. CLEAR_TOP|SINGLE_TOP retains Flutter state.
-                if (approvals==1 and not foreground_restored and
-                        observed is not None and
-                        observed.get('status')=='system_status_success'):
+                signed_success = (approvals==1 and
+                                  observed=={'status':'system_status_success','sha256':expected_v2})
+                if signed_success and not foreground_restored:
                     base.adb('shell','am','start','-f','0x24000000','-n',
                              base.APP+'/dev.imranr.obtainium.MainActivity',timeout=30)
                     foreground_restored = True
                     print('OX_P04B_P02_VERIFIED_SUCCESS_FOREGROUND_RESTORED',flush=True)
-                if time.monotonic()-last_progress >= 25:
-                    # Only constant stage markers are read; private
-                    # diagnostic log text must never enter console.
+                flutter_done = process.poll() is not None
+                if flutter_done and post_flutter_deadline is None:
+                    post_flutter_deadline = now + 120
+                    flutter_text = log.read_text('utf8','replace')
+                    need(process.returncode==0 and 'All tests passed!' in flutter_text and
+                         all(flutter_text.count(marker)==1 for marker in MARKERS),
+                         'Flutter handoff failed; native device status cannot be qualified')
+                # Never terminate polling solely because Dart returned.
+                if flutter_done and signed_success and foreground_restored:
+                    break
+                if not flutter_done and now>flutter_deadline:
+                    process.kill();process.wait(timeout=15)
+                    raise Refused('Flutter external positive deadline exceeded; target='+last_target_status)
+                if flutter_done and post_flutter_deadline is not None and now>post_flutter_deadline:
+                    raise Refused('Android approval or signed-result not proven after Dart return; '
+                                  'target='+last_target_status+' approvals='+str(approvals))
+                if now-last_progress>=25:
+                    # Export only fixed-category progress, never raw Flutter or
+                    # device error details. The private Flutter log stays on runner.
                     private_tail = log.read_text('utf8','replace')[-65536:]
                     stage = ('dart_returned' if MARKERS[-1] in private_tail else
                              'dart_handoff' if MARKERS[0] in private_tail else
@@ -159,15 +192,9 @@ def run(out:Path)->int:
                           ' target='+last_target_status+
                           ' approvals='+str(approvals)+
                           ' foreground='+str(int(foreground_restored))+
-                          ' elapsed_s='+str(int(time.monotonic()-started)),flush=True)
-                    last_progress=time.monotonic()
-                time.sleep(3)
-            if process.poll() is None:
-                process.kill();process.wait(timeout=15)
-                raise Refused('hosted Flutter external positive test timed out' +
-                              ' target='+last_target_status+
-                              ' approvals='+str(approvals)+
-                              ' foreground='+str(int(foreground_restored)))
+                          ' elapsed_s='+str(int(now-started)),flush=True)
+                    last_progress=now
+                time.sleep(2)
         private=log.read_text('utf8','replace')
         need(process.returncode==0 and 'All tests passed!' in private and
              all(private.count(marker)==1 for marker in MARKERS),

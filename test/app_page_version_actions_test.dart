@@ -311,6 +311,11 @@ void main() {
         FilledButton,
         tr('markDowngraded'),
       );
+      final openAction = find.byKey(
+        const ValueKey('r06-open-installed-app'),
+      );
+      expect(openAction, packageReadable ? findsOneWidget : findsNothing);
+      expect(find.byKey(const ValueKey('r06-install-history')), findsOneWidget);
       if (packageReadable) {
         expect(markButton, findsNothing);
       } else {

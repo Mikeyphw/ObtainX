@@ -181,7 +181,7 @@ def verify(root: Path = ROOT) -> int:
             policy.get('schema_version') != 1 or
             policy.get('repository') != 'Mikeyphw/ObtainX' or
             policy.get('base_branch') !=
-              'feature/obtainx-r04-actions-source-native-20261115' or
+              'feature/obtainx-r05-transactional-install-20261116' or
             policy.get('event') != 'pull_request' or
             policy.get('release_qualification') != 'separate' or
             len(req or ()) != len(expected) or actual != expected):

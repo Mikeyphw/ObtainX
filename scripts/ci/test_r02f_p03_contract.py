@@ -63,6 +63,36 @@ class R02FP03ContractTests(unittest.TestCase):
         self.deny('tap', 'await tester.tap(realCancel)',
                   '// test only pretends tap', 'integration_test/r02f_p03_app_cancel_test.dart')
 
+    def test_no_missing_post_tap_cancellation_checkpoints(self):
+        for marker in ('OX_P03_DART_CHECK=OWNER_CANCEL_REQUESTED',
+                       'OX_P03_DART_CHECK=ANDROID_CANCELLED_CONFIRMED',
+                       'OX_P03_DART_CHECK=ORIGINAL_APK_BYTES_CONFIRMED',
+                       'OX_P03_DART_CHECK=NATIVE_CLOSURE_PROVED'):
+            self.deny('checkpoint '+marker,
+                      "debugPrint('"+marker+"')",
+                      "debugPrint('OX_P03_DART_CHECK=MUTATED_CHECKPOINT')",
+                      'integration_test/r02f_p03_app_cancel_test.dart')
+        # Detect both duplicate and reordered checkpoints on the real path.
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        source=dict(self.clean)
+        key='integration_test/r02f_p03_app_cancel_test.dart'
+        marker="debugPrint('OX_P03_DART_CHECK=OWNER_CANCEL_REQUESTED')"
+        source[key]=source[key].replace(marker,marker+'\n      '+marker,1)
+        with self.assertRaises(ValueError, msg='duplicated checkpoint accepted'):
+            contract.verify_sources(source)
+        source=dict(self.clean)
+        first="debugPrint('OX_P03_DART_CHECK=OWNER_CANCEL_REQUESTED')"
+        second="debugPrint('OX_P03_DART_CHECK=PROVIDER_INSTALL_REJECTED')"
+        self.assertEqual(source[key].count(first),1)
+        self.assertEqual(source[key].count(second),1)
+        source[key]=source[key].replace(first,'OX_SWAP_FIRST',1).replace(second,first,1).replace('OX_SWAP_FIRST',second,1)
+        with self.assertRaises(ValueError, msg='reordered checkpoint accepted'):
+            contract.verify_sources(source)
+        self.deny('private diagnostics', 'POST_TAP_CHECKPOINTS = ',
+                  'POST_TAP_REMOVED = ',
+                  'scripts/ci/r02f_p03_failure_diagnostics.py')
+
     def test_no_synthetic_test_screen(self):
         self.deny('real AppPage', 'MaterialApp(home: AppPage(appId: app.listingKey))',
                   'MaterialApp(home: Scaffold())',

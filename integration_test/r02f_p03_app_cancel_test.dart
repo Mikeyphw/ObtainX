@@ -159,16 +159,24 @@ void main() {
       expect(realCancel, findsOneWidget,
           reason: 'Actual production AppPage lost its Cancel action');
       await tester.ensureVisible(realCancel);
+      // Allow the returned AppPage to complete a bounded layout frame.
+      // This is still the sole real production-widget tap.
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(provider.canCancelInstallPreparation(app.listingKey), isTrue,
+          reason: 'Cancel must still belong to this exact app operation');
       await tester.tap(realCancel);
       await tester.pump();
       debugPrint('OX_P03_DART_STAGE=REAL_APP_PAGE_CANCEL_TAPPED');
       expect(owner.wasCancelled, isTrue);
+      debugPrint('OX_P03_DART_CHECK=OWNER_CANCEL_REQUESTED');
       final installed = await install.timeout(const Duration(seconds: 60));
       expect(installed, isFalse,
           reason: 'App provider cannot report a successful install after UI Cancel');
+      debugPrint('OX_P03_DART_CHECK=PROVIDER_INSTALL_REJECTED');
       final snapshot = await R02fP03CancellableStock.instance.snapshot();
       final terminal = snapshot['terminal'] as Map<String, dynamic>?;
       expect(terminal?['id'], native['id']);
+      debugPrint('OX_P03_DART_CHECK=NATIVE_TERMINAL_ID_MATCHED');
       // Fixed-category diagnostics only: no paths, package inventory or
       // Flutter exception fragments are published by the hosted workflow.
       if (terminal == null) {
@@ -193,12 +201,15 @@ void main() {
       }
       expect(terminal?['outcome'], 'cancelled',
           reason: 'Native abandon and original APK integrity must be established');
+      debugPrint('OX_P03_DART_CHECK=ANDROID_CANCELLED_CONFIRMED');
       expect(terminal?['cancelRequested'], isTrue);
       expect(terminal?['originalBytesVerified'], isTrue,
           reason: 'Both installed APK byte observations must match original');
+      debugPrint('OX_P03_DART_CHECK=ORIGINAL_APK_BYTES_CONFIRMED');
       final closure = terminal?['closureProof'];
       expect(closure, anyOf('native_abandon', 'android_abort'),
           reason: 'Native or observed Android session closure is mandatory');
+      debugPrint('OX_P03_DART_CHECK=NATIVE_CLOSURE_PROVED');
       if (closure == 'native_abandon') {
         debugPrint('OX_P03_DART_CLOSURE=FIRST_PARTY_ABANDON');
       } else {

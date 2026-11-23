@@ -119,6 +119,18 @@ RULES = {
         'OX_P03_DART_STAGE=APP_ROUTE_OWNER_SURVIVED',
         'OX_P03_DART_STAGE=PRODUCTION_PROVIDER_INSTALL_STARTED',
         'OX_P03_DART_STAGE=REAL_APP_PAGE_CANCEL_TAPPED',
+        "debugPrint('OX_P03_DART_CHECK=OWNER_CANCEL_REQUESTED')",
+        "debugPrint('OX_P03_DART_CHECK=PROVIDER_INSTALL_REJECTED')",
+        "debugPrint('OX_P03_DART_CHECK=NATIVE_TERMINAL_ID_MATCHED')",
+        "debugPrint('OX_P03_DART_CHECK=ANDROID_CANCELLED_CONFIRMED')",
+        "debugPrint('OX_P03_DART_CHECK=ORIGINAL_APK_BYTES_CONFIRMED')",
+        "debugPrint('OX_P03_DART_CHECK=NATIVE_CLOSURE_PROVED')",
+    ),
+    'scripts/ci/r02f_p03_failure_diagnostics.py': (
+        'POST_TAP_CHECKPOINTS = ',
+        'post_tap_checkpoint_indices',
+        'duplicate_post_tap_checkpoints',
+        'raw_logs_uploaded',
     ),
     'scripts/ci/r02f_p03_hosted.py': (
         'base.host_check()',
@@ -234,6 +246,21 @@ def verify_sources(sources: dict[str,str]) -> None:
         if banned in native:
             raise ValueError('OX_P03_REFUSED unsupported privileged or false-success backend')
     integration=sources['integration_test/r02f_p03_app_cancel_test.dart']
+    # Full-call, unique post-tap evidence: renamed/prefixed/duplicated
+    # marker strings cannot satisfy this source acceptance contract.
+    posttap_calls = (
+        "debugPrint('OX_P03_DART_CHECK=OWNER_CANCEL_REQUESTED')",
+        "debugPrint('OX_P03_DART_CHECK=PROVIDER_INSTALL_REJECTED')",
+        "debugPrint('OX_P03_DART_CHECK=NATIVE_TERMINAL_ID_MATCHED')",
+        "debugPrint('OX_P03_DART_CHECK=ANDROID_CANCELLED_CONFIRMED')",
+        "debugPrint('OX_P03_DART_CHECK=ORIGINAL_APK_BYTES_CONFIRMED')",
+        "debugPrint('OX_P03_DART_CHECK=NATIVE_CLOSURE_PROVED')",
+    )
+    previous = integration.index('await tester.tap(realCancel)')
+    for call in posttap_calls:
+        if integration.count(call) != 1 or integration.index(call) <= previous:
+            raise ValueError('OX_P03_REFUSED nonunique/out-of-order post-tap checkpoint')
+        previous = integration.index(call)
     if 'StockInstaller(' in integration or 'R02fP03CancelButton(' in integration:
         raise ValueError('OX_P03_REFUSED synthetic UI or direct installer bypasses production provider/page')
     if 'await tester.tap(realCancel)' not in integration or \

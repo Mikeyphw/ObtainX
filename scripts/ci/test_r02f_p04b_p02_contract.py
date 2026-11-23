@@ -33,4 +33,14 @@ class P04BPositiveSourceMutations(unittest.TestCase):
     def test_13_no_ci_guard_drop(self):self.mutate(C.SOURCE,'run: python3 -B scripts/ci/r02f_p04b_p02_contract.py --check','run: echo omitted')
     def test_14_no_runtime_drop(self):self.mutate(C.RUNTIME,'python3 -B scripts/ci/r02f_p04b_p02_hosted.py run --out','python3 -B scripts/ci/other.py run --out')
     def test_15_no_false_scope(self):self.mutate(C.DOC,'**NOT_QUALIFIED**','**PASS**')
+    def test_16_status_only_guard_cannot_be_disabled(self):
+        self.mutate(C.HOST,"need(out['status'] in allowed_status_only,","need(True,")
+    def test_17_unsigned_status_cannot_bypass_validation(self):
+        self.mutate(C.HOST,"need(out.get('status') in TARGET_STATES,","need(True,")
+    def test_18_signed_terminal_receipt_required(self):
+        self.mutate(C.HOST,"             'status':'system_status_success'},","             'status':'approval_pending'},")
+    def test_19_post_flutter_android_poll_mandatory(self):
+        self.mutate(C.HOST,'if (process.poll() is not None and approvals>0 and','if (process.poll() is not None and True and')
+    def test_20_post_flutter_signed_bytes_mandatory(self):
+        self.mutate(C.HOST,'after=observe_signed_v2()','after=before')
 if __name__=='__main__':unittest.main()

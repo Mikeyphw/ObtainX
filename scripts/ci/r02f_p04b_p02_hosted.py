@@ -130,7 +130,18 @@ def target_observation()->dict:
     need(raw.lstrip().startswith('<?xml') and len(raw)<4096,'target receipt missing or unbounded')
     root=ET.fromstring(raw);need(root.tag=='map','target receipt malformed')
     out={x.attrib.get('name'):x.text for x in root if x.tag=='string'}
-    need(set(out)=={'sha256','status'},'target receipt fields unexpected')
+    need(set(out) in ({'status'}, {'sha256','status'}),
+         'target receipt fields unexpected')
+    allowed_status_only = {'started','installer_error','refused_content_grant',
+                           'missing_approval_intent','approval_launch_failed',
+                           'system_status_failure'}
+    if 'sha256' in out:
+        need(re.fullmatch(r'[0-9a-f]{64}',out['sha256'] or '') is not None,
+             'target receipt SHA-256 malformed')
+    else:
+        need(out['status'] in allowed_status_only,
+             'SHA-bearing approval or success receipt missing SHA')
+    need(out.get('status') in TARGET_STATES,'target receipt status unrecognized')
     return out
 
 def approve_if_verified()->bool:

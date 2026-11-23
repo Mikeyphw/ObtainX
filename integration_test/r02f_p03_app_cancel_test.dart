@@ -169,8 +169,31 @@ void main() {
       final snapshot = await R02fP03CancellableStock.instance.snapshot();
       final terminal = snapshot['terminal'] as Map<String, dynamic>?;
       expect(terminal?['id'], native['id']);
+      // Fixed-category diagnostics only: no paths, package inventory or
+      // Flutter exception fragments are published by the hosted workflow.
+      if (terminal == null) {
+        debugPrint('OX_P03_DART_CANCEL_DIAGNOSTIC=TERMINAL_MISSING');
+      } else if (terminal['outcome'] == 'unknown') {
+        debugPrint('OX_P03_DART_CANCEL_DIAGNOSTIC=TERMINAL_UNKNOWN');
+      } else if (terminal['outcome'] == 'error') {
+        debugPrint('OX_P03_DART_CANCEL_DIAGNOSTIC=TERMINAL_ERROR');
+      } else if (terminal['outcome'] != 'cancelled') {
+        debugPrint('OX_P03_DART_CANCEL_DIAGNOSTIC=OTHER_NON_CANCELLED');
+      }
       expect(terminal?['outcome'], 'cancelled',
           reason: 'Native abandon and original APK integrity must be established');
+      expect(terminal?['cancelRequested'], isTrue);
+      expect(terminal?['originalBytesVerified'], isTrue,
+          reason: 'Both installed APK byte observations must match original');
+      final closure = terminal?['closureProof'];
+      expect(closure, anyOf('native_abandon', 'android_abort'),
+          reason: 'Native or observed Android session closure is mandatory');
+      if (closure == 'native_abandon') {
+        debugPrint('OX_P03_DART_CLOSURE=FIRST_PARTY_ABANDON');
+      } else {
+        // Do not claim the app abandoned a session already aborted by Android.
+        debugPrint('OX_P03_DART_CLOSURE=ANDROID_ABORT_OBSERVED');
+      }
       debugPrint('OX_P03_DART_STAGE=APP_OWNED_CANCEL_RESULT_VERIFIED');
       provider.endInstallPreparation(app.listingKey, owner);
     } finally {

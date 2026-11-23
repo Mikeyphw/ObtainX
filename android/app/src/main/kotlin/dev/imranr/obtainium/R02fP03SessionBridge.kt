@@ -49,6 +49,12 @@ internal class R02fP03SessionBridge(
         val baseline: String,
         var state: String = "staged",
         var cancelRequested: Boolean = false,
+        // Android can abort its approval sheet when the app is foregrounded.
+        // Preserve the observed terminal status for a bounded user decision.
+        var androidAbortObserved: Boolean = false,
+        // The user pressed Cancel while this was a staged/approval session.
+        // Persist it because callbacks can arrive after cancel_uncertain/restart.
+        var cancelWindowAccepted: Boolean = false,
         var waiter: MethodChannel.Result? = null,
     ) {
         fun toJson() = JSONObject().apply {
@@ -59,6 +65,8 @@ internal class R02fP03SessionBridge(
             put("baseline", baseline)
             put("state", state)
             put("cancelRequested", cancelRequested)
+            put("androidAbortObserved", androidAbortObserved)
+            put("cancelWindowAccepted", cancelWindowAccepted)
         }
     }
 
@@ -123,6 +131,8 @@ internal class R02fP03SessionBridge(
                 v.getString("id"), v.getString("listingKey"), v.getString("packageName"),
                 v.getInt("sessionId"), v.getString("baseline"),
                 v.getString("state"), v.optBoolean("cancelRequested", false),
+                v.optBoolean("androidAbortObserved", false),
+                v.optBoolean("cancelWindowAccepted", false),
             )
         } catch (_: Exception) {
             // Corrupt state is never treated as an abandoned or installed session.
@@ -298,21 +308,39 @@ internal class R02fP03SessionBridge(
             return
         }
         synchronized(guard) {
+            val previouslyRequested = op.cancelRequested
+            val previouslyEligible = op.cancelWindowAccepted
+            if (!op.cancelRequested) {
+                op.cancelWindowAccepted = op.state == "approval" || op.state == "staged"
+            }
             op.cancelRequested = true
             if (!persist(op)) {
+                // A failed durable write cannot authorize a later cancellation.
+                op.cancelRequested = previouslyRequested
+                op.cancelWindowAccepted = previouslyEligible
                 answer(reply, mapOf("status" to "unknown", "reason" to "journal_write_failed"))
                 return
             }
         }
+        // Do not call an already-gone Android session an app-native abandon.
+        // getSessionInfo() must show ownership before the abandon request.
         var abandoned = false
-        try {
-            installer.abandonSession(op.sessionId)
-            abandoned = installer.getSessionInfo(op.sessionId) == null
-        } catch (_: Exception) { /* Session may have crossed the commit boundary. */ }
+        val existedBeforeCancel = try { installer.getSessionInfo(op.sessionId) != null }
+            catch (_: Exception) { false }
+        if (existedBeforeCancel) {
+            try {
+                installer.abandonSession(op.sessionId)
+                abandoned = installer.getSessionInfo(op.sessionId) == null
+            } catch (_: Exception) { /* Session may have crossed the commit boundary. */ }
+        }
         // The session may have crossed commit before a cancellation request.
         // Never advertise rollback from a state whose commit result was not
         // observed. A second device observation catches delayed package writes.
-        val cancellationWindow = op.state == "approval" || op.state == "staged"
+        val cancellationWindow = synchronized(guard) { op.cancelWindowAccepted }
+        // A foreground transition can deliver STATUS_FAILURE_ABORTED before
+        // the app-owned Cancel reaches this serialized worker. Only that
+        // observed Android status can qualify an already-absent session.
+        val androidAborted = synchronized(guard) { op.androidAbortObserved }
         val unchangedBeforeSettle = try { baselineStillProven(op) } catch (_: Exception) { false }
         if (abandoned && unchangedBeforeSettle) {
             try { Thread.sleep(600L) } catch (_: InterruptedException) {
@@ -322,26 +350,76 @@ internal class R02fP03SessionBridge(
         val stillAbsent = try { installer.getSessionInfo(op.sessionId) == null } catch (_: Exception) { false }
         val unchanged = unchangedBeforeSettle &&
             try { baselineStillProven(op) } catch (_: Exception) { false }
-        val outcome = if (abandoned && stillAbsent && unchanged && cancellationWindow) {
+        val closureProven = abandoned || (androidAborted && stillAbsent)
+        val outcome = if (closureProven && stillAbsent && unchanged && cancellationWindow) {
             "cancelled"
         } else "unknown"
-        if (outcome == "cancelled" || abandoned) {
-            finish(op, outcome, if (outcome == "unknown") "BASELINE_UNVERIFIED" else null)
+        if (outcome == "cancelled" || abandoned || (androidAborted && stillAbsent)) {
+            val closureProof = if (outcome != "cancelled") "none" else
+                if (abandoned) "native_abandon" else "android_abort"
+            finish(op, outcome, if (outcome == "unknown") "BASELINE_UNVERIFIED" else null,
+                closureProof, outcome == "cancelled")
         } else {
-            // A sealed session may still be applying an APK. Keep its journal
-            // and callback alive rather than manufacture a terminal rollback.
+            // A sealed session may be applying; preserve the commit waiter and
+            // exact native ownership for a late STATUS_FAILURE_ABORTED callback.
             synchronized(guard) {
                 if (current?.id == op.id) {
                     op.state = "cancel_uncertain"
                     persist(op)
                 }
             }
+            // Do not hang indefinitely if Android never reports a terminal
+            // status. Timeout resolves UNKNOWN, never fabricated cancellation.
+            mainHandler.postDelayed({
+                try {
+                    worker.execute {
+                        val unresolved = synchronized(guard) {
+                            current?.takeIf { it.id == op.id && it.state == "cancel_uncertain" }
+                        }
+                        if (unresolved != null) {
+                            finish(unresolved, "unknown", "CANCEL_SETTLEMENT_UNPROVEN")
+                        }
+                    }
+                } catch (_: java.util.concurrent.RejectedExecutionException) {
+                    // A replacement Activity owns restart reconciliation.
+                }
+            }, 6000L)
         }
         answer(reply, mapOf("status" to outcome, "sessionAbandoned" to abandoned,
+            "androidAbortObserved" to androidAborted,
             "baselineBytesVerified" to unchanged))
     }
 
-    private fun finish(op: Operation, outcome: String, detail: String?) {
+    /** Prove a late Android-aborted approval after a real, accepted Cancel.
+     * The session must be absent before/after settling and original APK bytes
+     * must match twice. Callback status by itself is NEVER rollback proof.
+     */
+    private fun reconcileLateAndroidAbort(op: Operation) {
+        val eligible = synchronized(guard) {
+            current?.id == op.id && op.cancelRequested && op.cancelWindowAccepted &&
+                op.androidAbortObserved
+        }
+        if (!eligible) return
+        val absentBefore = try { installer.getSessionInfo(op.sessionId) == null }
+            catch (_: Exception) { false }
+        val unchangedBefore = try { baselineStillProven(op) } catch (_: Exception) { false }
+        if (absentBefore && unchangedBefore) {
+            try { Thread.sleep(600L) } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+        val absentAfter = try { installer.getSessionInfo(op.sessionId) == null }
+            catch (_: Exception) { false }
+        val unchangedAfter = try { baselineStillProven(op) } catch (_: Exception) { false }
+        if (absentBefore && absentAfter && unchangedBefore && unchangedAfter) {
+            finish(op, "cancelled", null, "android_abort", true)
+        }
+        // Otherwise retain the bounded UNKNOWN settlement deadline. A late
+        // callback cannot manufacture successful rollback from version alone.
+    }
+
+    private fun finish(op: Operation, outcome: String, detail: String?,
+                       closureProof: String = "none", originalBytesVerified: Boolean = false) {
         val waiter: MethodChannel.Result?
         synchronized(guard) {
             if (current?.id != op.id) return
@@ -354,6 +432,9 @@ internal class R02fP03SessionBridge(
                 put("packageName", op.packageName)
                 put("sessionId", op.sessionId)
                 put("outcome", outcome)
+                put("closureProof", closureProof)
+                put("originalBytesVerified", originalBytesVerified)
+                put("cancelRequested", op.cancelRequested)
                 put("detail", detail ?: "")
                 put("baseline", op.baseline)
                 put("after", fingerprint(op.packageName))
@@ -379,6 +460,15 @@ internal class R02fP03SessionBridge(
                     op.state = "approval"
                     persist(op)
                 }
+            } else if (androidStatus == PackageInstaller.STATUS_FAILURE_ABORTED &&
+                op.cancelRequested && op.cancelWindowAccepted) {
+                synchronized(guard) {
+                    op.androidAbortObserved = true
+                    if (!persist(op)) {
+                        finish(op, "unknown", "RESTART_ABORT_JOURNAL_WRITE_FAILED")
+                        return
+                    }
+                }
             } else {
                 finish(op, "unknown", "RESTART_ORPHAN_ANDROID_STATUS_$androidStatus")
                 return
@@ -393,8 +483,12 @@ internal class R02fP03SessionBridge(
                 override fun notImplemented() { }
             })
         } else if (!stillOwned) {
-            // Do not fabricate a successful install or a rollback on restart.
-            finish(op, "unknown", "RESTART_SESSION_FINALIZED_UNOBSERVED")
+            if (op.cancelRequested && op.cancelWindowAccepted && op.androidAbortObserved) {
+                reconcileLateAndroidAbort(op)
+            } else {
+                // No matching Android abort: no proof of app cancellation.
+                finish(op, "unknown", "RESTART_SESSION_FINALIZED_UNOBSERVED")
+            }
         }
     }
 
@@ -425,6 +519,53 @@ internal class R02fP03SessionBridge(
                 // later foreground UI can cancel rather than assume success.
             }
             return
+        }
+        // Android sometimes aborts the pending approval sheet when ObtainX
+        // returns to the foreground. A callback arriving before the app-owned
+        // Cancel must not clear the active journal before Cancel is handled.
+        // No successful cancellation is asserted here: the cancel worker must
+        // still prove session closure and unchanged signed APK bytes twice.
+        if (status == PackageInstaller.STATUS_FAILURE_ABORTED) {
+            val deferred = synchronized(guard) {
+                if (current?.id != op.id ||
+                    (op.state != "approval" && op.state != "cancel_uncertain")) {
+                    false
+                } else {
+                    op.androidAbortObserved = true
+                    if (persist(op)) true else {
+                        op.androidAbortObserved = false
+                        false
+                    }
+                }
+            }
+            if (deferred) {
+                if (op.cancelRequested) {
+                    // Android's abort arrived AFTER the real Cancel request.
+                    // Do not queue a generic UNKNOWN that beats rollback proof.
+                    try {
+                        worker.execute { reconcileLateAndroidAbort(op) }
+                    } catch (_: java.util.concurrent.RejectedExecutionException) {
+                        // Native journal survives Activity replacement.
+                    }
+                } else {
+                    mainHandler.postDelayed({
+                        try {
+                            worker.execute {
+                                val unresolved = synchronized(guard) {
+                                    current?.takeIf { it.id == op.id && !it.cancelRequested }
+                                }
+                                if (unresolved != null) {
+                                    // No user Cancel: UNKNOWN, never CANCELLED.
+                                    finish(unresolved, "unknown", "ANDROID_ABORT_NO_USER_CANCEL")
+                                }
+                            }
+                        } catch (_: java.util.concurrent.RejectedExecutionException) {
+                            // Activity replaced: restart reconciliation owns journal.
+                        }
+                    }, 4000L)
+                }
+                return
+            }
         }
         // Never hash installed APKs on Android's main thread. PackageManager
         // status alone is insufficient to prove the planned APK was installed.

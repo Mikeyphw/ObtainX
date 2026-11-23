@@ -26,15 +26,15 @@ def inspect(inputs: dict[str, str]) -> list[str]:
     d=inputs.get(DART,'')
     h=inputs.get(HOST,'')
     c=inputs.get(DIAG,'')
-    block=n.split('    private fun cancel(id: String?, reply: MethodChannel.Result) {',1)[-1].split('    private fun finish(',1)[0]
+    block=n.split('    private fun cancel(id: String?, reply: MethodChannel.Result) {',1)[-1].split('    private fun reconcileLateAndroidAbort(',1)[0]
     need(block.count('for (attempt in 0 until 3) {') == 1, 'native retry count must be exactly three')
     need(block.count('installer.abandonSession(op.sessionId)') == 1, 'owned session abandon must be in loop')
     need(block.count('installer.getSessionInfo(op.sessionId) == null') >= 2, 'session absence must be checked twice')
     need(block.count('baselineStillProven(op)') == 2, 'native double baseline comparison missing')
-    need('if (abandoned || !cancellationWindow) break' in block, 'retry escaped approval guard')
+    need('if (abandoned || !op.cancelWindowAccepted) break' in block and 'if (existedBeforeCancel) {' in block, 'retry escaped owned-session guard')
     need('if (attempt < 2)' in block and 'Thread.sleep(150L)' in block, 'settle delay unbounded/absent')
     need('val unchanged = unchangedBeforeSettle &&' in block, 'second baseline gate removed')
-    need('if (abandoned && stillAbsent && unchanged && cancellationWindow)' in block, 'rollback success gate weakened')
+    need('if (closureProven && stillAbsent && unchanged && cancellationWindow)' in block and 'androidAborted && stillAbsent' in block, 'rollback success gate weakened')
     need('"cancelled"\n        } else "unknown"' in block, 'unknown outcome wrongly promoted to success')
     need('installer.abandonSession(op.sessionId)' in n.split('    private fun stage(',1)[-1], 'owned stage source changed')
     need("expect(terminal?['outcome'], 'cancelled'" in d, 'real Flutter terminal cancellation assertion missing')
@@ -73,8 +73,8 @@ class P03BoundedNativeCancellation(unittest.TestCase):
     def test_02_no_abandon_retry_refused(self):
         self.mutate(NATIVE,'for (attempt in 0 until 3) {','for (attempt in 0 until 0) {')
     def test_03_abandon_call_removed_refused(self):
-        self.mutate(NATIVE,'            try {\n                installer.abandonSession(op.sessionId)\n',
-                           '            try {\n                println("no abandon")\n')
+        self.mutate(NATIVE,'                try {\n                    installer.abandonSession(op.sessionId)\n',
+                           '                try {\n                    println("no abandon")\n')
     def test_04_no_second_session_absence_refused(self):
         self.mutate(NATIVE,'        val stillAbsent = try { installer.getSessionInfo(op.sessionId) == null }',
                            '        val stillAbsent = true // unverified')
@@ -82,10 +82,10 @@ class P03BoundedNativeCancellation(unittest.TestCase):
         self.mutate(NATIVE,'        val unchanged = unchangedBeforeSettle &&',
                            '        val unchanged = true || unchangedBeforeSettle &&')
     def test_06_suppress_baseline_condition_refused(self):
-        self.mutate(NATIVE,'if (abandoned && stillAbsent && unchanged && cancellationWindow)',
+        self.mutate(NATIVE,'if (closureProven && stillAbsent && unchanged && cancellationWindow)',
                            'if (abandoned || stillAbsent || unchanged || cancellationWindow)')
     def test_07_retry_guard_removed_refused(self):
-        self.mutate(NATIVE,'if (abandoned || !cancellationWindow) break',
+        self.mutate(NATIVE,'if (abandoned || !op.cancelWindowAccepted) break',
                            'if (abandoned) break')
     def test_08_flutter_rollback_assertion_required(self):
         self.mutate(DART,"expect(terminal?['outcome'], 'cancelled'", "expect(terminal?['outcome'], isNotNull")

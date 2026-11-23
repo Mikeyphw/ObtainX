@@ -30,6 +30,30 @@ class VerifiedObbReceipt {
 ///
 /// [isCancelled] is checked before copying and before destination mutation;
 /// it is not a guarantee of rollback after the atomic rename has completed.
+void _assertNoSymlinkAncestors(Directory directory) {
+  final absolute = directory.absolute.path;
+  if (!absolute.startsWith('/') || absolute == '/' ||
+      absolute.contains('//') || absolute.contains('\\') ||
+      absolute.split('/').contains('..') ||
+      absolute.split('/').contains('.')) {
+    throw const FormatException('OBB destination path is untrusted');
+  }
+  var prefix = '';
+  for (final part in absolute.split('/').skip(1)) {
+    if (part.isEmpty) continue;
+    prefix = '$prefix/$part';
+    final path = prefix;
+    final kind = FileSystemEntity.typeSync(path, followLinks: false);
+    if (kind == FileSystemEntityType.link) {
+      throw const FormatException('OBB destination ancestor is symlink');
+    }
+    if (kind != FileSystemEntityType.directory &&
+        kind != FileSystemEntityType.notFound) {
+      throw const FormatException('OBB destination ancestor is not a directory');
+    }
+  }
+}
+
 Future<VerifiedObbReceipt> copyVerifiedObbFile({
   required File source,
   required String packageName,
@@ -69,7 +93,9 @@ Future<VerifiedObbReceipt> copyVerifiedObbFile({
           FileSystemEntityType.file) {
     throw const FormatException('OBB destination cannot be a symlink or directory');
   }
+  _assertNoSymlinkAncestors(destinationFolder);
   await destinationFolder.create(recursive: true);
+  _assertNoSymlinkAncestors(destinationFolder);
   final nonce = Random.secure().nextInt(0x7fffffff).toRadixString(16);
   final pending = File('${destinationFolder.path}/.$fileName.$nonce.pending');
   final backup = File('${destinationFolder.path}/.$fileName.$nonce.backup');

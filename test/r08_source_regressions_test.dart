@@ -56,9 +56,9 @@ void main() {
     const url = 'https://f-droid.org/packages/net.osmand.plus/';
     const filename = 'net.osmand.plus_541003.apk';
     const asset = 'https://f-droid.org/repo/$filename';
-    final app = App(id: 'net.osmand.plus', url: url, author: 'OsmAnd',
+    final app = const App(id: 'net.osmand.plus', url: url, author: 'OsmAnd',
         name: 'OsmAnd', installedVersion: '5.4.10', latestVersion: '5.4.10',
-        apkUrls: [const MapEntry(filename, asset)], preferredApkIndex: 0,
+        apkUrls: [MapEntry(filename, asset)], preferredApkIndex: 0,
         additionalSettings: {'versionDetection': 'standard', 'trackOnly': true,
           observedPackageIdKey: 'net.osmand.plus', observedVersionNameKey: '5.4.10',
           observedVersionCodeKey: 5410});

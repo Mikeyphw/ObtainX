@@ -43,4 +43,7 @@ class R07ContractTests(unittest.TestCase):
  def test_reject_missing_r06_navigation(self):
   self.mutate('lib/pages/app.dart','R07ActivityCenterPage(')
   self.assertTrue(any('app.dart' in x for x in module.verify(self.root)))
+ def test_reject_unsynchronized_widget_journal(self):
+  self.mutate('test/r07_activity_center_test.dart','await initial!.timeout(')
+  self.assertTrue(any('r07_activity_center_test.dart' in x for x in module.verify(self.root)))
 if __name__=='__main__': unittest.main()

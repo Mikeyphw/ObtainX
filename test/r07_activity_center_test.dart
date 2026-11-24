@@ -21,6 +21,24 @@ class _R07FakeApps extends ChangeNotifier implements AppsProvider {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+// Observe the production catalog's real filesystem future, not a fake receipt.
+class _ObservedActivityCatalog extends R07ActivityCatalog {
+  _ObservedActivityCatalog({required Directory root,
+      required R05OperationJournal journal})
+      : super(testingRoot: root, installJournal: journal);
+
+  Future<List<R07ActivityRecord>>? initialLoad;
+
+  @override
+  Future<List<R07ActivityRecord>> load({
+    Map<String, String> trackedPackages = const <String, String>{},
+  }) {
+    final result = super.load(trackedPackages: trackedPackages);
+    initialLoad ??= result;
+    return result;
+  }
+}
+
 void main() {
   late Directory root;
   late R05OperationJournal journal;
@@ -59,21 +77,69 @@ void main() {
     await File('${folder.path}/$digest.json').writeAsString(jsonEncode(entry.toJson()));
   }
 
-  testWidgets('Activity Center renders its real journal without phantom actions',
-    (tester) async {
-      final fake = _R07FakeApps();
-      addTearDown(fake.dispose);
+  Future<void> mountActivity(WidgetTester tester, {String? operationId}) async {
+    final fake = _R07FakeApps();
+    addTearDown(fake.dispose);
+    final observed = _ObservedActivityCatalog(root: root, journal: journal);
+    // Widget tests use a fake clock. Real journal I/O must start and finish
+    // outside that clock; a fixed pump delay cannot establish completion.
+    final loaded = await tester.runAsync(() async {
       await tester.pumpWidget(ChangeNotifierProvider<AppsProvider>.value(
         value: fake,
-        child: MaterialApp(home: R07ActivityCenterPage(catalog: catalog)),
+        child: MaterialApp(home: R07ActivityCenterPage(
+          catalog: observed, operationId: operationId)),
       ));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 250));
-      expect(find.text('Activity Center'), findsOneWidget);
-      expect(find.textContaining('No matching activity records'), findsOneWidget);
-      expect(find.text('Retry'), findsNothing);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
+      final initial = observed.initialLoad;
+      expect(initial, isNotNull, reason: 'Activity Center must request its catalog');
+      await initial!.timeout(const Duration(seconds: 10));
+      return true;
+    });
+    expect(loaded, isTrue, reason: 'Real journal loading must complete');
+    // Render the FutureBuilder completion in the ordinary widget-test zone.
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  }
+
+  testWidgets('Activity Center renders its real journal without phantom actions',
+    (tester) async {
+      try {
+        await mountActivity(tester);
+        expect(find.text('Activity Center'), findsOneWidget);
+        expect(find.textContaining('No matching activity records'), findsOneWidget);
+        expect(find.text('Retry'), findsNothing);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+        expect(tester.takeException(), isNull);
+      } finally {
+        // Dispose the page's periodic refresh even if an expectation fails.
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    },
+  );
+
+  testWidgets('Activity Center renders only the requested durable attempt',
+    (tester) async {
+      final ids = await tester.runAsync(() async {
+        final selected = await begin('store:one');
+        final other = await begin('store:two');
+        await journal.transition(selected.id, R05InstallStage.awaitingApproval);
+        return [selected.id, other.id];
+      });
+      expect(ids, isNotNull);
+      final result = ids!;
+      final selected = result[0];
+      final other = result[1];
+      try {
+        await mountActivity(tester, operationId: 'install:$selected');
+        expect(find.byKey(ValueKey('r07-record-install:$selected')), findsOneWidget);
+        expect(find.byKey(ValueKey('r07-record-install:$other')), findsNothing);
+        expect(find.text('Review'), findsOneWidget);
+        expect(find.text('Retry'), findsNothing);
+        expect(find.text('Cancel'), findsNothing);
+        expect(find.text('Open'), findsNothing);
+        expect(tester.takeException(), isNull);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
     },
   );
 

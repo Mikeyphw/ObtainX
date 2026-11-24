@@ -28,7 +28,7 @@ EMULATOR = 'ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe
 OPT03_HELPER = 'scripts/ci/obtainx_ci_optimization_opt03_apk_cache.py'
 OPT03_TEST = 'scripts/ci/test_obtainx_ci_optimization_opt03_cache.py'
 OPT03_CACHE_PIN = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
-OPT03_KEY = 'obtainx-opt03-v1-${{ runner.os }}-flutter3.47.6-java21-normal-debug-${{ github.sha }}'
+OPT03_KEY = 'obtainx-opt03-v1-${{ runner.os }}-flutter3.47.6-java21-normal-debug-${{ github.event.pull_request.head.sha || github.sha }}'
 OPT03_APK_PATH = 'build/app/outputs/flutter-apk/app-normal-debug.apk'
 OPT03_RECEIPT_PATH = 'build/app/outputs/flutter-apk/obtainx-opt03-debug-apk.json'
 
@@ -130,7 +130,7 @@ def inspect(root: Path = ROOT) -> list[str]:
         cache_code = opt03.read_text(encoding='utf8')
         for marker in ('def source_identity()', 'def inspect_apk(', 'def seal(',
                        'def verify(', 'def verify_android_tools(',
-                       'zipfile.ZipFile', 'git', 'rev-parse', 'GITHUB_SHA',
+                       'zipfile.ZipFile', 'git', 'rev-parse', 'OX_EXPECTED_SHA',
                        'sha256', 'source_sha', 'apksigner', 'aapt'):
             if marker not in cache_code:
                 errors.append('OPT03 source-bound APK validation removed: '+marker)

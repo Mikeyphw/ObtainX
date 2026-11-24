@@ -62,7 +62,7 @@ class FixtureTests(unittest.TestCase):
                 (root/'.rt02g-disposable.jks').write_bytes(b'private-synthetic-key')
                 raise F.Refused('synthetic signer failure')
             with patch.dict(F.os.environ,{'GITHUB_ACTIONS':'true','RUNNER_OS':'Linux',
-                                          'RUNNER_ARCH':'X64','GITHUB_SHA':'a'*40,
+                                          'RUNNER_ARCH':'X64','OX_EXPECTED_SHA':'a'*40,
                                           'ANDROID_HOME':str(sdk)}),patch.object(F,'tool',side_effect=failed_key):
                 with self.assertRaises(F.Refused):F.build(root)
             for name in ('.rt02g-disposable.jks','.rt02g-manifest.xml',

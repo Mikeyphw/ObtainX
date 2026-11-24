@@ -10,7 +10,7 @@
     "date_utc": "2026-11-23",
     "previous_roadmap_sha256": "0d7aecd24f18d662395b01493ad10f1db5750be3b9513268bb1cac535489a51a"
   },
-  "roadmap_sha256": "794a3cf706f03d2933e21347749b048b78eb81c2ada1888f571cb531328527a8",
+  "roadmap_sha256": "a5ad6cecb436a57fd750274fc4d4e61ab6500865d355f27c9a56f81d6b17a7f1",
   "runtime_qualified": false,
   "schema_version": 1,
   "upstream_default_branch": "main",

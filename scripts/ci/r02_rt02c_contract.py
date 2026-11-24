@@ -38,7 +38,7 @@ def inspect(root:Path=ROOT)->list[str]:
       R00_TEST:("'obtainx-r02-rt02c.yml'",'test_valid_strict_workflows'),
       SOURCE_WF:('python3 scripts/ci/r02_rt02c_contract.py --check',),
       WF:('permissions:\n  contents: read','persist-credentials: false',
-          'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
+          'test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"',
           'flutter analyze integration_test lib test',
           'python3 -B scripts/ci/r02_rt02_fixture.py --out',
           'python3 -B scripts/ci/r02_rt02c_fixture.py --out',
@@ -74,7 +74,9 @@ def inspect(root:Path=ROOT)->list[str]:
               'subprocess.Popen(args', 'self.next_index += 1', 'self.launches = 1',
               'self.base.installed_state(2, True, self.fixtures)',
               'self.H.baseline_v1(self.fixtures)',
-              'self.base._tap_confirmed_install_dialog()',
+              'self.base._tap_confirmed_install_dialog(',
+               'on_observation=observation, authorize_tap=authorize_tap',
+               'self.record_failure(p.returncode)', 'self.H.flutter_failure(text, phase=phase, approvals=taps)',
               'self.need(self.next_index == len(CASES)',
               "self.headers.get('X-RT02C-Token')",
               'from obtainx_ci_optimization_opt06_rt02c_polling import should_probe_runner',
@@ -117,7 +119,10 @@ def inspect(root:Path=ROOT)->list[str]:
             'test_opt06_missing_probe_count_refused',
             'test_opt06_missing_skipped_count_refused',
             'test_opt06_boolean_probe_count_refused',
-            'test_opt06_excessive_skipped_count_refused'),
+            'test_opt06_excessive_skipped_count_refused',
+             'test_installer_timeout_is_not_gradle_failure',
+             'test_failed_dump_never_reads_stale_xml_or_taps',
+             'test_uncertain_tap_fails_closed'),
     }
     for p,markers in anchors.items():
         for m in markers:
@@ -173,7 +178,10 @@ def inspect(root:Path=ROOT)->list[str]:
         errors.append('HF09 runner must consume the same atomic clock snapshot')
     if docs[SINGLE].count('subprocess.Popen(')!=1:
         errors.append('HF01 must launch exactly one Flutter process')
-    if docs[SINGLE].count('self.H.baseline_v1(self.fixtures)')!=2:
+    transition=docs[SINGLE].split('    def transition(',1)[-1].split('    def ',1)[0]
+    if transition.count('self.base.installed_state(2, True, self.fixtures)')!=1:
+        errors.append('HF01 must verify signed v2 in the success boundary')
+    if transition.count('self.H.baseline_v1(self.fixtures)')!=2:
         errors.append('HF01 must verify v1 before and after negative')
     if docs[SINGLE].count('self.next_index += 1')!=1:
         errors.append('HF01 must independently advance every Android boundary')

@@ -9,6 +9,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -43,7 +44,7 @@ class SourceMutations(unittest.TestCase):
     def test_new_workflow_mandatory(self):
         self.mutation(C.WF,'permissions:\n  contents: read','permissions:\n  contents: write')
     def test_sha_checkout_required(self):
-        self.mutation(C.WF,'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"','true')
+        self.mutation(C.WF,'test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"','true')
     def test_action_pin_required(self):
         self.mutation(C.WF,'@a421e43855164a8197daf9d8d40fe71c6996bb0d','@main')
     def test_no_older_sdk(self):
@@ -197,6 +198,171 @@ class PreDartRetry(unittest.TestCase):
             with self.assertRaises(H.Refused):
                 H.eligible_pre_dart_retry(self.out,self.fixtures,self.case,
                    H.Refused('Flutter RT02C case failed apks phase=GRADLE_BUILD'))
+
+class FailureDiagnostics(unittest.TestCase):
+    def test_installer_timeout_is_not_gradle_failure(self):
+        log = ('Running Gradle task assembleNormalDebug\n'
+               'OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+               'OX_R02C_DART_STAGE=INSTALL_CALL\nTimeoutException: timed out')
+        self.assertEqual(H.flutter_failure(log), 'INSTALLER_TIMEOUT_NO_APPROVAL')
+        self.assertEqual(H.flutter_failure(log, phase='STOCK_INSTALLER_CALL', approvals=1),
+                         'INSTALLER_TIMEOUT_AFTER_APPROVAL')
+
+    def test_explicit_gradle_failure_requires_pre_dart_phase(self):
+        log = 'Gradle task assembleNormalDebug failed with exit code 1'
+        self.assertEqual(H.flutter_failure(log, phase='GRADLE_BUILD'), 'GRADLE_BUILD_FAILED')
+        self.assertEqual(H.flutter_failure(log, phase='STOCK_INSTALLER_CALL'),
+                         'INSTALLER_INCOMPLETE_NO_APPROVAL')
+        self.assertEqual(H.flutter_failure('Running Gradle task assemble\nException: later',
+                                          phase='GRADLE_BUILD'), 'UNKNOWN_PRECISE_FAILURE')
+
+    def test_previous_case_timeout_cannot_contaminate_current_case(self):
+        log = ('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\nTimeoutException\n'
+               'OX_R02C_DART_STAGE=SCENARIO_STARTED case=apkm\n'
+               'OX_R02C_DART_STAGE=INSTALL_CALL\nSome tests failed')
+        self.assertEqual(H.flutter_failure(log), 'INSTALLER_INCOMPLETE_NO_APPROVAL')
+
+    def _probe(self, *, dump_rc=0, xml=b'', tap_rc=0, cleanup_rc=0):
+        from types import SimpleNamespace
+        calls=[]; observed=[]
+        def command(args, **kwargs):
+            op=args[4]; calls.append(tuple(args))
+            return SimpleNamespace(returncode={'uiautomator':dump_rc,'cat':0,
+                                   'rm':cleanup_rc,'input':tap_rc}[op],
+                                   stdout=xml if op=='cat' else b'',stderr=b'')
+        with patch.object(H.base,'command',side_effect=command):
+            try:
+                result=H.base._tap_confirmed_install_dialog(on_observation=observed.append)
+            except H.base.Refused:
+                result='REFUSED'
+        return result,calls,observed
+
+    def test_failed_dump_never_reads_stale_xml_or_taps(self):
+        result,calls,observed=self._probe(dump_rc=1)
+        self.assertFalse(result)
+        self.assertEqual([c[4] for c in calls], ['uiautomator','rm'])
+        self.assertEqual(calls[0][-1],calls[1][-1])
+        self.assertEqual(observed,['DUMP_FAILED'])
+        _,other,_=self._probe(dump_rc=1)
+        self.assertNotEqual(calls[0][-1],other[0][-1])
+
+    def _xml(self, count=1, fixture=True):
+        label=H.base.NAME if fixture else 'Different package'
+        node=('<node package="com.android.packageinstaller" enabled="true" '
+              'text="Update" bounds="[0,0][20,20]"/>')
+        return ('<?xml version="1.0"?><hierarchy><node package="com.android.packageinstaller" text="'+label+'"/>'
+                +node*count+'</hierarchy>').encode()
+
+    def test_fresh_unique_installer_tap(self):
+        result,calls,observed=self._probe(xml=self._xml())
+        self.assertIs(result,True)
+        self.assertEqual([c[4] for c in calls],['uiautomator','cat','rm','input'])
+        self.assertEqual(calls[0][-1],calls[1][-1]);self.assertEqual(calls[1][-1],calls[2][-1])
+        self.assertEqual(observed,['CONFIRMATION_TAPPED'])
+
+    def test_ambiguous_or_wrong_fixture_never_taps(self):
+        for xml,category in ((self._xml(2),'ACTION_AMBIGUOUS'),
+                             (self._xml(fixture=False),'FIXTURE_NOT_VISIBLE'),
+                             (self._xml(0),'ACTION_NOT_VISIBLE'),
+                             (b'not xml','XML_INVALID')):
+            with self.subTest(category=category):
+                result,calls,observed=self._probe(xml=xml)
+                self.assertFalse(result);self.assertNotIn('input',[c[4] for c in calls])
+                self.assertEqual(observed,[category])
+
+    def test_uncertain_tap_fails_closed(self):
+        result,calls,observed=self._probe(xml=self._xml(),tap_rc=1)
+        self.assertEqual(result,'REFUSED')
+        self.assertEqual([c[4] for c in calls].count('input'),1)
+        self.assertEqual(observed,['TAP_FAILED'])
+
+    def test_cleanup_failure_prevents_tap(self):
+        result,calls,observed=self._probe(xml=self._xml(),cleanup_rc=1)
+        self.assertEqual(result,'REFUSED')
+        self.assertNotIn('input',[c[4] for c in calls])
+        self.assertEqual(observed,['CLEANUP_FAILED'])
+
+
+    def test_fixture_identity_must_belong_to_installer_package(self):
+        xml=self._xml().replace(b'package="com.android.packageinstaller"',
+                                b'package="unrelated.app"',1)
+        result,calls,observed=self._probe(xml=xml)
+        self.assertFalse(result)
+        self.assertNotIn('input',[c[4] for c in calls])
+        self.assertEqual(observed,['FIXTURE_NOT_VISIBLE'])
+
+    def test_action_must_belong_to_fixture_owner_ui(self):
+        xml=self._xml().replace(b'package="com.android.packageinstaller" enabled=',
+                                b'package="com.google.android.packageinstaller" enabled=')
+        result,calls,observed=self._probe(xml=xml)
+        self.assertFalse(result)
+        self.assertNotIn('input',[c[4] for c in calls])
+        self.assertEqual(observed,['ACTION_NOT_VISIBLE'])
+
+
+class ApprovalBoundaryConcurrency(unittest.TestCase):
+    def setUp(self):
+        from r02_rt02c_single_session import SingleSession
+        self.tmp=tempfile.TemporaryDirectory(prefix='ox-rt02c-concurrency-')
+        out=Path(self.tmp.name)
+        self.session=SingleSession(out,out,{}, {}, out/'receipt.json',H,H.base)
+        self.session.active='apks';self.session.called=True
+        self.session.phase='STOCK_INSTALLER_CALL'
+
+    def tearDown(self):self.tmp.cleanup()
+
+    def test_slow_dump_does_not_block_finish_and_stale_tap_refused(self):
+        entered=threading.Event();release=threading.Event();transition=threading.Event()
+        taps=[];results=[];errors=[]
+        def mock_probe(*, on_observation, authorize_tap):
+            entered.set()
+            if not release.wait(3):raise AssertionError('test probe not released')
+            on_observation('ACTION_NOT_VISIBLE')
+            return authorize_tap(lambda: taps.append('tap') or True)
+        def run():
+            try:results.append(self.session.probe_approval('apks',0))
+            except BaseException as exc:errors.append(exc)
+        def finish_boundary():
+            with self.session.lock:
+                self.session.active='apkm';self.session.next_index=1
+                self.session.called=True;self.session.taps=0
+                transition.set()
+        with patch.object(H.base,'_tap_confirmed_install_dialog',side_effect=mock_probe):
+            worker=threading.Thread(target=run);worker.start()
+            other=None
+            try:
+                self.assertTrue(entered.wait(2),'probe never started')
+                other=threading.Thread(target=finish_boundary);other.start()
+                self.assertTrue(transition.wait(1),'read-only UI probe blocked controller transition')
+            finally:
+                release.set();worker.join(4)
+                if other is not None:other.join(4)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors,[]);self.assertEqual(results,[False])
+            self.assertEqual(taps,[])
+            self.assertEqual(self.session.approval_probe_counts,{})
+
+    def test_current_boundary_tap_once(self):
+        taps=[]
+        def probe(*, on_observation, authorize_tap):
+            def tap():
+                taps.append(1);on_observation('CONFIRMATION_TAPPED');return True
+            self.assertTrue(authorize_tap(tap))
+            self.assertFalse(authorize_tap(tap))
+            return True
+        with patch.object(H.base,'_tap_confirmed_install_dialog',side_effect=probe) as helper:
+            self.assertTrue(self.session.probe_approval('apks',0))
+            self.assertFalse(self.session.probe_approval('apks',0))
+            self.assertEqual(helper.call_count,1)
+        self.assertEqual(taps,[1]);self.assertEqual(self.session.taps,1)
+        self.assertEqual(self.session.approval_probe_counts,{'CONFIRMATION_TAPPED':1})
+
+    def test_failed_boundary_not_probed(self):
+        self.session.failure='Refused'
+        with patch.object(H.base,'_tap_confirmed_install_dialog') as helper:
+            self.assertFalse(self.session.probe_approval('apks',0))
+            helper.assert_not_called()
+
 
 class RuntimeReceipts(unittest.TestCase):
     def setUp(self):

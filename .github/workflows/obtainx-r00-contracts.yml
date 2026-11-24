@@ -10,6 +10,9 @@ on:
 permissions:
   contents: read
 
+env:
+  OX_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 concurrency:
   group: obtainx-r00-contract-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -21,8 +24,11 @@ jobs:
       - name: Checkout exact commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
+      - name: Verify checked-out exact source
+        run: test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
       - name: Ensure hosted YAML parser dependency
         run: |
           if ! python3 -c 'import yaml'; then

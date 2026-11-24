@@ -25,7 +25,7 @@ def inspect(root: Path=ROOT) -> list[str]:
           'set -o pipefail','r01_hf02_golden_triage.py',
           'flutter test --no-pub --update-goldens test/apps_scroll_work_test.dart',
           'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
-          'obtainx-r01-hf02-golden-review-${{ github.event.pull_request.head.sha }}',
+          'obtainx-r01-hf02-golden-review-${{ github.event.pull_request.head.sha || github.sha }}',
           "if: ${{ failure() && steps.golden_triage.outcome == 'success' }}",
           'flutter test --no-pub test/archive_extraction_security_test.dart',
           'flutter build apk --debug --flavor normal --no-pub')

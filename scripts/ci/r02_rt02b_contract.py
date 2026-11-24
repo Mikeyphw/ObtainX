@@ -35,7 +35,7 @@ def inspect(root:Path=ROOT)->list[str]:
         R00_TEST:("'obtainx-r02-rt02b.yml'",'test_reviewed_rt02_required_and_release_is_still_prohibited'),
         INHERITED:('python3 scripts/ci/r02_rt02b_contract.py --check',),
         WORKFLOW:('permissions:\n  contents: read','persist-credentials: false',
-                  'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
+                  'test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"',
                   'flutter analyze integration_test lib test',
                   'python3 -B scripts/ci/r02_rt02_fixture.py --out',
                   'python3 -B scripts/ci/r02_rt02b_fixture.py --out',

@@ -71,6 +71,9 @@ on:
 permissions:
   contents: read
 
+env:
+  OX_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 concurrency:
   group: obtainx-r02-rt02b-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -86,12 +89,13 @@ jobs:
       - name: Checkout exact source commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Enforce RT02B real rejection source and mutation contracts
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
           python3 -B -m unittest discover -s scripts/ci -p 'test_r02_rt02b_contract.py' -v
           python3 -B scripts/ci/r02_rt02b_contract.py --check
       - name: Set up Java 21
@@ -168,7 +172,7 @@ jobs:
           OX_EVIDENCE_ROOT: ${{ runner.temp }}/obtainx-rt02b
         run: |
           set -euo pipefail
-          printf 'ObtainX evidence hashes only; source=%s; uploads remain mandatory\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          printf 'ObtainX evidence hashes only; source=%s; uploads remain mandatory\n' "$OX_EXPECTED_SHA" >> "$GITHUB_STEP_SUMMARY"
           for f in "$OX_EVIDENCE_ROOT"/*.json "$OX_EVIDENCE_ROOT"/fixtures/*inventory.json; do
             if [[ -f "$f" && ! -L "$f" ]]; then
               n="$(wc -c < "$f")"
@@ -183,7 +187,7 @@ jobs:
         timeout-minutes: 3
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # pinned v4
         with:
-          name: obtainx-r02-rt02b-rejection-${{ github.sha }}
+          name: obtainx-r02-rt02b-rejection-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/obtainx-rt02b/rt02b-receipt.json
             ${{ runner.temp }}/obtainx-rt02b/rt02b-progress.json

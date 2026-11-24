@@ -52,7 +52,7 @@ def build(out: Path)->dict:
          os.environ.get('RUNNER_OS')=='Linux' and
          os.environ.get('RUNNER_ARCH')=='X64',
          'only an authenticated GitHub Linux x64 runner can sign the fixture')
-    head=os.environ.get('GITHUB_SHA','')
+    head=os.environ.get('OX_EXPECTED_SHA','')
     need(bool(re.fullmatch(r'[0-9a-f]{40}',head)),'source commit absent')
     base=out/'fixture_inventory.json'
     need(base.is_file() and not base.is_symlink(),'R02 base signed fixtures must exist first')

@@ -72,12 +72,31 @@ def baseline_v1(fixtures:Path)->dict:
     return {'version_code':1,'installed_path_count':1,'base_sha256':expected,
             'installed_original_intact':True}
 
-def flutter_failure(text:str)->str:
-    lower=text.lower()
-    if 'failed to install' in lower or 'adb exited' in lower:return 'FLUTTER_INSTALL_BRIDGE_FAILED'
-    if 'gradle task' in lower and ('failed' in lower or 'exception' in lower):return 'GRADLE_BUILD_FAILED'
-    if 'expect(' in lower or 'test failed' in lower or 'test failure' in lower:return 'DART_TEST_FAILED'
-    if 'timeout' in lower:return 'TEST_TIMEOUT'
+def flutter_failure(text:str, *, phase:str|None=None, approvals:int=0)->str:
+    """Classify the failing phase, never a historical successful build line."""
+    markers={'SCENARIO_STARTED':'DART_TEST_STARTED',
+             'INSTALL_CALL':'STOCK_INSTALLER_CALL',
+             'INSTALL_RETURNED':'STOCK_INSTALLER_RETURNED',
+             'PREINSTALL_REFUSED':'PREINSTALL_REFUSED'}
+    if phase is None:
+        events=re.findall(r'OX_R02C_DART_STAGE=([A-Z_]+)',text)
+        phase=next((markers[e] for e in reversed(events) if e in markers),None)
+    current=text.rsplit('OX_R02C_DART_STAGE=SCENARIO_STARTED',1)[-1]
+    timed_out=bool(re.search(r'(?i)\b(?:TimeoutException|timed out|test timeout)\b',current))
+    if phase=='STOCK_INSTALLER_CALL':
+        if timed_out:
+            return 'INSTALLER_TIMEOUT_AFTER_APPROVAL' if approvals else 'INSTALLER_TIMEOUT_NO_APPROVAL'
+        return 'INSTALLER_INCOMPLETE_AFTER_APPROVAL' if approvals else 'INSTALLER_INCOMPLETE_NO_APPROVAL'
+    if phase in ('DART_TEST_STARTED','STOCK_INSTALLER_RETURNED','PREINSTALL_REFUSED',
+                 'ANDROID_V1_BASELINE_VERIFIED','ANDROID_V2_SPLIT_VERIFIED'):
+        return 'DART_TEST_TIMEOUT' if timed_out else 'DART_TEST_FAILED'
+    if phase in (None,'FLUTTER_STARTING','GRADLE_BUILD','TEST_APK_INSTALL'):
+        if re.search(r'(?im)failed to install|adb exited',text):
+            return 'FLUTTER_INSTALL_BRIDGE_FAILED'
+        if re.search(r'(?im)^.*(?:Gradle task [^\r\n]+ failed with exit code [1-9]\d*|FAILURE: Build failed with an exception)\s*$',text):
+            return 'GRADLE_BUILD_FAILED'
+        if timed_out:
+            return 'TEST_TIMEOUT'
     return 'UNKNOWN_PRECISE_FAILURE'
 
 def run_case(out:Path,fixtures:Path,inv:dict,case:str)->dict:
@@ -262,7 +281,11 @@ def main()->int:
                     data=json.loads(rp.read_text());data['status']='FAILED'
                     data['failure_category']=type(e).__name__
                     progress_file=a.out/'rt02c-progress.json'
-                    if progress_file.is_file():
+                    details=data.get('failure_details')
+                    if isinstance(details,dict):
+                        if details.get('case') in CASES:data['failure_case']=details['case']
+                        if details.get('phase') in PHASES:data['failure_phase']=details['phase']
+                    elif progress_file.is_file():
                         p=json.loads(progress_file.read_text())
                         if p.get('case') in CASES:data['failure_case']=p['case']
                         if p.get('phase') in PHASES:data['failure_phase']=p['phase']

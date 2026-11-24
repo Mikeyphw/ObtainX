@@ -71,6 +71,9 @@ on:
 permissions:
   contents: read
 
+env:
+  OX_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 concurrency:
   group: obtainx-r02-api36-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -86,12 +89,13 @@ jobs:
       - name: Checkout exact source commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Enforce emulator bootstrap source and mutation contracts
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
           python3 -B -m unittest discover -s scripts/ci -p 'test_r02_api36_contract.py' -v
           python3 -B scripts/ci/r02_api36_contract.py --check
       - name: Set up Java 21
@@ -110,7 +114,7 @@ jobs:
           path: |
             build/app/outputs/flutter-apk/app-normal-debug.apk
             build/app/outputs/flutter-apk/obtainx-opt03-debug-apk.json
-          key: obtainx-opt03-v1-${{ runner.os }}-flutter3.47.6-java21-normal-debug-${{ github.sha }}
+          key: obtainx-opt03-v1-${{ runner.os }}-flutter3.47.6-java21-normal-debug-${{ github.event.pull_request.head.sha || github.sha }}
           fail-on-cache-miss: false
       - name: Set up Flutter 3.47.6
         if: steps.opt03_apk_restore.outputs.cache-hit != 'true'
@@ -124,7 +128,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
           test "$RUNNER_OS" = Linux
           test "$(uname -m)" = x86_64
           mkdir -p "$RUNNER_TEMP/obtainx-r02-api36"
@@ -188,7 +192,7 @@ jobs:
           OX_EVIDENCE_ROOT: ${{ runner.temp }}/obtainx-r02-api36
         run: |
           set -euo pipefail
-          printf 'ObtainX evidence hashes only; source=%s; uploads remain mandatory\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          printf 'ObtainX evidence hashes only; source=%s; uploads remain mandatory\n' "$OX_EXPECTED_SHA" >> "$GITHUB_STEP_SUMMARY"
           for f in "$OX_EVIDENCE_ROOT"/*.json "$OX_EVIDENCE_ROOT"/fixtures/*inventory.json; do
             if [[ -f "$f" && ! -L "$f" ]]; then
               n="$(wc -c < "$f")"
@@ -203,7 +207,7 @@ jobs:
         timeout-minutes: 3
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # pinned v4
         with:
-          name: obtainx-r02-api36-bootstrap-${{ github.sha }}
+          name: obtainx-r02-api36-bootstrap-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/obtainx-r02-api36/receipt.json
             ${{ runner.temp }}/obtainx-r02-api36/app_launch.png

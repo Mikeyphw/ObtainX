@@ -64,7 +64,7 @@ def build(out:Path)->dict:
     need(out.is_absolute() and out.is_dir(),'absolute existing CI fixture directory required')
     need(os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('RUNNER_OS')=='Linux',
          'hosted Linux GitHub runner required')
-    source=os.environ.get('GITHUB_SHA','')
+    source=os.environ.get('OX_EXPECTED_SHA','')
     need(bool(re.fullmatch('[0-9a-f]{40}',source)),'invalid source SHA')
     baseline=json.loads((out/'fixture_inventory.json').read_text())
     need(baseline.get('source_sha')==source and baseline.get('fixture_package')==PKG,

@@ -1,6 +1,7 @@
 """Targeted workflow-structure regressions; no CI or Gradle invoked."""
 import unittest
-from r07_workflow_contract import parse_workflow, ContractError, WORKFLOWS, REQUIRED_STEPS
+from pathlib import Path
+from r07_workflow_contract import parse_workflow, ContractError, WORKFLOWS, REQUIRED_STEPS, verify, SOURCE_EXPR, SOURCE_GUARD
 
 NAME='obtainx-r00-contracts.yml'
 def fixture(name=NAME):
@@ -43,4 +44,53 @@ class WorkflowStructureTest(unittest.TestCase):
     def test_gate_error_is_not_a_pass(self):
         bad=fixture().replace('        run: python3 -B scripts/ci/r07_workflow_contract.py --check','        continue-on-error: true\n        run: python3 -B scripts/ci/r07_workflow_contract.py --check')
         with self.assertRaises(ContractError): parse_workflow(bad,NAME)
+class ExactSourceBindingTest(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parents[2]
+
+    def test_all_six_exact_workflow_jobs(self):
+        self.assertEqual(verify(self.ROOT), 6)
+
+    def mutation(self, name, old, new):
+        rel = '.github/workflows/' + name
+        text = (self.ROOT / rel).read_text()
+        self.assertIn(old, text)
+        with self.assertRaises(ContractError):
+            verify(self.ROOT, overrides={rel: text.replace(old, new, 1)})
+
+    def test_synthetic_merge_checkout_refused(self):
+        self.mutation('obtainx-r02-rt02c.yml', 'ref: ' + SOURCE_EXPR,
+                      'ref: ${{ github.sha }}')
+
+    def test_missing_expected_source_refused(self):
+        self.mutation(NAME, 'OX_EXPECTED_SHA: ' + SOURCE_EXPR,
+                      'OX_EXPECTED_SHA: ${{ github.sha }}')
+
+    def test_commented_source_guard_refused(self):
+        self.mutation('obtainx-r02-rt02c.yml', SOURCE_GUARD,
+                      '# ' + SOURCE_GUARD)
+
+    def test_unpinned_full_flutter_checkout_refused(self):
+        name = 'obtainx-r00-flutter.yml'
+        rel = '.github/workflows/' + name
+        text = (self.ROOT / rel).read_text()
+        prefix, sep, job = text.partition('  flutter-and-android-debug:')
+        self.assertTrue(sep)
+        with self.assertRaises(ContractError):
+            verify(self.ROOT, overrides={rel: prefix + sep + job.replace(
+                'ref: ' + SOURCE_EXPR, 'ref: ${{ github.sha }}', 1)})
+
+    def test_synthetic_artifact_identity_refused(self):
+        self.mutation('obtainx-r02-rt02c.yml',
+                      'name: obtainx-r02-rt02c-archive-' + SOURCE_EXPR,
+                      'name: obtainx-r02-rt02c-archive-${{ github.sha }}')
+
+    def test_static_artifact_identity_refused(self):
+        self.mutation('obtainx-r02-rt02c.yml',
+                      'name: obtainx-r02-rt02c-archive-' + SOURCE_EXPR,
+                      'name: obtainx-r02-rt02c-archive')
+
+    def test_job_level_override_refused(self):
+        self.mutation('obtainx-r02-rt02c.yml', '      GRADLE_OPTS:',
+                      '      OX_EXPECTED_SHA: ${{ github.sha }}\n      GRADLE_OPTS:')
+
 if __name__=='__main__': unittest.main()

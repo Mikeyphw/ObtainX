@@ -41,7 +41,7 @@ class SourceMutations(unittest.TestCase):
     def test_emulator_api36_required(self):self.mutation(C.WORKFLOW,'api-level: 36','api-level: 35')
     def test_kvm_required(self):self.mutation(C.WORKFLOW,'test -c /dev/kvm','echo skip-kvm')
     def test_runner_sha_pinned(self):self.mutation(C.WORKFLOW,'@a421e43855164a8197daf9d8d40fe71c6996bb0d','@main')
-    def test_source_checkout(self):self.mutation(C.WORKFLOW,'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"','true')
+    def test_source_checkout(self):self.mutation(C.WORKFLOW,'test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"','true')
     def test_real_flutter_test(self):self.mutation(C.HOST,"'flutter','test','integration_test/r02_real_installer_test.dart'", "'echo','run fake test'")
     def test_no_mock_installer(self):self.mutation(C.DART, 'StockInstaller(SettingsProvider()).installApk(', 'fakeInstaller(')
     def test_no_skip_confirm(self):self.mutation(C.HOST,'tap_count==1', 'tap_count>=0')

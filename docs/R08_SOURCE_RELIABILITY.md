@@ -25,3 +25,26 @@ The existing source identity and install evidence checks remain authoritative.
 R07 persistent check/extraction/scan history, per-source counts, Android
 approval/notification after process death and background recovery still need
 acceptance. CI24, physical-device tests and signed release are independent.
+
+## R08-F03 / RT02C-HF10 failure remediation
+
+The legacy SourceProvider URL-matching expectation conflicted with the #353
+filename-only policy. The replacement covers URL-only refusal, inversion,
+filename matching, and empty pattern; the APK preview shares `filterApks`.
+
+RT02C run 45459045944 had zero completed cases and zero confirmed taps at
+`STOCK_INSTALLER_CALL`. Its former `GRADLE_BUILD_FAILED` diagnostic was not
+proof of a Gradle failure. The repair uses phase-specific error categories,
+unique fresh uncompressed hierarchy dumps, checked cleanup, bounded approval
+observations and read-only signed-package state evidence before fixture cleanup.
+Neither a tap attempt nor a package observation replaces the test's required
+seven-case and independent receipt checks. The actual cause of the prior stall
+remains open pending a new hosted run; no physical-device or release acceptance.
+
+RT02C now probes the hierarchy outside the session state lock, then rechecks
+the active case and boundary index under lock immediately before the bounded
+input mutation. A late probe cannot approve or pollute a later case. Installer
+identity and action must be in the same allowlisted system UI. All six CI
+workflows pin checkout, evidence and cache identities to the PR head via
+OX_EXPECTED_SHA (or the actual event commit outside PRs); structural regressions
+cover synthetic merge substitution, unbound artifacts and conditional guards.

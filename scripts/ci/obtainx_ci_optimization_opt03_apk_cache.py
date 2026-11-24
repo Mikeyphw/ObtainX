@@ -34,7 +34,7 @@ def need(condition: bool, message: str) -> None:
         raise Refused('OX_OPT03_REFUSED: '+message)
 
 def source_identity() -> str:
-    source = os.environ.get('GITHUB_SHA','')
+    source = os.environ.get('OX_EXPECTED_SHA','')
     need(os.environ.get('GITHUB_ACTIONS') == 'true' and
          os.environ.get('RUNNER_OS') == 'Linux' and
          os.environ.get('RUNNER_ARCH') == 'X64', 'must run on hosted Linux x64')

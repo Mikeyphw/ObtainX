@@ -110,6 +110,45 @@ def parse_workflow(text, filename, *, require_repair_gate=True):
         require(len(matches) == 1 and matches[0][1].get('run') == command and 'if' not in matches[0][1] and matches[0][1].get('continue-on-error', False) is False, f'{filename}: missing, duplicated, conditional or displaced required step {label}')
     return doc
 
+SOURCE_EXPR = '${{ github.event.pull_request.head.sha || github.sha }}'
+SOURCE_GUARD = 'test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"'
+
+
+def verify_exact_source(doc, filename):
+    """All mandatory jobs must use one exact PR-head identity end-to-end."""
+    require(doc.get('env', {}).get('OX_EXPECTED_SHA') == SOURCE_EXPR,
+            f'{filename}: workflow exact-source environment missing')
+    for job_id, job in doc['jobs'].items():
+        label = f'{filename}/{job_id}'
+        require(job.get('env', {}).get('OX_EXPECTED_SHA', SOURCE_EXPR) == SOURCE_EXPR,
+                f'{label}: job source identity override')
+        steps = job.get('steps', [])
+        checkout = [i for i, step in enumerate(steps)
+                    if step.get('uses', '').startswith('actions/checkout@')]
+        require(checkout == [0], f'{label}: exactly one first checkout required')
+        require(steps[0].get('with', {}).get('ref') == SOURCE_EXPR,
+                f'{label}: checkout not pinned to exact source')
+        require(steps[0].get('with', {}).get('persist-credentials') is False,
+                f'{label}: checkout credential persistence forbidden')
+        guard_lines = steps[1].get('run', '').splitlines() if len(steps)>1 else []
+        guard_lines = [line.strip() for line in guard_lines if line.strip()]
+        require(SOURCE_GUARD in guard_lines and
+                (guard_lines == [SOURCE_GUARD] or
+                 guard_lines[:2] == ['set -euo pipefail', SOURCE_GUARD]) and
+                'if' not in steps[1] and not steps[1].get('continue-on-error', False),
+                f'{label}: unconditional exact-source guard must follow checkout')
+        for step in steps:
+            require(step.get('env', {}).get('OX_EXPECTED_SHA', SOURCE_EXPR) == SOURCE_EXPR,
+                    f'{label}: step source identity override')
+            action = step.get('uses', '')
+            key = ('key' if action.startswith(('actions/cache/save@', 'actions/cache/restore@'))
+                   else 'name' if action.startswith('actions/upload-artifact@') else None)
+            if key is not None:
+                value = step.get('with', {}).get(key, '')
+                require(isinstance(value, str) and SOURCE_EXPR in value,
+                        f'{label}: cache/artifact not exact-source bound')
+
+
 def verify(root=ROOT, *, overrides=None, require_repair_gate=True):
     root = Path(root)
     overrides = overrides or {}
@@ -120,7 +159,8 @@ def verify(root=ROOT, *, overrides=None, require_repair_gate=True):
         rel = '.github/workflows/'+name
         text = overrides[rel] if rel in overrides else (root/rel).read_text(encoding='utf-8')
         if isinstance(text, bytes): text=text.decode('utf-8')
-        parse_workflow(text, name, require_repair_gate=require_repair_gate)
+        doc = parse_workflow(text, name, require_repair_gate=require_repair_gate)
+        verify_exact_source(doc, name)
     return len(WORKFLOWS)
 
 if __name__ == '__main__':

@@ -830,19 +830,37 @@ void main() {
     },
   );
 
-  test('APK filters also match the download URL', () async {
+  test('APK filters match asset labels only, including inversion', () async {
     const MapEntry<String, String> ironFoxApk = MapEntry(
       'IronFox-153.0.1.apk',
       'https://example.com/arm64-v8a/ironfox-153.0.1-arm64-v8a.apk',
     );
 
-    final App app = await SourceProvider().getApp(
-      _StubSource(apkUrls: const [ironFoxApk]),
-      'https://example.com/releases',
-      <String, dynamic>{'apkFilterRegEx': 'arm64-v8a'},
-    );
+    Future<App> filtered(String pattern, {bool invert = false}) =>
+        SourceProvider().getApp(
+          _StubSource(apkUrls: const [ironFoxApk]),
+          'https://example.com/releases',
+          <String, dynamic>{
+            'apkFilterRegEx': pattern,
+            'invertAPKFilter': invert,
+            'autoApkFilterByArch': false,
+          },
+        );
 
-    expect(app.apkUrls, const [ironFoxApk]);
+    await expectLater(filtered('arm64-v8a'), throwsA(isA<NoAPKError>()));
+    expect(
+      (await filtered('arm64-v8a', invert: true)).apkUrls,
+      const [ironFoxApk],
+    );
+    expect(
+      (await filtered(r'^IronFox-.*\.apk$')).apkUrls,
+      const [ironFoxApk],
+    );
+    await expectLater(
+      filtered(r'^IronFox-', invert: true),
+      throwsA(isA<NoAPKError>()),
+    );
+    expect((await filtered('')).apkUrls, const [ironFoxApk]);
   });
 
   test(

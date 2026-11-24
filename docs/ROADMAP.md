@@ -1,3 +1,35 @@
+# ObtainX — R08-F03 / RT02C failure-repair candidate (24 November 2026)
+
+**Preimage:** draft PR #30 `60f44d5fdfc1616e54a7d59b3b9b101b89312228`,
+main `181191cc9a09c9c3053d837a3dfb24e9d98bafa0`. The previous six-workflow
+batch reported four successes; Flutter run 45459045853 failed on a stale
+URL-matching test and RT02C run 45459045944 stalled at the first APKS
+installer call. The latter's actual tested merge SHA was
+`c1289426c73ead0656ab9f7fcc2e31194fc35bea` (same source tree).
+
+**Repair scope:** retain R08-P02 filename-only semantics and reconcile the
+legacy source-provider test. Classify RT02C failures by actual phase; require
+a fresh successful UI hierarchy before an explicitly identified installer tap;
+retain bounded per-case approval outcomes and exact package-state observations
+before cleanup. Approval observation no longer holds the controller lock across
+slow hierarchy reads, and a late snapshot must reauthorize its exact active
+case before any bounded tap. Fixture and action must belong to the same
+recognized installer UI. All six required workflows now check out the actual
+PR head (push/manual dispatch use their exact event SHA); fixture, receipt,
+cache and artifact identities share OX_EXPECTED_SHA. A structural gate and
+negative tests reject merge-SHA substitution and stale UI authorization.
+No retries after an installer call, no synthetic approvals,
+no raw private UI/Flutter logs, and no promotion of failed tests to success.
+The specific prior installer stall remains unproven until a new hosted run.
+
+**Acceptance:** source candidate only; fresh native and required hosted CI
+receipts, CI24 if configured, Android device and release gates remain separate.
+Remaining: R07 Activity Center acceptance; R08 Source reliability/provider and
+integration acceptance; R09 Discovery, app list and picker; R10 Settings and
+accessibility; R11 Integrations, policy and history; R12 Release qualification.
+
+---
+
 # ObtainX — R08 source reliability candidate (24 November 2026)
 
 **Predecessor:** PR #30 R07-F02 head `e008f52b7d1f801a0f27c73dafccead3dc701f02`;

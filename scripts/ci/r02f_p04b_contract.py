@@ -26,7 +26,7 @@ def inspect(root:Path=ROOT)->list[str]:
     t,h,d,w,doc=(docs[p] for p in PATHS)
     def check(ok,msg):
         if not ok:issues.append(msg)
-    for anchor in ('GITHUB_ACTIONS','RUNNER_OS','GITHUB_SHA','keytool',
+    for anchor in ('GITHUB_ACTIONS','RUNNER_OS','OX_EXPECTED_SHA','keytool',
                    'javac','d8','aapt2','zipalign','apksigner',
                    'signed_disposable_target','only_reads_content_uri',
                    'can_install_apks\':False','SHA-256','received_and_declined',

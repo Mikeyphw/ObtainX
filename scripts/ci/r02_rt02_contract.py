@@ -50,7 +50,7 @@ def inspect(root:Path=ROOT)->list[str]:
         SOURCE_GATE:('run: python3 scripts/ci/r02_rt02_contract.py --check',),
         PUBSPEC:('integration_test:', 'sdk: flutter'),
         WORKFLOW:('permissions:\n  contents: read','persist-credentials: false',
-                  'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
+                  'test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"',
                   "python3 -B scripts/ci/r02_rt02_fixture.py --out",
                   'python3 -B scripts/ci/r02_rt02_hosted.py run --out',
                   'python3 -B scripts/ci/r02_rt02_hosted.py verify --out',

@@ -24,7 +24,7 @@ def inspect(root:Path=ROOT)->list[str]:
         except SyntaxError:problems.append('invalid Python '+x)
     def check(ok,reason):
         if not ok:problems.append(reason)
-    for s in ('GITHUB_ACTIONS','RUNNER_OS','GITHUB_SHA','android-36','35.0.0',
+    for s in ('GITHUB_ACTIONS','RUNNER_OS','OX_EXPECTED_SHA','android-36','35.0.0',
               'REQUEST_INSTALL_PACKAGES','USER_ACTION_REQUIRED','PackageInstaller.SessionParams.MODE_FULL_INSTALL',
               'session.openWrite("base.apk",0L,-1L)','session.fsync(output)',
               'session.commit(pending.getIntentSender())','PendingIntent.FLAG_MUTABLE',

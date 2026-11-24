@@ -787,21 +787,23 @@ class APKMirror extends AppSource {
       throw NoVersionError();
     }
 
-    // Icon resolution is intentionally decoupled from size resolution. Size
-    // resolution requires walking the release page + N download pages and
-    // is now done lazily on the AppPage. The icon, by contrast, is one
-    // cheap GET against the listing page and is fine to do here.
-    String? iconUrl;
-    try {
-      final pageRes = await sourceRequest(standardUrl, additionalSettings);
-      if (pageRes.statusCode == 200) {
-        iconUrl = await iconUrlFromApkMirrorAppPageHtml(
-          pageRes.body,
-          standardUrl,
-        );
+    // Keep RSS polling independent from the optional HTML icon. Once a
+    // matching listing has been checked, retain its icon (including absent)
+    // instead of scraping the listing page on each poll (#339).
+    final previous = previouslyCheckedApp;
+    String? iconUrl = previous != null && previous.url == standardUrl ? previous.iconUrl : null;
+    if (previous == null || previous.url != standardUrl) {
+      try {
+        final pageRes = await sourceRequest(standardUrl, additionalSettings);
+        if (pageRes.statusCode == 200) {
+          iconUrl = await iconUrlFromApkMirrorAppPageHtml(
+            pageRes.body,
+            standardUrl,
+          );
+        }
+      } catch (_) {
+        // Icon is optional; feed errors remain authoritative.
       }
-    } catch (_) {
-      // Icon is optional - ignore errors.
     }
 
     // [apkSizeBytes] is intentionally not resolved here. The APKMirror size
@@ -885,8 +887,13 @@ class APKMirror extends AppSource {
       if (filteredEntries.isEmpty) {
         return releasePageSize;
       }
+      // Refuse a speculative size if inspecting the bounded candidate set
+      // cannot determine it; the user can still open the store listing.
+      if (filteredEntries.length > 3) {
+        return releasePageSize;
+      }
       final List<_ApkMirrorSizeCandidate> sizeCandidates = [];
-      for (final candidateDownloadPageEntry in filteredEntries) {
+      for (final candidateDownloadPageEntry in filteredEntries.take(3)) {
         final downloadPageResponse = await sourceRequest(
           candidateDownloadPageEntry.value,
           additionalSettings,

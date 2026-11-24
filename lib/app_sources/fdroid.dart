@@ -14,6 +14,7 @@ import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/services/html_parse_isolate.dart';
 import 'package:obtainium/services/store_icon_resolver.dart';
+import 'package:obtainium/services/r08_source_policy.dart';
 
 /// Returns a trimmed, non-empty display String from an F-Droid metadata value.
 ///
@@ -684,7 +685,7 @@ class FDroid extends AppSource {
           );
         }
       }
-      // Prefer the device's first ABI that has its own build. A versionCode
+      // Prefer compatible ARM64, then the device's remaining ABI order. A versionCode
       // missing from the page is unknown, not universal: only an explicit
       // empty nativecode list means the APK runs on every ABI. F-Droid's
       // suggested versionCode is not ABI-aware (for Rethink it is the x86_64
@@ -705,7 +706,7 @@ class FDroid extends AppSource {
           );
         }
         if (supportedAbis.isNotEmpty) {
-          for (final String abi in supportedAbis) {
+          for (final String abi in preferredSourceAbis(supportedAbis)) {
             final List<dynamic> explicitMatches = releaseChoices.where((
               release,
             ) {

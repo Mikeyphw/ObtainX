@@ -45,6 +45,8 @@ import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/app_sources/githubstars.dart';
 import 'package:obtainium/http/obtainx_user_agent.dart';
 import 'package:obtainium/http/source_request_session.dart';
+import 'package:obtainium/http/r08_apkmirror_budget.dart';
+import 'package:obtainium/services/r08_source_policy.dart';
 import 'package:obtainium/services/r04_actions_redirect_policy.dart';
 import 'package:obtainium/http/response_bytes.dart';
 import 'package:obtainium/providers/logs_provider.dart';
@@ -1062,9 +1064,19 @@ abstract class AppSource {
       );
     }
 
-    if (session != null &&
-        method == 'GET' &&
-        Uri.parse(url).path.endsWith('/index.xml')) {
+    final uri = Uri.parse(url);
+    final mirrorRequest = this is APKMirror && method == 'GET' &&
+        ApkMirrorRequestBudget.appliesTo(uri);
+    Future<http.Response> loadWithBudget() async {
+      if (!mirrorRequest) return loadResponse();
+      try {
+        return await ApkMirrorRequestBudget.shared.request(loadResponse);
+      } on ApkMirrorRequestDeferred catch (error) {
+        throw ObtainiumError(error.message);
+      }
+    }
+    if (session != null && method == 'GET' &&
+        (uri.path.endsWith('/index.xml') || mirrorRequest)) {
       // Key after URL/header customization so credentials, TLS policy and
       // redirects cannot accidentally share a response across configurations.
       final headerNames = requestHeaders?.keys.toList() ?? <String>[];
@@ -1075,9 +1087,10 @@ abstract class AppSource {
         followRedirects,
         for (final name in headerNames) [name, requestHeaders![name]],
       ]);
-      return session.repositoryResponse(key, loadResponse);
+      return session.repositoryResponse(key, loadWithBudget,
+          maxEntries: mirrorRequest ? 64 : null);
     }
-    return loadResponse();
+    return loadWithBudget();
   }
 
   void runOnAddAppInputChange(String inputUrl) {}
@@ -2435,9 +2448,14 @@ class ApkFilterService {
 
   List<MapEntry<String, String>> getApkUrlsFromUrls(List<String> urls) =>
       urls.map((e) {
-        final segments = e.split('/').where((el) => el.trim().isNotEmpty);
+        // A signed query or a host name is not an asset filename.
+        final uri = Uri.tryParse(e);
+        final segments = uri?.pathSegments.where((s) => s.isNotEmpty).toList()
+            ?? const <String>[];
         final apkSegs = segments.where((s) => isApkOrContainerFile(s));
-        return MapEntry(apkSegs.isNotEmpty ? apkSegs.last : segments.last, e);
+        final name = apkSegs.isNotEmpty ? apkSegs.last :
+            (segments.isNotEmpty ? segments.last : '');
+        return MapEntry(name, e);
       }).toList();
 
   List<MapEntry<String, String>> filterApks(
@@ -2448,8 +2466,8 @@ class ApkFilterService {
     if (apkFilterRegEx?.isNotEmpty == true) {
       final reg = RegExp(apkFilterRegEx!);
       apkUrls = apkUrls.where((element) {
-        final hasMatch =
-            reg.hasMatch(element.key) || reg.hasMatch(element.value);
+        // Match the source-provided filename/asset label only (#353).
+        final hasMatch = reg.hasMatch(element.key);
         return invert == true ? !hasMatch : hasMatch;
       }).toList();
     }
@@ -2462,17 +2480,9 @@ class ApkFilterService {
     bool preferSplits = true,
   }) async {
     if (apkUrls.length > 1) {
-      for (var abi in abis) {
-        final RegExp architecturePattern = RegExp(
-          '.*$abi.*',
-          caseSensitive: false,
-        );
+      for (final abi in preferredSourceAbis(abis)) {
         final urls2 = apkUrls
-            .where(
-              (element) =>
-                  architecturePattern.hasMatch(element.key) ||
-                  architecturePattern.hasMatch(element.value),
-            )
+            .where((element) => sourceAssetHasAbi(element.key, abi))
             .toList();
         if (urls2.isNotEmpty && urls2.length < apkUrls.length) {
           apkUrls = urls2;

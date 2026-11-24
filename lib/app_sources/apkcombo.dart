@@ -50,8 +50,10 @@ class APKCombo extends AppSource {
       throw getObtainiumHttpError(res);
     }
     final html = await parseHtmlOffIsolate(res.body);
-    return html
-        .querySelectorAll('#variants-tab > div > ul > li')
+    final variants = html.querySelectorAll('#variants-tab > div > ul > li');
+    final rows = variants.isNotEmpty ? variants :
+        html.querySelectorAll('#best-variant-tab ul.file-list > li');
+    return rows
         .map((li) {
           final String? arch = li
               .querySelector('code')
@@ -65,25 +67,31 @@ class APKCombo extends AppSource {
           // every historical build is returned as a separate "APK" (dozens of
           // near-identical choices, and silent updates get disabled).
           for (final a in li.querySelectorAll('a')) {
-            String? url = a.attributes['href'];
-            // Current apkcombo download links are "/r2?u=<encoded R2 presigned
-            // URL>" redirectors. Unwrap them to the actual (AWS4-signed) .apk
-            // URL so the extension check passes and the link can later be
-            // matched by its stable R2 object path. See issue #341.
-            if (url != null) {
-              final parsed = Uri.parse(url);
-              if (parsed.path == '/r2' && parsed.queryParameters['u'] != null) {
-                url = parsed.queryParameters['u'];
+            final href = a.attributes['href'];
+            if (href == null || href.isEmpty) continue;
+            final source = Uri.parse(standardUrl);
+            Uri? resolved;
+            try {
+              resolved = source.resolve(href);
+              if (resolved.host == source.host && resolved.path == '/r2') {
+                final inner = resolved.queryParametersAll['u'];
+                if (inner == null || inner.length != 1) continue;
+                resolved = Uri.tryParse(inner.single);
               }
-            }
-            if (url == null ||
-                !AppSource.isApkOrContainerFile(Uri.parse(url).path)) {
+            } on FormatException {
               continue;
             }
+            if (resolved == null || resolved.scheme != 'https' ||
+                resolved.host.isEmpty || resolved.userInfo.isNotEmpty ||
+                !AppSource.isApkOrContainerFile(resolved.path)) {
+              continue;
+            }
+            final url = resolved.toString();
             final String verCode =
                 a.querySelector('.info .header .vercode')?.text.trim() ?? '';
             return MapEntry<String, String>(
-              arch != null ? '$arch-$verCode.apk' : '',
+              arch != null && arch.isNotEmpty ?
+                  '$arch-$verCode.apk' : resolved.pathSegments.last,
               url,
             );
           }

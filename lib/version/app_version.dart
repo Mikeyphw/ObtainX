@@ -592,15 +592,8 @@ VersionDecision versionDecisionForApp(App app) {
       acknowledgement['version'] == app.latestVersion &&
       acknowledgement['assetName'] == asset?.key &&
       acknowledgement['assetUrl'] == asset?.value &&
-      direct.relation != VersionRelation.newer &&
-      direct.relation != VersionRelation.same) {
+      direct.relation != VersionRelation.newer) {
     return const VersionDecision(VersionRelation.same, 'sourceAcknowledged');
-  }
-  // Matching Google series/build identifiers already name the same release;
-  // distribution labels alone do not make another update available.
-  if (direct.reason == 'googleBuild' &&
-      direct.relation == VersionRelation.same) {
-    return direct;
   }
   // Matching Google series/build identifiers already name the same release;
   // distribution labels alone do not make another update available.

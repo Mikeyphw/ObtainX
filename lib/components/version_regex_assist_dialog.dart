@@ -362,6 +362,8 @@ List<List<GeneratedFormItem>> attachRegexAssistToItems(
                 initialRaw: apkRawLines.isNotEmpty ? apkRawLines.first : null,
                 rawLineSuggestions: apkRawLines,
                 filterFieldKey: 'apkFilterRegEx',
+                initialPattern: currentValues['apkFilterRegEx']?.toString(),
+                initialInvert: currentValues['invertAPKFilter'] == true,
                 patch: patch,
               );
             };
@@ -443,6 +445,8 @@ Future<void> showRegexAssistDialog({
   String? initialDesired,
   required List<String> rawLineSuggestions,
   required String? filterFieldKey,
+  String? initialPattern,
+  bool initialInvert = false,
   required FormValuesTextPatch patch,
 }) async {
   await showAppModalSheet<void>(
@@ -454,6 +458,8 @@ Future<void> showRegexAssistDialog({
         initialDesired: initialDesired,
         rawLineSuggestions: rawLineSuggestions,
         filterFieldKey: filterFieldKey,
+        initialPattern: initialPattern,
+        initialInvert: initialInvert,
         patch: patch,
       );
     },
@@ -467,6 +473,8 @@ class _RegexAssistSheetBody extends StatefulWidget {
     required this.initialDesired,
     required this.rawLineSuggestions,
     required this.filterFieldKey,
+    required this.initialPattern,
+    required this.initialInvert,
     required this.patch,
   });
 
@@ -475,6 +483,8 @@ class _RegexAssistSheetBody extends StatefulWidget {
   final String? initialDesired;
   final List<String> rawLineSuggestions;
   final String? filterFieldKey;
+  final String? initialPattern;
+  final bool initialInvert;
   final FormValuesTextPatch patch;
 
   @override
@@ -483,6 +493,7 @@ class _RegexAssistSheetBody extends StatefulWidget {
 
 class _RegexAssistSheetBodyState extends State<_RegexAssistSheetBody> {
   late final TextEditingController _rawController;
+  late final TextEditingController _patternController;
   late List<String> _candidates;
   String? _selectedCandidate;
   late final TextEditingController _customController;
@@ -493,6 +504,7 @@ class _RegexAssistSheetBodyState extends State<_RegexAssistSheetBody> {
   void initState() {
     super.initState();
     _rawController = TextEditingController(text: widget.initialRaw ?? '');
+    _patternController = TextEditingController(text: widget.initialPattern ?? '');
     _customController = TextEditingController();
     _customFocusNode = FocusNode();
     _customFocusNode.addListener(_onCustomFocusChange);
@@ -548,6 +560,7 @@ class _RegexAssistSheetBodyState extends State<_RegexAssistSheetBody> {
     _customFocusNode.removeListener(_onCustomFocusChange);
     _customFocusNode.dispose();
     _rawController.dispose();
+    _patternController.dispose();
     _customController.dispose();
     super.dispose();
   }
@@ -604,6 +617,18 @@ class _RegexAssistSheetBodyState extends State<_RegexAssistSheetBody> {
   }
 
   void _applySelection() {
+    if (widget.kind == RegexAssistKind.apkFilter &&
+        _patternController.text.isNotEmpty) {
+      try {
+        RegExp(_patternController.text);
+      } on FormatException {
+        showAppToast(tr('invalidRegEx'), context: context, type: ToastType.error);
+        return;
+      }
+      widget.patch({'apkFilterRegEx': _patternController.text});
+      Navigator.of(context).pop();
+      return;
+    }
     final String raw = _rawController.text.trim();
     if (raw.isEmpty) {
       showAppToast(
@@ -654,6 +679,38 @@ class _RegexAssistSheetBodyState extends State<_RegexAssistSheetBody> {
       widget.patch(<String, String>{widget.filterFieldKey!: pattern});
     }
     Navigator.of(context).pop();
+  }
+
+  Widget _apkPatternPreview() {
+    final samples = (widget.rawLineSuggestions.isEmpty
+        ? [_rawController.text] : widget.rawLineSuggestions)
+        .where((name) => name.isNotEmpty).take(40).toList();
+    final desired = _customController.text.trim().isNotEmpty
+        ? _customController.text.trim() : (_selectedCandidate ?? '').trim();
+    final pattern = _patternController.text.isNotEmpty
+        ? _patternController.text
+        : tryBuildFilterRegExFromSelection(raw: _rawController.text.trim(), desired: desired);
+    String result;
+    try {
+      final rows = samples.map((name) => MapEntry(name, '')).toList();
+      final kept = filterApks(rows, pattern, widget.initialInvert);
+      result = '${kept.length}/${samples.length} sampled asset names kept'
+          '${widget.initialInvert ? ' (inverted)' : ''}. '
+          '${kept.isEmpty ? 'No matching assets in this sample.' : kept.take(4).map((row) => row.key).join('\n')}';
+    } on FormatException {
+      result = tr('invalidRegEx');
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 12),
+      TextField(
+        controller: _patternController,
+        decoration: const InputDecoration(labelText: 'APK filename pattern preview',
+          helperText: 'Empty uses the selected substring; URL and host are ignored.'),
+        onChanged: (_) => setState(() {}),
+      ),
+      const SizedBox(height: 8),
+      Text(result, key: const ValueKey('r08-apk-pattern-result')),
+    ]);
   }
 
   @override
@@ -799,6 +856,7 @@ class _RegexAssistSheetBodyState extends State<_RegexAssistSheetBody> {
             });
           },
         ),
+        if (widget.kind == RegexAssistKind.apkFilter) _apkPatternPreview(),
         const SizedBox(height: 16),
       ],
       footer: Row(

@@ -300,6 +300,19 @@ _ParsedRelease? _parseRelease(String input) {
   if (suffix.isEmpty) {
     return _ParsedRelease(core, null, const [], revision, '', hash);
   }
+  // Mozilla-style 158.0b3 and 150.0a1 are ordered prereleases,
+  // not descriptive distribution labels (#336). Restrict aliases to digits.
+  final shortQualifier = RegExp(r'^([ab])(\d+)$').firstMatch(suffix);
+  if (shortQualifier != null) {
+    return _ParsedRelease(
+      core,
+      shortQualifier.group(1) == 'a' ? 'alpha' : 'beta',
+      [shortQualifier.group(2)!],
+      revision,
+      '',
+      hash,
+    );
+  }
   final qualifier = _prerelease.firstMatch(suffix);
   if (qualifier != null) {
     return _ParsedRelease(

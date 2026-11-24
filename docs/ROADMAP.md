@@ -1,3 +1,26 @@
+# ObtainX — R08 source reliability candidate (24 November 2026)
+
+**Predecessor:** PR #30 R07-F02 head `e008f52b7d1f801a0f27c73dafccead3dc701f02`;
+all six required GitHub-hosted workflows reported success on that exact head.
+`main` remains `181191cc9a09c9c3053d837a3dfb24e9d98bafa0`. Preserve prior receipts.
+R07 complete persistent check/extraction/scan history, Android process-restart
+approval, background counts and physical-device UX remain unqualified.
+
+**R08 candidate:** Mozilla prerelease aliases; filename-only APK matching and
+preview; compatible ARM64 precedence with F-Droid metadata; matching manual
+source acknowledgement; bounded APKMirror request pacing and optional HTML
+work; APKCombo single-variant fallback; defensive RuStore/Farsroid handling;
+encoded add-link routing and exact-event deduplication. See
+`docs/R08_SOURCE_RELIABILITY.md` for source scope and unresolved provider proof.
+No direct main write. Continue the consolidated draft PR #30 only through
+native Devtool with a fresh source-bound session. CI24/device/release separate.
+
+**Remaining:** R07 acceptance debt; R08 provider and integration acceptance;
+R09 — Discovery, app list and picker; R10 — Settings and accessibility;
+R11 — Integrations, policy and history; R12 — Release qualification.
+
+---
+
 # ObtainX — R07 Activity Center implementation candidate (24 November 2026)
 
 **Verified source baseline:** merged PR #29 `main` at `181191cc9a09c9c3053d837a3dfb24e9d98bafa0`

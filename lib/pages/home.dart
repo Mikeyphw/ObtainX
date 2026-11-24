@@ -20,6 +20,7 @@ import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/services/shared_url_receiver.dart';
+import 'package:obtainium/services/r08_source_policy.dart';
 import 'package:provider/provider.dart';
 
 /// The link import that pasted [text] holds, as one `obtainium://` link, or
@@ -451,10 +452,10 @@ class HomePageState extends State<HomePage> {
 
     Future<void> interpretLink(Uri uri) async {
       final action = uri.host;
-      final data = uri.path.length > 1 ? uri.path.substring(1) : '';
       try {
+        if (uri.scheme != 'obtainium') throw UnsupportedURLError();
         if (action == 'add') {
-          await handleAddUrl(data);
+          await handleAddUrl(obtainiumAddUrl(uri));
         } else if (action == 'app' || action == 'apps') {
           // Added as Import from URL list adds whatever is typed into it
           // (importUrlListEntries): each app fetched while the sheet is open,
@@ -523,12 +524,18 @@ class HomePageState extends State<HomePage> {
     }
 
     // Check initial link if app was in cold state (terminated)
-    final appLink = await _appLinks.getInitialLink();
-    var initLinked = false;
-    if (appLink != null) {
-      await interpretIncomingLink(appLink);
-      initLinked = true;
+    final linkGate = IncomingSourceLinkGate();
+    Uri? appLink;
+    try {
+      appLink = await _appLinks.getInitialLink();
+      if (appLink != null && mounted) {
+        await interpretIncomingLink(appLink);
+      }
+    } catch (e) {
+      // A malformed cold-start link must not prevent warm listeners starting.
+      if (mounted) showError(e);
     }
+    if (!mounted) return;
     _sharedUrlReceiver.listen(handleSharedText);
     final String? initialSharedText = await _sharedUrlReceiver
         .getInitialSharedText();
@@ -536,12 +543,20 @@ class HomePageState extends State<HomePage> {
       await handleSharedText(initialSharedText);
     }
     // Handle link when app is in warm state (front or background)
-    _linkSubscription = _appLinks.uriLinkStream.listen((uri) async {
-      if (!initLinked) {
-        await interpretIncomingLink(uri);
-      } else {
-        initLinked = false;
-      }
+    if (!mounted) return;
+    if (appLink != null) linkGate.accept(appLink, DateTime.now());
+    // Serialize distinct arrivals. A repeated cold echo is not permission to
+    // drop a different warm link, and failures cannot poison later arrivals.
+    Future<void> pendingLink = Future<void>.value();
+    _linkSubscription = _appLinks.uriLinkStream.listen((uri) {
+      if (!linkGate.accept(uri, DateTime.now())) return;
+      pendingLink = pendingLink.then((_) async {
+        if (mounted) await interpretIncomingLink(uri);
+      }).catchError((Object error) {
+        if (mounted) showError(error);
+      });
+    }, onError: (Object error) {
+      if (mounted) showError(error);
     });
   }
 

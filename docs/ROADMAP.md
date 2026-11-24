@@ -1,3 +1,22 @@
+# ObtainX — PR #29 forward integration into main (23 November 2026)
+
+**Exact pre-integration refs:** accepted `main` `990b3287e8a4d121be720d8684ebe255909d12b8` (PR #25), and
+R06-containing R05 branch `1cd3a8701af59b165f4a0b33db480b2c6e0c624d` (PR #26 merged into R05).
+**Remediation:** merge `main` into the existing PR #29 branch with an
+exact-tree-preserving merge; set the committed required-CI base to `main`;
+update R04/R05/R06 source and negative contracts together. The six
+required workflow identities, release separation, native approval and
+original Android installer baseline safeguards are unchanged.
+**Acceptance:** source candidate until native Devtool validation,
+non-force PR #29 update, and six *new* exact-head required CI checks
+pass. CI24, physical Android device and signed release remain separate
+and are **NOT ATTESTED** by this reconciliation. No direct main write.
+**Remaining:** R07 — Activity Center; R08 — Source reliability;
+R09 — Discovery and app list; R10 — Settings and accessibility;
+R11 — Integrations, policy and history; R12 — Release qualification.
+
+---
+
 # ObtainX — Post-consolidation reconciliation (23 November 2026)
 
 **Current authoritative GitHub baseline:** `main` at `bde1f1234c88a939477b988c5b5fd6fbcb6696a8`, merged through PR #28. The preceding R01–R04 stack (#15–#24) is contained in the accepted Git history; superseded PRs #16–#24 are closed, not separately merged. Existing security acceptance was source-specific and is not physical-device or release qualification.

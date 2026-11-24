@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[2]
-R05_BASE='feature/obtainx-r05-transactional-install-20261116'
+INTEGRATION_BASE='main'
 FILES=(
   'lib/pages/app.dart',
   'lib/components/r06_version_tile.dart',
@@ -72,8 +72,8 @@ def verify(root:Path=ROOT)->int:
   '## G. Complete original R00–R12 specification')
  contains('docs/R06_APP_DETAILS.md','R06', 'R07', 'physical-device', 'NOT_QUALIFIED')
  contains('docs/R05_INSTALL_LIFECYCLE.md','Historical R05 milestone', 'The next R06 PR')
- contains('scripts/ci/r04_completion_contract.py',R05_BASE)
- contains('scripts/ci/r05_contract.py',R05_BASE)
+ contains('scripts/ci/r04_completion_contract.py',INTEGRATION_BASE)
+ contains('scripts/ci/r05_contract.py',INTEGRATION_BASE)
  contains('scripts/ci/obtainx_ci_policy.py',
   "'lib/pages/app.dart'", "'lib/components/r06_*'", "'test/r06_*'", "'scripts/ci/r06_*'")
  contains('.github/workflows/obtainx-r00-contracts.yml',
@@ -93,7 +93,7 @@ def verify(root:Path=ROOT)->int:
  try:
   policy=json.loads(files['config/delivery-required-ci.json'])
   actual={x['name']:x['workflow_id'] for x in policy['required_workflows']}
-  if policy['base_branch']!=R05_BASE or policy['event']!='pull_request' or \
+  if policy['base_branch']!=INTEGRATION_BASE or policy['event']!='pull_request' or \
     actual!=REQUIRED_WORKFLOW_IDS or policy['release_qualification']!='separate':
    errors.append('R06 CI policy base/required IDs/release gate mismatch')
  except (KeyError,TypeError,ValueError) as exc:errors.append(f'R06 CI policy invalid: {exc}')

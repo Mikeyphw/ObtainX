@@ -59,8 +59,8 @@ class R06SourceMutationTests(unittest.TestCase):
    with contextlib.redirect_stdout(io.StringIO()) as changed_output:
     self.assertNotEqual(module.verify(root),0)
    self.assertIn('roadmap digest differs from R00 baseline',changed_output.getvalue())
- def test_stack_base_branch(self):
-  self.mutated('config/delivery-required-ci.json',module.R05_BASE)
+ def test_forward_integration_main_base_branch(self):
+  self.mutated('config/delivery-required-ci.json',module.INTEGRATION_BASE)
  def test_required_workflow_identity(self):
   self.mutated('config/delivery-required-ci.json','413864665')
  def test_r06_quick_actions_null_aware(self):

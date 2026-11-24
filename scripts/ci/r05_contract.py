@@ -58,7 +58,7 @@ FILES={
         "'lib/services/r05_*'", "'test/r05_*'",
         "'scripts/ci/r05_*'", "'lib/widgets/r05_*'"),
     'config/delivery-required-ci.json':(
-        'feature/obtainx-r05-transactional-install-20261116',),
+        '"base_branch": "main"',),
     'docs/R05_INSTALL_LIFECYCLE.md':(
         'R05 transactional install lifecycle','Android','NOT_QUALIFIED',
         'durable','approval','R07'),

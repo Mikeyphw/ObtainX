@@ -48,7 +48,7 @@ class R05ContractMutation(unittest.TestCase):
         self.mutation('lib/providers/apps_provider_lifecycle.dart',
                       'R05OperationJournal.instance.recoverInterruptedOnce()')
     def test_remove_review_route(self):
-        self.mutation('lib/pages/settings.dart','R05InstallActivityPage()')
+        self.mutation('lib/pages/settings.dart','R07ActivityCenterPage()')
     def test_remove_hosted_flutter_regression(self):
         self.mutation('.github/workflows/obtainx-r00-flutter.yml',
                       'flutter test --no-pub test/r05_operation_receipt_test.dart')

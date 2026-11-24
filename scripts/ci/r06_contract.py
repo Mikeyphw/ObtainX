@@ -13,7 +13,7 @@ INTEGRATION_BASE='main'
 FILES=(
   'lib/pages/app.dart',
   'lib/components/r06_version_tile.dart',
-  'lib/widgets/r05_install_activity_page.dart',
+  'lib/widgets/r07_activity_center_page.dart',
   'test/r06_app_details_test.dart',
   'test/app_page_version_actions_test.dart',
   'docs/ROADMAP.md',
@@ -53,14 +53,14 @@ def verify(root:Path=ROOT)->int:
  contains('lib/pages/app.dart',
   'R06VersionTile(', "ValueKey('r06-open-installed-app')",
   'app.installedInfo?.packageName == app.app.id',
-  "ValueKey('r06-install-history')",'R05InstallActivityPage(', 'packageId: app.app.id,',
+  "ValueKey('r06-install-history')",'R07ActivityCenterPage(', 'packageId: app.app.id,',
   "ValueKey('r06-whats-new-action')",'?r06QuickActions,', '?changeLogCard,')
  contains('lib/components/r06_version_tile.dart',
   'class R06VersionTile extends StatelessWidget','Semantics(',
   "label: '$label: $value",'SelectableText(', 'Wrap(')
- contains('lib/widgets/r05_install_activity_page.dart',
+ contains('lib/widgets/r07_activity_center_page.dart',
   'final String? packageId;', 'this.packageId',
-  'record.packageId == widget.packageId')
+  'widget.packageId != null && widget.packageId != x.packageId')
  contains('test/app_page_version_actions_test.dart',
   "ValueKey('r06-open-installed-app')",'packageReadable ? findsOneWidget : findsNothing')
  contains('test/r06_app_details_test.dart',

@@ -58,7 +58,9 @@ jobs:
       - name: Enforce consolidated R05 lifecycle and policy contracts
         run: python3 -B scripts/ci/r05_contract.py --check
       - name: Enforce R06 details, package-evidence and stacked source contracts
-        run: python3 -B scripts/ci/r06_contract.py --check
+      - name: R07 Activity Center source and negative contracts
+      run: python3 -B scripts/ci/r07_contract.py --check
+      run: python3 -B scripts/ci/r06_contract.py --check
       - name: Enforce original R03 resumable download and persistence contracts
         run: python3 -B scripts/ci/r03_contract.py --check
       - name: Enforce R04 GitHub Actions exact-identity and source contract

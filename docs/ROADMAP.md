@@ -1,3 +1,25 @@
+# ObtainX — R07 Activity Center implementation candidate (24 November 2026)
+
+**Verified source baseline:** merged PR #29 `main` at `181191cc9a09c9c3053d837a3dfb24e9d98bafa0`
+(tree `2f409c11f02e1698dc5619d0555015a6e3957e0a`). This is a new, independently reviewable R07 overlay;
+the historical R00–R06 sections below remain unchanged for audit.
+
+**R07 changes:** direct Activity Center tab, Settings and app-history
+routes, merged *read-only* R03/R05 journal projection, unique attempt
+notifications, status-gated actions and explicit unknown/approval
+resolution. No new install-success journal or source authority.
+
+**Acceptance:** source candidate until native schema-v3 Devtool
+validation, new PR source-bound required CI, CI24 and real Android
+device/notification/approval tests establish their independent gates.
+Release/signing remains separately unqualified. See `docs/R07_ACTIVITY_CENTER.md`.
+
+**Next:** R08 — Source reliability; R09 — Discovery and app list;
+R10 — Settings and accessibility; R11 — Integrations, policy and
+history; R12 — Release qualification.
+
+---
+
 # ObtainX — PR #29 forward integration into main (23 November 2026)
 
 **Exact pre-integration refs:** accepted `main` `990b3287e8a4d121be720d8684ebe255909d12b8` (PR #25), and

@@ -14,6 +14,7 @@ import 'package:obtainium/pages/apps.dart';
 import 'package:obtainium/pages/import_export.dart';
 import 'package:obtainium/pages/import_from_url_list.dart'
     show importUrlListEntries, urlImportEntriesFromLink;
+import 'package:obtainium/widgets/r07_activity_center_page.dart';
 import 'package:obtainium/pages/settings.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
@@ -117,7 +118,7 @@ class NavigationPageItem {
 
   NavigationPageItem(this.titleKey, this.icon, this.widget);
 
-  String get title => tr(titleKey);
+  String get title => titleKey == 'activityCenter' ? 'Activity center' : tr(titleKey);
 }
 
 /// Keeps the system navigation-bar padding stable while Android animates the
@@ -351,6 +352,10 @@ class HomePageState extends State<HomePage> {
       'settings',
       Icons.settings,
       SettingsPage(key: GlobalKey<SettingsPageState>()),
+    ),
+    NavigationPageItem(
+      'activityCenter', Icons.pending_actions_rounded,
+      const R07ActivityCenterPage(),
     ),
   ];
 

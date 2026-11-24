@@ -419,6 +419,21 @@ extension AppsProviderInstall on AppsProvider {
           reason: 'Installer returned success but matching Android/release proof is missing');
       }
     }
+    // A notification is optional UX; the R05 journal, never the notification,
+    // owns installer success/uncertainty. Notification failure cannot undo it.
+    try {
+      final latest = (await journal.list()).firstWhere((x) => x.id == attempt.id);
+      if (latest.stage == R05InstallStage.failed ||
+          latest.stage == R05InstallStage.handedOff ||
+          latest.stage == R05InstallStage.unknown) {
+        await NotificationsProvider().notifyR07Attention(
+          attemptId: latest.id, packageId: latest.packageId,
+          stage: latest.stage.name);
+      }
+    } catch (_) {
+      // No swallowed installation failure: this catch is only around the
+      // optional notification, after the authoritative journal settled.
+    }
   }
 
   Future<bool> _r05AdditionalApproval(R05OperationReceipt receipt,
@@ -428,6 +443,13 @@ extension AppsProviderInstall on AppsProvider {
     await R05OperationJournal.instance.settleIfOpen(
         receipt.id, R05InstallStage.awaitingApproval,
         reason: 'Optional extra approval required');
+    try {
+      await NotificationsProvider().notifyR07Attention(
+        attemptId: receipt.id, packageId: receipt.packageId,
+        stage: R05InstallStage.awaitingApproval.name);
+    } catch (_) {
+      // The optional notification does not affect the durable approval gate.
+    }
     final navigator = globalNavigatorKey.currentState;
     if (!interactive || navigator == null || !navigator.mounted) {
       // Preserve the file and review entry; no silent approval.

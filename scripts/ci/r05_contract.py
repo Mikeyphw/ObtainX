@@ -21,9 +21,10 @@ FILES={
         'recoverInterruptedOnce()', 'settleIfOpen(', 'uniqueUnresolved(', 'R05InstallStage.unknown',
         'R05InstallStage.awaitingApproval','Random.secure()'),
     'lib/widgets/r05_install_activity_page.dart':(
-        'class R05InstallActivityPage','class R05ExtraApprovalTile',
-        'R05OperationJournal.instance.list()', 'reconcileR05OperationReceipts()',
-        'Review / retry','not independently verified','r05ExtraApprovalPreference'),
+        'class R05ExtraApprovalTile', 'r05ExtraApprovalPreference'),
+    'lib/widgets/r07_activity_center_page.dart':(
+        'class R07ActivityCenterPage', 'R05OperationJournal.instance.list()',
+        'reconcileR05OperationReceipts()', 'Android confirmation is not independently established.'),
     'lib/providers/apps_provider_install.dart':(
         '_r05BeginAttempt(', 'sha256FileOffIsolate(primary.path)',
         '_r05AdditionalApproval(', '_r05CloseAttempt(',
@@ -40,8 +41,8 @@ FILES={
     'lib/providers/apps_provider_lifecycle.dart':(
         'R05OperationJournal.instance.recoverInterruptedOnce()',),
     'lib/pages/settings.dart':(
-        'R05InstallActivityPage()', 'R05ExtraApprovalTile()',
-        "ValueKey('r05-install-activity')"),
+        'R07ActivityCenterPage()', 'R05ExtraApprovalTile()',
+        "ValueKey('r07-activity-center')"),
     'test/r05_operation_receipt_test.dart':(
         'installer success and timer are never independent Android proof',
         'pending, approval, handoff and unknown are distinct durable states',

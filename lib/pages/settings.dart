@@ -26,6 +26,7 @@ import 'package:obtainium/components/ui_widgets.dart'
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/installers/shizuku_plugin.dart';
 import 'package:obtainium/main.dart';
+import 'package:obtainium/widgets/r07_activity_center_page.dart';
 import 'package:obtainium/widgets/r05_install_activity_page.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/app_sources/gitlab.dart';
@@ -1070,12 +1071,12 @@ class _UpdatesSection extends StatelessWidget {
         // eligible apps), as opposed to pull-to-refresh's foreground check of
         // only the currently visible list.
         const _RunBgUpdateCheckNowButton(),
-        ListTile(key: const ValueKey('r05-install-activity'),
+        ListTile(key: const ValueKey('r07-activity-center'),
           leading: const Icon(Icons.receipt_long_rounded),
-          title: const Text('Install activity and approvals'),
-          subtitle: const Text('Review unknown, pending and handed-off installation attempts'),
+          title: const Text('Activity Center'),
+          subtitle: const Text('Downloads, approvals, installs and recoverable attempts'),
           onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-            builder: (_) => const R05InstallActivityPage())),
+            builder: (_) => const R07ActivityCenterPage())),
         ),
         const R05ExtraApprovalTile(),
         FutureBuilder<AndroidDeviceInfo>(

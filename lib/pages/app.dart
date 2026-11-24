@@ -34,7 +34,7 @@ import 'package:obtainium/pages/apps.dart';
 import 'package:obtainium/pages/settings.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/widgets/r02f_p03_cancel_button.dart';
-import 'package:obtainium/widgets/r05_install_activity_page.dart';
+import 'package:obtainium/widgets/r07_activity_center_page.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -5405,13 +5405,13 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
                     key: const ValueKey('r06-install-history'),
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
-                        builder: (_) => R05InstallActivityPage(
+                        builder: (_) => R07ActivityCenterPage(
                           packageId: app.app.id,
                         ),
                       ),
                     ),
                     icon: const Icon(Icons.history_rounded),
-                    label: const Text('Install history'),
+                    label: const Text('Activity history'),
                   ),
                 ],
               ),

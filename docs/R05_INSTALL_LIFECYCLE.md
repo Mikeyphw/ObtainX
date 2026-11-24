@@ -1,5 +1,12 @@
 # R05 transactional install lifecycle and verifiable receipts
 
+> **Historical R05 milestone.** The R05 PR was based on the R04 feature branch.
+> The next R06 PR is based on the exact R05 feature branch; therefore the
+> active `config/delivery-required-ci.json` base and the regression assertions
+> advance to R05 in the R06 overlay. The six workflow IDs and separate release
+> qualification remain unchanged. Do not reinterpret the historical R05 text
+> below as the active base contract for subsequent stacked PRs.
+
 R05 introduces source-bound, per-attempt durable operation records and a recovery surface for Android installs. It retains R02 install/precommit/security checks, R03 byte verification, and R04 GitHub Actions provenance. It never equates an installer intent launch or a generic broadcast with a verified release. A successful install claim requires an independent installed package and exact source-bound pending-release check (and expected version code where available); local archive import retains its stronger signed-byte check. Build provenance, downloaded file digest, APK archive certificate and installed signer are **distinct** facts; missing evidence remains `null`.
 
 ## Transaction and recovery model

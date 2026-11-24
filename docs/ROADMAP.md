@@ -1,10 +1,176 @@
+# ObtainX — PR #29 forward integration into main (23 November 2026)
+
+**Exact pre-integration refs:** accepted `main` `990b3287e8a4d121be720d8684ebe255909d12b8` (PR #25), and
+R06-containing R05 branch `1cd3a8701af59b165f4a0b33db480b2c6e0c624d` (PR #26 merged into R05).
+**Remediation:** merge `main` into the existing PR #29 branch with an
+exact-tree-preserving merge; set the committed required-CI base to `main`;
+update R04/R05/R06 source and negative contracts together. The six
+required workflow identities, release separation, native approval and
+original Android installer baseline safeguards are unchanged.
+**Acceptance:** source candidate until native Devtool validation,
+non-force PR #29 update, and six *new* exact-head required CI checks
+pass. CI24, physical Android device and signed release remain separate
+and are **NOT ATTESTED** by this reconciliation. No direct main write.
+**Remaining:** R07 — Activity Center; R08 — Source reliability;
+R09 — Discovery and app list; R10 — Settings and accessibility;
+R11 — Integrations, policy and history; R12 — Release qualification.
+
+---
+
+# ObtainX — Post-consolidation reconciliation (23 November 2026)
+
+**Current authoritative GitHub baseline:** `main` at `bde1f1234c88a939477b988c5b5fd6fbcb6696a8`, merged through PR #28. The preceding R01–R04 stack (#15–#24) is contained in the accepted Git history; superseded PRs #16–#24 are closed, not separately merged. Existing security acceptance was source-specific and is not physical-device or release qualification.
+
+**Pre-merge CI:** six independent workflows passed on exact integration source `bdd26247bd7c9b3a2bbd8bcb66219bb4d58d0c8c` (R00 contracts `45245822651`, Flutter `45245823008`, API36 `45245822596`, RT02 `45245822338`, RT02B `45245822529`, RT02C `45245822723`). **Post-merge:** R00 push source integrity passed for `main` at `bde1f1234` (run `45247737093`). This is not CI24 or physical/release acceptance.
+
+**Current drafts:** R05 PR #25 (transactional installs, verifiable receipts, recovery) is rebased *logically by non-force merge* onto accepted `main`; R06 PR #26 (app details, clearer version decisions, install history) follows the updated R05 branch. Both PRs remain drafts with independent fresh exact-head six-workflow checks required. No draft was merged, no force push was used, and no Gradle was invoked locally. R06's historical 18 November snapshot below is retained for audit, but its old PR/main/CI states are superseded by this section.
+
+**Remaining overlays:** R05 — Transactional installs; R06 — App details and history; R07 — Activity Center; R08 — Source reliability; R09 — Discovery and app list; R10 — Settings and accessibility; R11 — Integrations, policy and history; R12 — Release qualification. Each remains independently subject to full implementation, regression and acceptance gates.
+
+---
+
+# ObtainX — Canonical Roadmap and Qualification Snapshot
+
+**Snapshot date:** 18 November 2026 (UTC; verified after 21:07 UTC)  
+**Repository:** [Mikeyphw/ObtainX](https://github.com/Mikeyphw/ObtainX)  
+**Canonical path:** `docs/ROADMAP.md`  
+**Original specification:** 10 November 2026; **restored intermediate snapshot:** 11 November 2026  
+**Scope:** full engineering milestones **R00–R12**, Android runtime lanes RT01–RT02F, and release milestones M0–M6.  
+**Evidence status:** GitHub repository/PR/check-run metadata rechecked 18 November 2026. Evidence here is historical and SHA-specific, not an evergreen promise about future branch heads.
+
+> **How to read this file:** This dated snapshot is the current status and execution order. The complete 10 November R00–R12 specification is preserved **unchanged** in the appendix below and remains the feature/acceptance baseline. Its original “proposed” statements, old implementation status and historical delivery example do not override this newer evidence or the current Devtool v3.2 source contract. Any later branch, CI or release claim must be reverified against its own exact SHA.
+
+## A. Source-of-truth and merge status (18 November)
+
+- `main` HEAD: `538a9ba5c57382ca717a87528ac269eeae7ae826` (R00 bootstrap). It **does not** yet contain the R01–R05 stacked PR implementations.
+- Latest implementation: [PR #25](https://github.com/Mikeyphw/ObtainX/pull/25), branch `feature/obtainx-r05-transactional-install-20261116`, exact HEAD `e4ac28fd7bd7a45ca0df977d51bac824087ce72b`, Git tree `5afb5f2eb9a91e2a29fbcf2b47ab72501e60f1b5`. The PR base is R04 branch `feature/obtainx-r04-actions-source-native-20261115` at `86ad4d0fe16e484f355ac71c7d05fdb2505ea21b`.
+- GitHub reports PR #25 **open, draft, mergeable/clean**, with 25 changed files, **no submitted reviews and no review threads** at inspection. Clean merge status and green hosted CI do **not** constitute an approval to merge.
+- PRs **#1–#25** are **open and unmerged**, forming a dependency stack. Do not merge from the top, skip reviewing parents, squash away audit provenance without review, force-push, auto-merge, or claim `main` contains features that exist only in PR branches.
+- A future R06 branch should depend on the reviewed R05 feature state, not on R00 `main` as if R01–R05 were merged. Keep a dedicated, clean named feature branch, with an explicitly chosen reviewed PR base, for each native delivery.
+
+### GitHub PR inventory at the snapshot
+
+This full list is a snapshot of every open, stacked PR head through R05, not a claim that all earlier heads were separately requalified on 18 November. Each full SHA is repository-reported.
+
+| PR | Workstream | Exact PR HEAD | State |
+|---|---|---|---|
+| [#1](https://github.com/Mikeyphw/ObtainX/pull/1) | R01: archive limits and atomic extraction | `3a57cfdced5940d3cdebd2396ba9c86c21d4926c` | Open, unmerged |
+| [#2](https://github.com/Mikeyphw/ObtainX/pull/2) | R02: deterministic APK/split plans | `dd297f3e0e503e1a1b59b0ce2a0b629e05808204` | Open, unmerged |
+| [#3](https://github.com/Mikeyphw/ObtainX/pull/3) | RT01: API36 bootstrap/installed APK proof | `eee62aa6d0b6eadec5543d6ed0ee67e3fc57e373` | Open, unmerged |
+| [#4](https://github.com/Mikeyphw/ObtainX/pull/4) | RT02A: real standalone/split install | `c1ec76cc2b34147c171a9be40c62fdc6411eefac` | Open, unmerged |
+| [#5](https://github.com/Mikeyphw/ObtainX/pull/5) | RT02B: signature/downgrade rejection | `3d435792348e719a1f366c1ee44f5a2529ba0bc3` | Open, unmerged |
+| [#6](https://github.com/Mikeyphw/ObtainX/pull/6) | RT02C: archive-to-installer API36 | `4ffa6203e15973b3c2efe9bf4afc1af3997814af` | Open, unmerged |
+| [#7](https://github.com/Mikeyphw/ObtainX/pull/7) | RT02C: single-session optimization | `b5d0d5f3419562ae3c80916b03ec1d75f24d86ae` | Open, unmerged |
+| [#8](https://github.com/Mikeyphw/ObtainX/pull/8) | RT02D: device split selection / OBB safety | `678d5a20807674c26325d29a64b27df6ec13384b` | Open, unmerged |
+| [#9](https://github.com/Mikeyphw/ObtainX/pull/9) | RT02E: verified OBB handling | `112a09d4c1cc852717a9965e7e30cf2f85898546` | Open, unmerged |
+| [#10](https://github.com/Mikeyphw/ObtainX/pull/10) | RT02F: external handoff and CI routing | `90888b0fcea5e89420afb48accfa8972d5f49c22` | Open, unmerged |
+| [#11](https://github.com/Mikeyphw/ObtainX/pull/11) | RT02F: external session abandonment | `0dac5a2aba90118bfb6f050b86526851ae3a4e8e` | Open, unmerged |
+| [#12](https://github.com/Mikeyphw/ObtainX/pull/12) | RT02F: UI cancellation/recovery | `1743ee8bbb6e63170be89563a0169c49afafeee0` | Open, unmerged |
+| [#13](https://github.com/Mikeyphw/ObtainX/pull/13) | RT02F: external provenance / backend matrix | `1003037dbd0d0517b6846eb1a53a3337e294a414` | Open, unmerged |
+| [#14](https://github.com/Mikeyphw/ObtainX/pull/14) | RT02F: external decline | `ffa82a8650a8f7772f1f85e98b0aa7661de05afb` | Open, unmerged |
+| [#15](https://github.com/Mikeyphw/ObtainX/pull/15) | RT02F: external approval / signed bytes | `14625b01043def888127f0637bb884539d9cb0e0` | Open, unmerged |
+| [#16](https://github.com/Mikeyphw/ObtainX/pull/16) | RT02F: external approval diagnostics | `50184478b9932ef725679be8151c93c9e4b55b71` | Open, unmerged |
+| [#17](https://github.com/Mikeyphw/ObtainX/pull/17) | RT02F: full source/approval contracts | `3af3de8c26a2164d3cbdecd8da63c982d4517f1e` | Open, unmerged |
+| [#18](https://github.com/Mikeyphw/ObtainX/pull/18) | RT02F: native approval broadcast | `498f52e1f42221d6914303aa70e3c7215af199fc` | Open, unmerged |
+| [#19](https://github.com/Mikeyphw/ObtainX/pull/19) | RT02F: exact-SHA CI path gates | `5fe3639844f2c1c0f210c12acb433fd0b92472ed` | Open, unmerged |
+| [#20](https://github.com/Mikeyphw/ObtainX/pull/20) | RT02F: adversarial / Shizuku-Dhizuku paths | `c3b96b8cda72f1a4b2de96b594e9cc85ad8e5dfa` | Open, unmerged |
+| [#21](https://github.com/Mikeyphw/ObtainX/pull/21) | RT02F: device/OBB profile receipts | `17662996fa1295867aa43c12afb1b7f5f8820dcc` | Open, unmerged |
+| [#22](https://github.com/Mikeyphw/ObtainX/pull/22) | R02: consolidated local import and install review | `65156fe19438f9a7c119cd7aaa80d9bc8ec91bf9` | Open, unmerged |
+| [#23](https://github.com/Mikeyphw/ObtainX/pull/23) | R03: resumable downloads and persistence | `1874e6a09888adcba0f12a2bbc55788c7d5c76ba` | Open, unmerged |
+| [#24](https://github.com/Mikeyphw/ObtainX/pull/24) | R04: GitHub Actions source channel | `86ad4d0fe16e484f355ac71c7d05fdb2505ea21b` | Open, unmerged |
+| [#25](https://github.com/Mikeyphw/ObtainX/pull/25) | R05: transactional installs and receipts | `e4ac28fd7bd7a45ca0df977d51bac824087ce72b` | Open, unmerged, draft |
+
+## B. Milestone status — evidence-limited
+
+| Phase | Implemented / supported evidence through 18 November | Remaining acceptance or next action |
+|---|---|---|
+| **R00 — Baseline and contract audit** | Baseline commit on `main`; active R00 source/Flutter CI and scoped-test routing at later exact PR SHAs | Continue auditing source drift, current tests/gates and upstream; no unverified CI or stale contracts |
+| **R01 — Archive security / supply chain** | Bounded atomic archive extractor, adversarial ZIP/TAR protections from PR #1; inheritance covered by later hosted tests | Protected production signing identity, redirection/credentials/release security need separate end-to-end assurance; not a release-signing pass |
+| **R02 — Install plans and runtime safety** | PRs #2–#22: APK/split plan, API36 real standalone/split install and negative gates, archive-to-installer paths, ABI/locale/density and SDK selection, OBB safety, cancellation, external handoff, availability checks, local SAF import | A hosted emulator is not every physical device or installer; unsupported OBB and Shizuku/Dhizuku privilege paths remain explicitly bounded; physical-matrix evidence is separate |
+| **R03 — Resumable download core** | PR #23 exact-HEAD required CI **6/6 PASS**; validator-bound HTTP Range/ETag resume, byte/hash receipts, retry and restart contracts documented | Android device/network interruption and production source/credential behavior remain independently testable; do not infer a release pass |
+| **R04 — GitHub Actions source channel** | PR #24 exact-HEAD required CI **6/6 PASS**; workflow/run/attempt/artifact selection, bounded pages, optional manual history, redirects with credential isolation, ZIP digest gate | Live private-token, device installation, source-specific redirects and signed release remain separate checks; ZIP digest ≠ APK signer/attestation |
+| **R05 — Transactional installs and receipts** | PR #25 exact-HEAD required CI **6/6 PASS**, including real API36 installer rerun attempt 2; journal/receipts, approval recovery surface, observed futures, unknown/cancelled/confirmed distinctions | Still **draft/unmerged**; final code review, physical-device UX/installer evidence, accessibility, signing and release tests outstanding. Do not apply another failure-repair overlay solely for already-green CI |
+| **R06 — App details and version UX** | **Next implementation milestone**; not yet qualified | Full R06 scope and acceptance plan below; one consolidated native implementation, current tests/docs and verified CI |
+| **R07 — Activity Center and operation UX** | **Next implementation milestone after/alongside R06 planning**; R05 supplies a *basic* Settings → Install activity and approvals screen, not the full R07 Activity Center | Unified check/download/install view, durable operation navigation and actionable recovery, no duplicate state engines; see acceptance plan below |
+| **R08 — Source/version reliability** | Planned | Version/prerelease, regex, ARM64, polling, source adaptors, deep-link regressions with named reproducers |
+| **R09 — Discovery, list and picker** | Planned; some Actions/manual selection primitives already exist in R04 | Distinct Check vs Update, multi-source grouping, compatible artifact picker, explicit empty states; build upon existing UI |
+| **R10 — Settings, accessibility and responsive UI** | Planned; limited settings controls added during R05 | Search, clear everyday/expert settings, TalkBack, scaling, keyboard/TV, localization, layout tests |
+| **R11 — Integrations, policy and history** | Planned | Safe Tasker/App Manager/deep links, receipt history/export, OS-compliant scheduling and permission boundaries |
+| **R12 — Device, signing and release qualification** | **NOT QUALIFIED** | Complete real-device/backend matrix, provenance/signing, negative security, accessibility and publication evidence |
+
+**Status vocabulary:** `SOURCE_PASS`, `HOSTED_CI_PASS`, `DEVICE_RUNTIME_PASS` and `RELEASE_QUALIFIED` are separate judgments. The six green hosted workflows establish only the named required hosted lane at the exact PR HEAD. Hosted Android emulator cases are runtime evidence **for those specific emulator scenarios**, not physical-device, external-backend, full-product or release qualification. Skipped optional checks are not passes.
+
+## C. Exact-HEAD CI ledger through R05
+
+The six workflow names/IDs below match the committed `config/delivery-required-ci.json` on the R05 branch. Every linked workflow run was checked via its exact SHA-associated GitHub check-run; each of the six required workflows reports **success** for all four phase heads in this table. Each phase's Hosted Flutter workflow also contains an **optional scoped-analysis job marked `skipped`** plus successful Android debug/Flutter qualification and exact-SHA classifier jobs; the skipped job is **not** included in the six passes.
+
+| Phase / PR | Exact SHA | GitHub PR state (18 Nov) | Required workflow result |
+|---|---|---|---|
+| [R02 / #22](https://github.com/Mikeyphw/ObtainX/pull/22) | `65156fe19438f9a7c119cd7aaa80d9bc8ec91bf9` | Open, unmerged | 6/6 PASS |
+| [R03 / #23](https://github.com/Mikeyphw/ObtainX/pull/23) | `1874e6a09888adcba0f12a2bbc55788c7d5c76ba` | Open, unmerged | 6/6 PASS |
+| [R04 / #24](https://github.com/Mikeyphw/ObtainX/pull/24) | `86ad4d0fe16e484f355ac71c7d05fdb2505ea21b` | Open, unmerged | 6/6 PASS |
+| [R05 / #25](https://github.com/Mikeyphw/ObtainX/pull/25) | `e4ac28fd7bd7a45ca0df977d51bac824087ce72b` | Open, **draft**, unmerged | 6/6 PASS |
+
+| Required workflow (ID) | R02 #22 | R03 #23 | R04 #24 | R05 #25 |
+|---|---|---|---|---|
+| R00 Source and Contract Integrity (`413437262`) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43675315960) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43751711157) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43884084054) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/44393146089) |
+| R00 Hosted Flutter Qualification (`413437265`) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43675316045) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43751711085) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43884083975) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/44393146029) |
+| R02 API36 Emulator Bootstrap (`413666807`) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43675316000) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43751711112) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43884083981) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/44393146046) |
+| R02 RT02 Real System Installer (`413864665`) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43675316026) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43751711107) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43884083729) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/44393146191) |
+| R02 RT02B Negative Installer (`414136383`) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43675316004) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43751711136) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43884083910) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/44393146012) |
+| R02 RT02C Archive-to-Installer (`414158361`) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43675316070) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43751711113) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/43884083997) | [PASS](https://github.com/Mikeyphw/ObtainX/actions/runs/44393146044) |
+
+**RT02 controlled rerun:** R05 `rt02-real-install` [run 44393146191](https://github.com/Mikeyphw/ObtainX/actions/runs/44393146191), **attempt 2**, `pull_request` event, head SHA `e4ac28fd7bd7a45ca0df977d51bac824087ce72b`, GitHub status `completed/success`, updated **18 November 2026, 21:07:16 UTC**. No source commit changed between attempts. The operator-provided installation report records one explicitly approved standalone APK installation; a split APK update confirmed by Android without an extra approval dialog; and independent package-state verification for both. The report also describes a recovered, explicitly reported pre-Dart installer-bridge failure. **Those scenario-level observations are from the operator report**; this snapshot independently verified the run's successful metadata, not the raw device logs.
+
+**Not equivalent to full acceptance:** This R05 result does not assert that Shizuku/Dhizuku, every external installer, real private GitHub sources, physical hardware or release signing were exercised. The PR remains draft; approval and merge are future actions.
+
+## D. Immediate next implementation: R06 — App details clarity
+
+**Goal:** make an app's current state, trustworthy version evidence and next safe action understandable without prior ObtainX knowledge, preserving Material 3 Expressive and current multi-source/grouping/installer backends.
+
+1. **Primary information hierarchy:** visible status → **Installed** version → **Available** version → primary action → safe Markdown **What's new** → technical/verification details. Different package-distributor versionCode schemes and unknown comparisons must show explicit uncertainty, not inferred equivalence.
+2. **Direct actions:** context-aware `Check`, `Update`/`Download`/`Install`, and a clear **Open app** when installed; access to `History`/`Options` without icon-press tricks. Never show an invalid or falsely enabled action.
+3. **Evidence labels:** visually and accessibly separate source listing, downloaded ZIP/hash proof, APK signer comparison, attestation, and Android-installed state. A source workflow's success is not a signed APK proof.
+4. **Release notes:** safe GitHub Markdown, readable text/links/expansion, graceful missing/oversized notes. Avoid rendering active HTML or leaking auth tokens through links.
+5. **Acceptance:** source/installed/available state fixtures (up-to-date, newer, prerelease, versionCode mismatch, unverified, error, no installed package, multi-source); widget/golden/screen-reader and large-text tests; regression coverage for existing navigation, settings, grouping and install states. Targeted Flutter and native overlay checks, then six required exact-HEAD hosted workflows. Physical usability evidence is separate.
+
+**R06 exit:** one consolidated, source-pinned change with reviewed source, current tests, docs and non-obsolete gates; all required exact-HEAD hosted workflows pass, and remaining physical/a11y limitations are recorded rather than silently waived.
+
+## E. Next implementation: R07 — Full Activity Center
+
+**Goal:** evolve R05's minimal install activity/approval screen and R03's download persistence into **one user-visible cross-stage operation surface** without inventing a duplicate journal or another success authority.
+
+1. **Unified activity timeline:** queued checks, downloads, verification, extraction, scanning, approval, Android handoff, confirmation, failed/cancelled/unknown and completed entries from the existing durable R03/R05 records. Preserve exact source/listing/attempt identity and correct ownership for concurrent jobs.
+2. **State-correct controls:** `Review`, `Resume`, `Retry`, `Cancel`, `Details`, `Open` only when allowed; present a consistent path back to the Android-mandated approval UI when supported, and an actionable `unknown` outcome when confirmation is unavailable.
+3. **Persistent/recoverable UX:** maintain correct activity across page navigation, process death and restart; surface no fabricated success from external installer intents, callbacks or timeouts. Reconcile against independent installed package/signature/version evidence.
+4. **Progress/error semantics:** accurate verified bytes and totals, indeterminate status for unknown totals, clear per-app failures (signature, ABI, SDK, split, expired artifact, rate-limit), notifications linked to the exact operation, and no UI showing 100% until verified completion.
+5. **Acceptance:** unit, widget, interruption/restart, concurrency, cancellation, approval-denial, stale receipt, cross-listing attribution, external handoff and notification-route tests; legacy R02 recovery hook retained after R05 journal recovery. Hosted API36 real-install/negative/archive paths stay required. Real-device notification/approval behavior and Android OS background limits separately recorded.
+
+**R07 exit:** one consolidated native overlay for the complete milestone, with updated existing test contracts rather than historical HF/Pxx scaffolding. All required hosted workflows must pass at the resulting exact HEAD; device and release evidence are not inferred.
+
+## F. Delivery order, review and safety
+
+1. **Finish R05 PR #25 review:** ensure exact-HEAD tests and source semantics still match. Resolve legitimate comments; when review-complete, mark ready for review, then consider a separately approved merge in dependency order. A green hosted check is not review approval, physical release permission or authorization to auto-merge.
+2. **Implement R06** on a clean named source-bound feature worktree. Review current upstream app-details implementation first; preserve existing Material 3 Expressive and backend behavior. Deliver all R06 functionality/tests/docs in one consolidated native Devtool overlay.
+3. **Implement R07** building on R03 download state, R05 install receipts and the R06 details UX, with a single Activity Center state authority and no duplicated operations. Keep R06 and R07 independently reviewable milestones; run cross-milestone integration tests.
+4. **Then R08–R09**, version/source regression fixes, discovery and compatible picker; **R10**, settings/accessibility and locales; **R11**, integrations/history; **R12**, complete device signing/security/release acceptance. R01/R02 security and physical-device gaps stay visible throughout; release-critical gaps cannot be postponed silently.
+5. **Stack cleanup:** PRs #1–#25 are still open. Plan reviewed bottom-up consolidation without resetting, rebasing, force-pushing, auto-merging or overwriting unrelated work. Retain exact provenance, user worktree safety and GitHub dependency review.
+
+**Native delivery contract current at this snapshot:** Devtool source `Mikeyphw/devtool` `main` HEAD `cd10dbe2e6dfa85ce30e12fa869a8c0313a78d40`; committed `LAUNCHER_CONTRACT_VERSION = '3.2.0'`. Discover/verify latest compatible v3.1+ again **at each delivery**, rather than treating this snapshot as a future runtime pin. Native launcher must source-bind origin, target branch, HEAD/tree, preimage blobs and payload digest; use native validation, atomic commit and durable session; no manual file patch/copy as a substitute. Use native terminal (`DEVTOOL_EXECUTION_PRESENTATION=plain`, `DEVTOOL_JOB_UI=plain`, `DEVTOOL_TEXTUAL_APPLY_HOST=0`, `DEVTOOL_TEXTUAL_EXECUTION_HOST=0`) and `--no-clipboard` as documented in the current contract; honor `NO_COLOR`, `CLICOLOR=0`, `TERM=dumb`. A committed package must be resumed using session commands instead of reapplied. Validate actual PR HEAD and hosted checks, and never equate skipped tests with PASS. If the runtime contract evolves, re-evaluate, not silently repin immutable packages.
+
+**Historical specification handling:** Section G below reproduces the entire 10 November plan, including its then-current implementation assumptions and launcher example, for traceability. The dated sections above take precedence for current status and delivery behavior. No original acceptance criteria are waived. This document is a roadmap status update, **not** evidence of a new native apply, CI run, device install, signing operation or merge.
+
+## G. Complete original R00–R12 specification (10 November 2026; preserved verbatim)
+
+---
+
 # ObtainX Fork — Consolidated Development Roadmap
 
-**Planning baseline:** 10 November 2026
-**Recommended upstream:** `bikram-agarwal/ObtainX` (not `wizzwuz/ObtainX`)
-**Upstream `main` inspected:** `aea18592413de992e813bd063cb9ad453259582b` (4 October 2026)
-**Feature reference:** `wizzwuz/ObtainX@f23d202c219ed328b19edaedfff92c49bf0fd348` (24 October 2026), eight commits ahead of ObtainX `main`
-**Other pending reference:** PR [#368](https://github.com/bikram-agarwal/ObtainX/pull/368), targeted at `sync/upstream_v1.6.17_20261004`, not assumed merged into `main`
+**Planning baseline:** 10 November 2026  
+**Recommended upstream:** `bikram-agarwal/ObtainX` (not `wizzwuz/ObtainX`)  
+**Upstream `main` inspected:** `aea18592413de992e813bd063cb9ad453259582b` (4 October 2026)  
+**Feature reference:** `wizzwuz/ObtainX@f23d202c219ed328b19edaedfff92c49bf0fd348` (24 October 2026), eight commits ahead of ObtainX `main`  
+**Other pending reference:** PR [#368](https://github.com/bikram-agarwal/ObtainX/pull/368), targeted at `sync/upstream_v1.6.17_20261004`, not assumed merged into `main`  
 **Status of everything below:** Proposed for the new fork unless explicitly described as already existing or confirmed in reviewed code. Prior audits were source/metadata reviews, not Android runtime qualification.
 
 ## 1. Product direction

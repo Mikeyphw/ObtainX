@@ -20,6 +20,7 @@ STAGES = (
     'OX_P03_DART_STAGE=REAL_APP_PAGE_CANCEL_TAPPED',
     'OX_P03_DART_STAGE=APP_OWNED_CANCEL_RESULT_VERIFIED',
 )
+POST_TAP_CHECKPOINTS = ('OX_P03_DART_CHECK=OWNER_CANCEL_REQUESTED', 'OX_P03_DART_CHECK=PROVIDER_INSTALL_REJECTED', 'OX_P03_DART_CHECK=NATIVE_TERMINAL_ID_MATCHED', 'OX_P03_DART_CHECK=ANDROID_CANCELLED_CONFIRMED', 'OX_P03_DART_CHECK=ORIGINAL_APK_BYTES_CONFIRMED', 'OX_P03_DART_CHECK=NATIVE_CLOSURE_PROVED')
 CATEGORIES = (
     ('P03_FIXTURE_SHA_MISSING', 'P03 fixture SHA256 missing'),
     ('P03_FIXTURE_HTTP_REFUSED', 'P03 fixture HTTP refused'),
@@ -63,6 +64,9 @@ def classify(log_text: str, process_rc: int | None, last_runner_stage: str,
     if not re.fullmatch(r'[0-9]{1,16}',str(run_id)):
         raise ValueError('invalid Actions run identifier')
     marker_counts = [log_text.count(m) for m in STAGES]
+    post_tap_counts = [log_text.count(m) for m in POST_TAP_CHECKPOINTS]
+    post_tap_indices = [i+1 for i,n in enumerate(post_tap_counts) if n == 1]
+    post_tap_duplicates = any(n > 1 for n in post_tap_counts)
     present = [i+1 for i,n in enumerate(marker_counts) if n == 1]
     duplicate = any(n > 1 for n in marker_counts)
     relevant = log_text[-262144:]
@@ -81,6 +85,8 @@ def classify(log_text: str, process_rc: int | None, last_runner_stage: str,
         'last_runner_stage':stage,
         'unique_dart_marker_indices':present,
         'duplicate_dart_stage_markers':duplicate,
+        'post_tap_checkpoint_indices':post_tap_indices,
+        'duplicate_post_tap_checkpoints':post_tap_duplicates,
         'failure_categories':categories,
         'private_log_sha256':hashlib.sha256(log_bytes).hexdigest(),
         'private_log_byte_count':len(log_bytes),

@@ -16,6 +16,7 @@ import 'package:obtainium/app_sources/apkmirror.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/components/app_bottom_sheet.dart';
 import 'package:obtainium/components/app_page_section_title.dart';
+import 'package:obtainium/components/r06_version_tile.dart';
 import 'package:obtainium/components/app_smooth_surface.dart';
 import 'package:obtainium/components/category_action_chip.dart';
 import 'package:obtainium/components/ui_widgets.dart' show ExplainedWhenOff;
@@ -33,6 +34,7 @@ import 'package:obtainium/pages/apps.dart';
 import 'package:obtainium/pages/settings.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/widgets/r02f_p03_cancel_button.dart';
+import 'package:obtainium/widgets/r05_install_activity_page.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -3386,6 +3388,8 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
       );
     }
 
+    // R06 retains the authoritative source/version decision engine. These
+    // accessible blocks are presentation-only and never imply installation.
     Widget versionRow(
       BuildContext ctx,
       String label,
@@ -3394,58 +3398,17 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
       bool versionCode = false,
       String? osInstalledVersion,
     }) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Row(
-          // Centred, not baseline-aligned: a label that wraps to two lines in a
-          // longer locale would otherwise pin the value to its first line and
-          // leave it floating at the top of the row.
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: _versionRowLabelWidth,
-              child: Text(
-                label,
-                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Wrap(
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  SelectableText(
-                    value,
-                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.w500,
-                      fontSize: 14,
-                      fontStyle: pseudoVersion ? FontStyle.italic : null,
-                    ),
-                  ),
-                  if (pseudoVersion) versionChip(ctx, tr('pseudoVersion')),
-                  if (versionCode) versionChip(ctx, tr('versionCode')),
-                  if (pseudoVersion &&
-                      osInstalledVersion != null &&
-                      osInstalledVersion.isNotEmpty)
-                    SelectableText(
-                      '${tr('osInstalledVersion')}: $osInstalledVersion',
-                      style: Theme.of(ctx).textTheme.labelSmall?.copyWith(
-                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
+      return R06VersionTile(
+        label: label,
+        value: value,
+        annotation: pseudoVersion && osInstalledVersion != null &&
+                osInstalledVersion.isNotEmpty
+            ? '${tr('osInstalledVersion')}: $osInstalledVersion'
+            : null,
+        indicators: <Widget>[
+          if (pseudoVersion) versionChip(ctx, tr('pseudoVersion')),
+          if (versionCode) versionChip(ctx, tr('versionCode')),
+        ],
       );
     }
 
@@ -3455,46 +3418,13 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
       required bool skipActive,
       bool filtered = false,
     }) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Row(
-          // Centred, not baseline-aligned: a label that wraps to two lines in a
-          // longer locale would otherwise pin the value to its first line and
-          // leave it floating at the top of the row.
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: _versionRowLabelWidth,
-              child: Text(
-                tr('latest'),
-                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Wrap(
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  SelectableText(
-                    value,
-                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.w500,
-                      fontSize: 14,
-                    ),
-                  ),
-                  if (skipActive) versionChip(ctx, tr('latestVersionSkipped')),
-                  if (filtered) versionChip(ctx, tr('filtered')),
-                ],
-              ),
-            ),
-          ],
-        ),
+      return R06VersionTile(
+        label: tr('latest'),
+        value: value,
+        indicators: <Widget>[
+          if (skipActive) versionChip(ctx, tr('latestVersionSkipped')),
+          if (filtered) versionChip(ctx, tr('filtered')),
+        ],
       );
     }
 
@@ -4501,18 +4431,6 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
             app?.app.latestVersion ?? '-',
           ),
         );
-        if (changeLogFn != null || app?.app.releaseDate != null) {
-          versionCardChildren.add(
-            versionRowWithLink(
-              pageThemeContext,
-              tr('changelog'),
-              app?.app.releaseDate == null
-                  ? tr('changes')
-                  : formatDateTimeToMinute(app!.app.releaseDate!),
-              changeLogFn,
-            ),
-          );
-        }
         if ((app?.app.apkUrls.length ?? 0) > 0) {
           versionCardChildren.add(
             versionRowWithLink(
@@ -4568,18 +4486,6 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
             filtered: app != null && appHasActiveReleaseFilter(app.app),
           ),
         );
-        if (changeLogFn != null || app?.app.releaseDate != null) {
-          versionCardChildren.add(
-            versionRowWithLink(
-              pageThemeContext,
-              tr('changelog'),
-              app?.app.releaseDate == null
-                  ? tr('changes')
-                  : formatDateTimeToMinute(app!.app.releaseDate!),
-              changeLogFn,
-            ),
-          );
-        }
         if ((app?.app.apkUrls.length ?? 0) > 0) {
           versionCardChildren.add(
             versionRowWithLink(
@@ -5076,6 +4982,26 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
         headerStripe: verdictStripe,
         cardWatermark: verdictWatermark,
       );
+      // R06: release notes stay source-selected and use the existing safe
+      // Markdown dialog; an absent changelog stays absent.
+      final Widget? changeLogCard =
+          changeLogFn == null && app?.app.releaseDate == null
+          ? null
+          : _materialAppPageSectionCard(
+              pageThemeContext,
+              tr('changelog'),
+              <Widget>[
+                if (app?.app.releaseDate != null)
+                  Text(formatDateTimeToMinute(app!.app.releaseDate!)),
+                if (changeLogFn != null)
+                  TextButton.icon(
+                    key: const ValueKey('r06-whats-new-action'),
+                    onPressed: changeLogFn,
+                    icon: const Icon(Icons.article_outlined),
+                    label: Text(tr('changes')),
+                  ),
+              ],
+            );
       final Widget? securityCard = securityCardChildren.isEmpty
           ? null
           : _materialAppPageSectionCard(
@@ -5458,6 +5384,38 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
               ),
             );
 
+      // Only Android's independent installed package record permits Open;
+      // a pseudo version, download receipt or external handoff cannot.
+      final Widget? r06QuickActions = app == null || _editMode
+          ? null
+          : Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  if (app.installedInfo?.packageName == app.app.id)
+                    OutlinedButton.icon(
+                      key: const ValueKey('r06-open-installed-app'),
+                      onPressed: () => packageManager.openApp(app.app.id),
+                      icon: const Icon(Icons.open_in_new_rounded),
+                      label: Text(tr('openApp')),
+                    ),
+                  TextButton.icon(
+                    key: const ValueKey('r06-install-history'),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => R05InstallActivityPage(
+                          packageId: app.app.id,
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.history_rounded),
+                    label: const Text('Install history'),
+                  ),
+                ],
+              ),
+            );
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -5466,6 +5424,8 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
           ?trackOnlyInstalledErrorCard,
           if (buttonsAtTop && actionButtonsWidget != null) actionButtonsWidget,
           versionCard,
+          ?r06QuickActions,
+          ?changeLogCard,
           ?securityCard,
           detailsCard,
           if (app?.app.additionalSettings['about'] is String &&

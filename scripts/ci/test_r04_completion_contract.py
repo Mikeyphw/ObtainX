@@ -58,11 +58,11 @@ class R04FinalMutationTests(unittest.TestCase):
     def test_required_ci_policy_cannot_swap_workflow_id(self):
         self.mutated('config/delivery-required-ci.json',
           '"workflow_id": 413437262', '"workflow_id": 413437263')
-    def test_stacked_r05_pr_base_must_match_committed_policy(self):
+    def test_forward_integrated_r06_pr_base_must_match_committed_policy(self):
         # Mutate the actual CI policy, not the assertion itself. This must
         # fail closed while keeping all six exact workflow ID gates intact.
         self.mutated('config/delivery-required-ci.json',
-          '"base_branch": "feature/obtainx-r04-actions-source-native-20261115"',
+          '"base_branch": "main"',
           '"base_branch": "feature/obtainx-r03-resumable-download-engine-20261115"')
     def test_skip_archive_verification(self):
         self.mutated('lib/providers/apps_provider_install.dart',

@@ -72,7 +72,8 @@ class _R05ExtraApprovalTileState extends State<R05ExtraApprovalTile> {
 }
 
 class R05InstallActivityPage extends StatefulWidget {
-  const R05InstallActivityPage({super.key});
+  const R05InstallActivityPage({super.key, this.packageId});
+  final String? packageId;
   @override
   State<R05InstallActivityPage> createState() => _R05InstallActivityPageState();
 }
@@ -140,7 +141,7 @@ class _R05InstallActivityPageState extends State<R05InstallActivityPage> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('Install activity'),
+      title: Text(widget.packageId == null ? 'Install activity' : 'Install history: ${widget.packageId}'),
       actions: <Widget>[
         IconButton(
           tooltip: 'Recheck installed packages', icon: const Icon(Icons.refresh_rounded),
@@ -159,7 +160,9 @@ class _R05InstallActivityPageState extends State<R05InstallActivityPage> {
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
-        final records = snapshot.data!;
+        final records = snapshot.data!
+            .where((record) => widget.packageId == null || record.packageId == widget.packageId)
+            .toList();
         if (records.isEmpty) {
           return const Center(child: Text('No recorded installation attempts'));
         }

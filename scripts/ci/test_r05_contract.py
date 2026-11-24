@@ -56,4 +56,8 @@ class R05ContractMutation(unittest.TestCase):
         self.mutation('.github/workflows/obtainx-r02-rt02c.yml',
                       "- 'lib/services/r05_*'")
 
+    def test_cannot_retarget_required_ci_away_from_main(self):
+        self.mutation('config/delivery-required-ci.json',
+                      '"base_branch": "main"')
+
 if __name__=='__main__':unittest.main(verbosity=2)

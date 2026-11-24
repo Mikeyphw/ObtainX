@@ -206,7 +206,9 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
 
   Future<void> _retry(R07ActivityRecord entry, AppsProvider provider) async {
     if (!_actions(entry, provider).contains(R07ActivityAction.retry) &&
-        !_actions(entry, provider).contains(R07ActivityAction.resume)) return;
+        !_actions(entry, provider).contains(R07ActivityAction.resume)) {
+      return;
+    }
     final key = entry.listingKey;
     if (key == null) return;
     final pending = (await R05OperationJournal.instance.list()).where((x) =>
@@ -237,9 +239,11 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     try {
       await provider.downloadAndInstallLatestApps(<String>[key], context);
     } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('New attempt could not finish; inspect its recorded status.'),
-      ));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('New attempt could not finish; inspect its recorded status.'),
+        ));
+      }
     } finally {
       if (mounted) setState(() { _busy = false; _load(); });
     }

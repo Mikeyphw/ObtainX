@@ -1,0 +1,46 @@
+"""Targeted workflow-structure regressions; no CI or Gradle invoked."""
+import unittest
+from r07_workflow_contract import parse_workflow, ContractError, WORKFLOWS, REQUIRED_STEPS
+
+NAME='obtainx-r00-contracts.yml'
+def fixture(name=NAME):
+    text='name: '+WORKFLOWS[name][1]+'\non:\n  pull_request:\n    types: [opened, reopened, synchronize]\n'
+    if name.startswith('obtainx-r02-'):
+        text += "    paths: ['lib/services/r07_*', 'lib/widgets/r07_*', 'test/r07_*', 'scripts/ci/r07_*']\n"
+    text+='jobs:\n  job:\n    runs-on: ubuntu-24.04\n    steps:\n      - uses: actions/checkout@v4\n'
+    for label, run in REQUIRED_STEPS.get(name,{}).items():
+        text+=f'      - name: {label}\n        run: {run}\n'
+    return text
+
+class WorkflowStructureTest(unittest.TestCase):
+    def test_all_six_workflow_shapes(self):
+        for name in WORKFLOWS:
+            with self.subTest(name=name):
+                self.assertIn('pull_request',parse_workflow(fixture(name),name)['on'])
+    def test_original_indentation_defect(self):
+        good=fixture()
+        bad=good.replace('        run: python3 -B scripts/ci/r06_contract.py --check\n      - name: R07 Activity Center source and negative contracts\n        run: python3 -B scripts/ci/r07_contract.py --check', '      - name: R07 Activity Center source and negative contracts\n      run: python3 -B scripts/ci/r07_contract.py --check\n      run: python3 -B scripts/ci/r06_contract.py --check')
+        self.assertNotEqual(good,bad)
+        with self.assertRaises(ContractError): parse_workflow(bad,NAME)
+    def test_duplicate_run(self):
+        bad=fixture().replace('        run: python3 -B scripts/ci/r06_contract.py --check','        run: echo bypass\n        run: python3 -B scripts/ci/r06_contract.py --check')
+        with self.assertRaises(ContractError): parse_workflow(bad,NAME)
+    def test_duplicate_on(self):
+        with self.assertRaises(ContractError): parse_workflow(fixture()+'on: {}\n',NAME)
+    def test_displaced_command(self):
+        bad=fixture().replace('        run: python3 -B scripts/ci/r06_contract.py --check','        run: echo unrelated')
+        with self.assertRaises(ContractError): parse_workflow(bad,NAME)
+    def test_conditional_required_gate(self):
+        bad=fixture().replace('        run: python3 -B scripts/ci/r07_contract.py --check','        if: false\n        run: python3 -B scripts/ci/r07_contract.py --check')
+        with self.assertRaises(ContractError): parse_workflow(bad,NAME)
+    def test_missing_synchronize(self):
+        with self.assertRaises(ContractError): parse_workflow(fixture().replace(', synchronize',''),NAME)
+    def test_missing_runtime_risk_path(self):
+        name='obtainx-r02-api36.yml'
+        with self.assertRaises(ContractError): parse_workflow(fixture(name).replace("'test/r07_*', ",''),name)
+    def test_unconditional_job_step_shape(self):
+        with self.assertRaises(ContractError): parse_workflow(fixture().replace('      - uses: actions/checkout@v4','      - name: orphan step'),NAME)
+    def test_gate_error_is_not_a_pass(self):
+        bad=fixture().replace('        run: python3 -B scripts/ci/r07_workflow_contract.py --check','        continue-on-error: true\n        run: python3 -B scripts/ci/r07_workflow_contract.py --check')
+        with self.assertRaises(ContractError): parse_workflow(bad,NAME)
+if __name__=='__main__': unittest.main()

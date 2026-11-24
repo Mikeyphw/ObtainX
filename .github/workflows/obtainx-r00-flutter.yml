@@ -119,9 +119,9 @@ jobs:
       - name: R05 receipt state and evidence invariants
         run: flutter test --no-pub test/r05_operation_receipt_test.dart
       - name: R05 persisted journal and restart regression
+        run: flutter test --no-pub test/r05_operation_journal_test.dart
       - name: R07 Activity Center journal/action and restart tests
-      run: flutter test --no-pub test/r07_activity_center_test.dart
-      run: flutter test --no-pub test/r05_operation_journal_test.dart
+        run: flutter test --no-pub test/r07_activity_center_test.dart
       - name: Execute R01 adversarial archive fixtures first
         run: flutter test --no-pub test/archive_extraction_security_test.dart
       - name: Execute R02 bundle and split-session contract tests

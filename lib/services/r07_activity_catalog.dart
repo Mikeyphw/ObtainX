@@ -52,7 +52,9 @@ class R07ActivityRecord {
   /// A file transfer finishing is NOT a successful installation.
   double? get progress {
     if (kind != 'download' || totalBytes == null || totalBytes! <= 0 ||
-        verifiedBytes == null) return null;
+        verifiedBytes == null) {
+      return null;
+    }
     final digest = download?.finalDigest;
     final done = digest != null && RegExp(r'^[a-f0-9]{64}$').hasMatch(digest) &&
         download?.completedBytes == totalBytes &&
@@ -117,11 +119,10 @@ String? r07UniqueListingForFile(String fileName, Iterable<String> keys) {
 }
 
 class R07ActivityCatalog {
-  R07ActivityCatalog({Directory? testingRoot, R05OperationJournal? installJournal})
-      : _testingRoot = testingRoot,
-        _installJournal = installJournal ?? R05OperationJournal.instance;
+  R07ActivityCatalog({this.testingRoot, R05OperationJournal? installJournal})
+      : _installJournal = installJournal ?? R05OperationJournal.instance;
 
-  final Directory? _testingRoot;
+  final Directory? testingRoot;
   final R05OperationJournal _installJournal;
   static const int maxDownloadReceipts = 512;
   static const int maxDownloadReceiptBytes = 128 * 1024;
@@ -154,7 +155,7 @@ class R07ActivityCatalog {
         ),
     ];
 
-    final root = _testingRoot ?? await getApplicationSupportDirectory();
+    final root = testingRoot ?? await getApplicationSupportDirectory();
     final folder = Directory('${root.path}/r03-download-journal');
     final type = await FileSystemEntity.type(folder.path, followLinks: false);
     if (type == FileSystemEntityType.notFound) {

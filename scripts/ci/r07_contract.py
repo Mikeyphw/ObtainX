@@ -59,10 +59,10 @@ def verify(root:Path=ROOT)->list[str]:
   for mark in marks:
    if mark not in source:errors.append(f'{path}: missing {mark!r}')
  for path in R02_WORKFLOWS:
-  try: source=(root/path).read_text(encoding='utf-8')
-  except (OSError,UnicodeError):errors.append(f'{path}: missing'); continue
-  for mark in ("- 'lib/services/r07_*'", "- 'lib/widgets/r07_*'", "- 'test/r07_*'", "- 'scripts/ci/r07_*'"):
-   if mark not in source:errors.append(f'{path}: risk path missing {mark!r}')
+  try: content=(root/path).read_text(encoding='utf-8')
+  except (OSError,UnicodeError):errors.append(f'{path}: missing');continue
+  if ('    paths:' in content or '    paths-ignore:' in content or 'scripts/ci/obtainx_ci_policy.py plan --head' not in content):
+   errors.append(f'{path}: risk path routing missing')
  try:
   config=json.loads((root/'docs/R00_BASELINE.json').read_text(encoding='utf-8'))
   if config['roadmap_sha256']!=hashlib.sha256((root/'docs/ROADMAP.md').read_bytes()).hexdigest():

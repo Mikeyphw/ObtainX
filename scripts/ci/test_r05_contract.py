@@ -54,7 +54,7 @@ class R05ContractMutation(unittest.TestCase):
                       'flutter test --no-pub test/r05_operation_receipt_test.dart')
     def test_remove_android_risk_scope(self):
         self.mutation('.github/workflows/obtainx-r02-rt02c.yml',
-                      "- 'lib/services/r05_*'")
+                      "scripts/ci/obtainx_ci_policy.py plan --head")
 
     def test_cannot_retarget_required_ci_away_from_main(self):
         self.mutation('config/delivery-required-ci.json',

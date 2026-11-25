@@ -68,7 +68,7 @@ class SDKWorkflowContracts(unittest.TestCase):
                     '.github/workflows/obtainx-r02-rt02c.yml'):
             s=(ROOT/rel).read_text()
             self.assertEqual(s.count("python3 -B scripts/ci/r02_sdk_retry.py 'platforms;android-36' 'build-tools;35.0.0' 'system-images;android-36;google_apis;x86_64'"),1,rel)
-            self.assertIn("      - 'scripts/ci/r02_sdk_retry.py'",s,rel)
+            self.assertIn("scripts/ci/obtainx_ci_policy.py plan --head",s,rel)
             self.assertNotIn('continue-on-error: true',s,rel)
             self.assertIn('timeout-minutes: 3',s,rel)
             self.assertIn('api-level: 36',s,rel)

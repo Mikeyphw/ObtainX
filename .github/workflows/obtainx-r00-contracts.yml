@@ -4,11 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, reopened, synchronize, labeled, unlabeled]
+    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review, converted_to_draft]
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   OX_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -29,6 +30,20 @@ jobs:
           fetch-depth: 0
       - name: Verify checked-out exact source
         run: test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
+      - name: Resolve exact overlay scope
+        id: scope
+        shell: bash
+        env:
+          OX_SCOPE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
+          python3 -B scripts/ci/obtainx_ci_policy.py plan --head "$OX_EXPECTED_SHA" --github-output "$GITHUB_OUTPUT"
+      - name: OPT07 plan SHA256 ${{ steps.scope.outputs.plan_digest }}
+        env:
+          OX_PLAN_DIGEST: ${{ steps.scope.outputs.plan_digest }}
+        shell: bash
+        run: test "${#OX_PLAN_DIGEST}" -eq 64 && [[ "$OX_PLAN_DIGEST" =~ ^[a-f0-9]{64}$ ]]
       - name: Ensure hosted YAML parser dependency
         run: |
           if ! python3 -c 'import yaml'; then
@@ -100,9 +115,9 @@ jobs:
       - name: Enforce bounded CI optimization and dev-only qualification guard
         run: python3 -B scripts/ci/obtainx_ci_optimization_contract.py --check
       - name: Development-only cannot qualify (same runner)
-        if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:development-only') }}
+        if: steps.scope.outputs.mode == 'scoped'
         shell: bash
         run: |
-          echo 'OX_CI_DEVELOPMENT_ONLY_NOT_QUALIFIED: remove ci:development-only to force the full Android/Flutter matrix' >&2
-          echo 'Development-only mode. All Android runtime and full Flutter gates are NOT QUALIFIED.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'OX_CI_DEVELOPMENT_ONLY_NOT_QUALIFIED: ready PR or ci:full-qualification required for full acceptance' >&2
+          echo 'Scoped development mode. Selected tests may pass; FULL QUALIFICATION IS NOT ESTABLISHED.' >> "$GITHUB_STEP_SUMMARY"
           exit 1

@@ -1,3 +1,24 @@
+# CI-OPT07 — incremental development qualification (consolidated with R09-F01)
+
+Draft PRs default to scoped qualification. The planner looks for a recent full
+first-parent ancestor with all six exact-source run/job/decisive-step proofs,
+falling back to the pinned verified HF13 run identities. Changes since that
+full source accumulate; scoped/deferred results cannot become a full baseline.
+A ready-for-review PR or `ci:full-qualification` requests every full lane;
+manual dispatch also runs full lanes. `ci:development-only` always prevents
+full acceptance. A commit changing the actual CI routing policy/workflows
+runs the full matrix once (deterministic first-parent decision); this combined
+R09/OPT07 migration therefore runs all six. Two bounded native transactions
+(R09 then OPT07) produce one final PR update; no intermediate remote push. Unknown impact or unavailable
+baseline evidence runs all lanes but remains scoped on draft PRs. Scope-only
+checks retain the intentional RED full-qualification refusal after source tests.
+Every required workflow triggers on every PR mode-change event; only expensive
+jobs defer. Strict full-source Dart analysis and mapped regression suites run
+for impacted Dart/UI paths. No local Gradle, no skipped runtime pass, no release
+or merge approval. Full qualification remains mandatory before merge.
+
+---
+
 # ObtainX — R09-F01 discovery candidate (25 November 2026)
 
 **Exact preimage:** PR #30 `e3960a6779f9139c72810748c1001198d82e8f94`, tree `b502f623e796eaf747aebff2ee4024fff2c3399e`. All six prior-head required workflows passed (45528116294, 45528116304, 45528116492, 45528116325, 45528116334, 45528116315). RT02C real five archives, two refusals and independent receipts passed. R09 does not inherit this hosted qualification.

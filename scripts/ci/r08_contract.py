@@ -52,7 +52,7 @@ def verify(root=ROOT):
     for name in workflows.WORKFLOWS:
         doc = workflows.parse_workflow(read('.github/workflows/'+name), name)
         if name.startswith('obtainx-r02-'):
-            require(set(RISK)<=set(doc['on']['pull_request']['paths']), name+' R08 paths missing')
+            require('paths' not in doc['on']['pull_request'] and 'scope' in doc['jobs'], name+' exact scope route missing')
         if name in STEPS:
             steps = [step for job in doc['jobs'].values() for step in job.get('steps', [])
                      if step.get('run')==STEPS[name]]

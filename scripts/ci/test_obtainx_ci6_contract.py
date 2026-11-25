@@ -53,9 +53,9 @@ class CI6NegativeMutations(unittest.TestCase):
                     '"release_qualified": true')
 
     def test_04_android_pr_filter_drop_each(self):
-        for path in C.ANDROID:
-            for glob in C.GROUPS:
-                self.mutate(path,"      - '"+glob+"'", "      - 'scripts/ci/unused_only.py'")
+        for path,lane in zip(C.ANDROID,('api36','rt02','rt02b','rt02c')):
+            self.mutate(path,"    if: needs.scope.outputs."+lane+" == 'true'", "    if: false")
+            self.mutate(path,'  pull_request:\n','  pull_request:\n    paths: [docs/**]\n')
 
     def test_05_no_manual_trigger_each(self):
         for _,path in C.REQUIRED:

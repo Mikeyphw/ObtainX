@@ -35,7 +35,7 @@ class RT02FMutation(unittest.TestCase):
     def test_source_contract_mandatory(self):
         self.mutate(M.SOURCE_CI,'python3 -B scripts/ci/r02f_source_contract.py --check','echo skip')
     def test_android_high_risk_path(self):
-        self.mutate(M.HEAVY[1],"      - 'lib/installers/**'", "      - 'docs/**'")
+        self.mutate(M.HEAVY[1],"  pull_request:\n", "  pull_request:\n    paths: [docs/**]\n")
     def test_manual_full_workflow_retained(self):
         self.mutate(M.HEAVY[2],'  workflow_dispatch:', '  # no manual gate')
 if __name__=='__main__': unittest.main()

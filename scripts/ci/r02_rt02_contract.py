@@ -41,6 +41,8 @@ def inspect(root:Path=ROOT)->list[str]:
         else:
             files[path]=p.read_text('utf-8')
     w=files[WORKFLOW];r00=files[R00];r00test=files[R00_TEST]
+    if w.count('test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"') != 2:
+        errors.append("exact source guard must exist in planner and runtime job")
     host=files[HOST];fixture=files[FIXTURE];dart=files[DART];docs=files[DOC]
     requirements={
         R00:("'obtainx-r02-rt02.yml'",'unexpected = names - EXPECTED_WORKFLOWS',

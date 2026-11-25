@@ -101,7 +101,7 @@ class R04FinalMutationTests(unittest.TestCase):
           'echo tests bypassed')
     def test_remove_android_risk_path(self):
         self.mutated('.github/workflows/obtainx-r02-api36.yml',
-          "- 'lib/providers/source_provider.dart'", "- 'docs/other.dart'")
+          "scripts/ci/obtainx_ci_policy.py plan --head", "- 'docs/other.dart'")
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -83,8 +83,8 @@ def parse_workflow(text, filename, *, require_repair_gate=True):
         for key in ('branches','branches-ignore','paths','paths-ignore'):
             if key in pr:
                 require(isinstance(pr[key], list) and all(isinstance(x,str) for x in pr[key]), f'{filename}: invalid {key} filter')
-    if filename.startswith('obtainx-r02-'):
-        require(isinstance(pr, dict) and isinstance(pr.get('paths'), list) and RISK_PATHS <= set(pr['paths']), f'{filename}: R07 risk paths missing')
+    require(isinstance(pr, dict) and not ({'paths','paths-ignore','branches','branches-ignore'} & set(pr)), f'{filename}: unconditional PR event routing required')
+    require({'opened','reopened','synchronize','labeled','unlabeled','ready_for_review','converted_to_draft'} <= set(pr.get('types',[])), f'{filename}: incomplete mode-change events')
     jobs = doc.get('jobs')
     require(isinstance(jobs, dict) and bool(jobs), f'{filename}: jobs missing')
     actual = {}
@@ -149,6 +149,34 @@ def verify_exact_source(doc, filename):
                         f'{label}: cache/artifact not exact-source bound')
 
 
+def verify_incremental_route(doc, filename):
+    jobs=doc['jobs']; source=filename=='obtainx-r00-contracts.yml'
+    scope=jobs['source-contracts'] if source else jobs.get('scope',{})
+    steps=[x for x in scope.get('steps',[]) if x.get('id')=='scope']
+    require(len(steps)==1 and not steps[0].get('if') and not steps[0].get('continue-on-error'),filename+': scope planning must be unconditional')
+    require('python3 -B scripts/ci/obtainx_ci_policy.py plan --head "$OX_EXPECTED_SHA" --github-output "$GITHUB_OUTPUT"' in steps[0].get('run','').splitlines()[-1],filename+': exact scope command missing')
+    require(steps[0].get('env',{}).get('OX_SCOPE_TOKEN')=='${{ github.token }}',filename+': read-only proof token missing')
+    require(doc.get('permissions')=={'contents':'read','actions':'read'},filename+': scope proof permissions drift')
+    marker='OPT07 plan SHA256 ${{ steps.scope.outputs.plan_digest }}'
+    proof=[x for x in scope['steps'] if x.get('name')==marker]
+    require(len(proof)==1 and scope['steps'].index(proof[0])==scope['steps'].index(steps[0])+1 and not proof[0].get('if') and not proof[0].get('continue-on-error') and proof[0].get('env')=={'OX_PLAN_DIGEST':'${{ steps.scope.outputs.plan_digest }}'} and proof[0].get('run')=='test "${#OX_PLAN_DIGEST}" -eq 64 && [[ "$OX_PLAN_DIGEST" =~ ^[a-f0-9]{64}$ ]]',filename+': exact plan digest proof missing')
+    if source:
+        guard=[x for x in scope['steps'] if x.get('name')=='Development-only cannot qualify (same runner)']
+        require(len(guard)==1 and guard[0] is scope['steps'][-1] and guard[0].get('if')=="steps.scope.outputs.mode == 'scoped'" and guard[0].get('run','').strip().endswith('exit 1') and not guard[0].get('continue-on-error'),filename+': scoped mode could falsely qualify full CI')
+    else:
+        require(scope.get('name')=='Exact-SHA scope classifier' and 'if' not in scope,filename+': planner job conditional')
+        for k in ('mode','full_flutter','targeted_flutter','api36','rt02','rt02b','rt02c','plan'):
+            require(scope.get('outputs',{}).get(k)=='${{ steps.scope.outputs.'+k+' }}',filename+': scope output drift '+k)
+        runtime={'obtainx-r02-api36.yml':('emulator-api36','api36'),'obtainx-r02-rt02.yml':('rt02-real-install','rt02'),'obtainx-r02-rt02b.yml':('rt02b-negative-install','rt02b'),'obtainx-r02-rt02c.yml':('rt02c-archive-install','rt02c')}
+        pairs=[runtime[filename]] if filename in runtime else [('targeted-flutter','targeted_flutter'),('flutter-and-android-debug','full_flutter')]
+        for name,key in pairs:
+            job=jobs.get(name,{})
+            require(job.get('needs')=='scope' and job.get('if')=="needs.scope.outputs."+key+" == 'true'",filename+': incorrect job gate '+name)
+        if filename=='obtainx-r00-flutter.yml':
+            scoped=[x for x in jobs['targeted-flutter']['steps'] if x.get('name')=='Run only impacted Flutter checks']
+            require(len(scoped)==1 and scoped[0].get('env',{}).get('OX_SCOPE_PLAN')=='${{ needs.scope.outputs.plan }}' and 'python3 -B scripts/ci/obtainx_ci_policy.py run-flutter --head "$OX_EXPECTED_SHA"' in scoped[0].get('run',''),filename+': targeted execution not plan-bound')
+
+
 def verify(root=ROOT, *, overrides=None, require_repair_gate=True):
     root = Path(root)
     overrides = overrides or {}
@@ -161,6 +189,7 @@ def verify(root=ROOT, *, overrides=None, require_repair_gate=True):
         if isinstance(text, bytes): text=text.decode('utf-8')
         doc = parse_workflow(text, name, require_repair_gate=require_repair_gate)
         verify_exact_source(doc, name)
+        verify_incremental_route(doc, name)
     return len(WORKFLOWS)
 
 if __name__ == '__main__':

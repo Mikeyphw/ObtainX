@@ -5,9 +5,7 @@ from r07_workflow_contract import parse_workflow, ContractError, WORKFLOWS, REQU
 
 NAME='obtainx-r00-contracts.yml'
 def fixture(name=NAME):
-    text='name: '+WORKFLOWS[name][1]+'\non:\n  pull_request:\n    types: [opened, reopened, synchronize]\n'
-    if name.startswith('obtainx-r02-'):
-        text += "    paths: ['lib/services/r07_*', 'lib/widgets/r07_*', 'test/r07_*', 'scripts/ci/r07_*']\n"
+    text='name: '+WORKFLOWS[name][1]+'\non:\n  pull_request:\n    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review, converted_to_draft]\n'
     text+='jobs:\n  job:\n    runs-on: ubuntu-24.04\n    steps:\n      - uses: actions/checkout@v4\n'
     for label, run in REQUIRED_STEPS.get(name,{}).items():
         text+=f'      - name: {label}\n        run: {run}\n'
@@ -38,7 +36,7 @@ class WorkflowStructureTest(unittest.TestCase):
         with self.assertRaises(ContractError): parse_workflow(fixture().replace(', synchronize',''),NAME)
     def test_missing_runtime_risk_path(self):
         name='obtainx-r02-api36.yml'
-        with self.assertRaises(ContractError): parse_workflow(fixture(name).replace("'test/r07_*', ",''),name)
+        with self.assertRaises(ContractError): parse_workflow(fixture(name).replace("  pull_request:\n", "  pull_request:\n    paths: [docs/**]\n"),name)
     def test_unconditional_job_step_shape(self):
         with self.assertRaises(ContractError): parse_workflow(fixture().replace('      - uses: actions/checkout@v4','      - name: orphan step'),NAME)
     def test_gate_error_is_not_a_pass(self):

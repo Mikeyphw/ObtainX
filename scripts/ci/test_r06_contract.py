@@ -68,8 +68,8 @@ class R06SourceMutationTests(unittest.TestCase):
  def test_r06_changelog_null_aware(self):
   self.mutated('lib/pages/app.dart','?changeLogCard,')
  def test_negative_no_r06_api36_trigger(self):
-  self.mutated('.github/workflows/obtainx-r02-api36.yml',"- 'lib/components/r06_*'")
+  self.mutated('.github/workflows/obtainx-r02-api36.yml',"scripts/ci/obtainx_ci_policy.py plan --head")
  def test_negative_no_r06_rt02_trigger(self):
-  self.mutated('.github/workflows/obtainx-r02-rt02.yml',"- 'lib/pages/app.dart'")
+  self.mutated('.github/workflows/obtainx-r02-rt02.yml',"scripts/ci/obtainx_ci_policy.py plan --head")
 
 if __name__=='__main__':unittest.main(verbosity=2)

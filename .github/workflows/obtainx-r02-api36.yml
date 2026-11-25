@@ -2,86 +2,12 @@ name: ObtainX R02 / API 36 Hosted Emulator Bootstrap
 
 on:
   pull_request:
-    paths:
-      - 'lib/installers/**'
-      - 'lib/providers/apps_provider_install.dart'
-      - 'lib/providers/apps_provider.dart'
-      - 'lib/providers/source_provider.dart'
-      - 'lib/components/generated_form_renderer.dart'
-      - 'lib/services/r03_*'
-      - 'lib/services/r04_*'
-      - 'lib/services/r07_*'
-      - 'lib/services/r05_*'
-      - 'lib/widgets/r07_*'
-      - 'lib/widgets/r05_*'
-      - 'lib/pages/app.dart'
-      - 'lib/components/r06_*'
-      - 'test/r06_*'
-      - 'scripts/ci/r06_*'
-      - 'test/r07_*'
-      - 'test/r05_*'
-      - 'scripts/ci/r07_*'
-      - 'lib/version/**'
-      - 'lib/app_sources/**'
-      - 'lib/http/r08_*'
-      - 'lib/services/r08_*'
-      - 'lib/pages/home.dart'
-      - 'lib/components/version_regex_assist_dialog.dart'
-      - 'test/r08_*'
-      - 'scripts/ci/r08_*'
-      - 'scripts/ci/test_r08_*'
-      - 'lib/pages/apps.dart'
-      - 'lib/providers/settings_provider.dart'
-      - 'lib/folders/**'
-      - 'lib/components/bulk_update_sheet.dart'
-      - 'lib/components/app_detail_widgets.dart'
-      - 'lib/pages/additional_options_page.dart'
-      - 'lib/widgets/r04_actions_history_dialog.dart'
-      - 'lib/services/r09_*'
-      - 'test/r09_*'
-      - 'scripts/ci/r09_*'
-      - 'scripts/ci/test_r09_*'
-      - 'assets/translations/en.json'
-      - 'scripts/ci/r05_*'
-      - 'lib/app_sources/github.dart'
-      - 'test/r04_*'
-      - 'scripts/ci/r04_*'
-      - 'test/r03_*'
-      - 'scripts/ci/r03_*'
-      - 'lib/providers/apps_provider_updates.dart'
-      - 'lib/providers/installer_provider.dart'
-      - 'lib/providers/external_install_bridge.dart'
-      - 'lib/services/install_bundle_plan.dart'
-      - 'lib/services/verified_obb_delivery.dart'
-      - 'lib/services/artifact_file_work.dart'
-      - 'integration_test/**'
-      - 'android/**'
-      - '.github/workflows/**'
-      - 'scripts/ci/r02_rt02**'
-      - 'scripts/ci/r02f_p02_*'
-      - 'scripts/ci/r02f_p03_*'
-      - 'scripts/ci/r02f_p04b_*'
-      - 'scripts/ci/r02f_p04_*'
-      - 'lib/services/r02f_p04_backend_availability.dart'
-      - 'scripts/ci/r02f_p05_*'
-      - 'lib/services/r02f_p05_*'
-      - 'test/r02f_p05_*'
-      - 'scripts/ci/r02_final_*'
-      - 'lib/services/r02_local_*'
-      - 'test/r02_local_*'
-      - 'scripts/ci/r02g_*'
-      - 'scripts/ci/r02_sdk_retry.py'
-      - 'scripts/ci/obtainx_ci_policy.py'
-      - 'scripts/ci/*optimization*'
-      - 'scripts/ci/r00_source_contract.py'
-      - 'pubspec.yaml'
-      - 'pubspec.lock'
-      - 'docs/SECURITY_RELEASE_POLICY.md'
-    types: [opened, reopened, synchronize, labeled, unlabeled]
+    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review, converted_to_draft]
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   OX_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -91,8 +17,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    name: Exact-SHA scope classifier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.scope.outputs.mode }}
+      full_flutter: ${{ steps.scope.outputs.full_flutter }}
+      targeted_flutter: ${{ steps.scope.outputs.targeted_flutter }}
+      api36: ${{ steps.scope.outputs.api36 }}
+      rt02: ${{ steps.scope.outputs.rt02 }}
+      rt02b: ${{ steps.scope.outputs.rt02b }}
+      rt02c: ${{ steps.scope.outputs.rt02c }}
+      plan: ${{ steps.scope.outputs.plan }}
+    steps:
+      - name: Checkout PR HEAD, not GitHub synthetic merge commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve exact overlay scope
+        id: scope
+        shell: bash
+        env:
+          OX_SCOPE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
+          python3 -B scripts/ci/obtainx_ci_policy.py plan --head "$OX_EXPECTED_SHA" --github-output "$GITHUB_OUTPUT"
+      - name: OPT07 plan SHA256 ${{ steps.scope.outputs.plan_digest }}
+        env:
+          OX_PLAN_DIGEST: ${{ steps.scope.outputs.plan_digest }}
+        shell: bash
+        run: test "${#OX_PLAN_DIGEST}" -eq 64 && [[ "$OX_PLAN_DIGEST" =~ ^[a-f0-9]{64}$ ]]
   emulator-api36:
-    if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'ci:development-only') }}
+    needs: scope
+    if: needs.scope.outputs.api36 == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:

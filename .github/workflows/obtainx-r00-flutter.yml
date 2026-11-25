@@ -2,11 +2,12 @@ name: ObtainX R00 / Hosted Flutter Qualification
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, labeled, unlabeled]
+    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review, converted_to_draft]
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   OX_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -21,8 +22,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
+      mode: ${{ steps.scope.outputs.mode }}
       full_flutter: ${{ steps.scope.outputs.full_flutter }}
       targeted_flutter: ${{ steps.scope.outputs.targeted_flutter }}
+      api36: ${{ steps.scope.outputs.api36 }}
+      rt02: ${{ steps.scope.outputs.rt02 }}
+      rt02b: ${{ steps.scope.outputs.rt02b }}
+      rt02c: ${{ steps.scope.outputs.rt02c }}
+      plan: ${{ steps.scope.outputs.plan }}
     steps:
       - name: Checkout PR HEAD, not GitHub synthetic merge commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
@@ -30,21 +37,20 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify exact base HEAD risk
+      - name: Resolve exact overlay scope
         id: scope
         shell: bash
         env:
-          OX_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          OX_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
-          OX_MANUAL_EVENT: ${{ github.event_name }}
+          OX_SCOPE_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
-          if [[ -z "$OX_BASE_SHA" ]]; then OX_BASE_SHA="$(git rev-parse HEAD^)"; fi
-          args=()
-          if [[ "$OX_MANUAL_EVENT" == 'workflow_dispatch' ]]; then args+=(--manual); fi
-          python3 -B scripts/ci/obtainx_ci_policy.py plan --head "$OX_EXPECTED_SHA" \
-            --base "$OX_BASE_SHA" --github-output "$GITHUB_OUTPUT" "${args[@]}"
+          python3 -B scripts/ci/obtainx_ci_policy.py plan --head "$OX_EXPECTED_SHA" --github-output "$GITHUB_OUTPUT"
+      - name: OPT07 plan SHA256 ${{ steps.scope.outputs.plan_digest }}
+        env:
+          OX_PLAN_DIGEST: ${{ steps.scope.outputs.plan_digest }}
+        shell: bash
+        run: test "${#OX_PLAN_DIGEST}" -eq 64 && [[ "$OX_PLAN_DIGEST" =~ ^[a-f0-9]{64}$ ]]
 
   targeted-flutter:
     name: Scoped Flutter analysis and changed regression tests (NOT full)
@@ -71,17 +77,15 @@ jobs:
       - name: Run only impacted Flutter checks
         shell: bash
         env:
-          OX_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          OX_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          OX_SCOPE_PLAN: ${{ needs.scope.outputs.plan }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
-          python3 -B scripts/ci/obtainx_ci_policy.py run-flutter \
-            --head "$OX_EXPECTED_SHA" --base "$OX_BASE_SHA"
+          python3 -B scripts/ci/obtainx_ci_policy.py run-flutter --head "$OX_EXPECTED_SHA"
 
   flutter-and-android-debug:
     needs: scope
-    if: needs.scope.outputs.full_flutter == 'true' && !contains(github.event.pull_request.labels.*.name, 'ci:development-only')
+    if: needs.scope.outputs.full_flutter == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:

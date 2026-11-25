@@ -33,7 +33,8 @@ def verify(root=ROOT):
     for glob in RISK: require(repr(glob) in read('scripts/ci/obtainx_ci_policy.py'), 'classifier missing '+glob)
     for name in workflows.WORKFLOWS:
         doc=workflows.parse_workflow(read('.github/workflows/'+name),name)
-        if name.startswith('obtainx-r02-'): require(set(RISK)<=set(doc['on']['pull_request']['paths']), name+' missing R09 scopes')
+        if name.startswith('obtainx-r02-'):
+            require('paths' not in doc['on']['pull_request'] and 'scope' in doc['jobs'], name+' exact scope route missing')
         if name in STEPS:
             rows=[s for j in doc['jobs'].values() for s in j.get('steps',[]) if s.get('run')==STEPS[name]]
             require(len(rows)==1 and 'if' not in rows[0] and rows[0].get('continue-on-error',False) is False, name+' weakened R09 gate')

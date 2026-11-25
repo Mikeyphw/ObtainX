@@ -48,7 +48,7 @@ REQUIRED={
           'test_mirrored_code_twice_in_same_stream_refused',
           'test_install_diagnostics_never_include_paths_or_logs',
           'test_fixture_signing_key_cleanup','test_removed_hosted_gate_refused'),
-    WF:("      - 'scripts/ci/r02g_*'",
+    WF:("scripts/ci/obtainx_ci_policy.py plan --head",
         'python3 -B scripts/ci/r02g_incompatible_sdk_contract.py --check',
         "-p 'test_r02g_incompatible_sdk_contract.py'",
         'python3 -B scripts/ci/r02g_incompatible_sdk_fixture.py --out',

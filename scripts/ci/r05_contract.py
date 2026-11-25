@@ -80,10 +80,10 @@ def verify(root:Path=ROOT)->int:
         for marker in markers:
             if marker not in content:errors.append(f'{path}: marker missing: {marker}')
     for path in ANDROID_CI:
-        try: content=(root/path).read_text(encoding='utf8')
-        except (OSError, UnicodeError):errors.append(f'{path}: missing/unreadable');continue
-        for marker in ("- 'lib/services/r05_*'", "- 'lib/widgets/r05_*'", "- 'test/r05_*'"):
-            if marker not in content:errors.append(f'{path}: R05 risk path missing {marker}')
+        try: content=(root/path).read_text(encoding='utf-8')
+        except (OSError,UnicodeError):errors.append(f'{path}: missing');continue
+        if ('    paths:' in content or '    paths-ignore:' in content or 'scripts/ci/obtainx_ci_policy.py plan --head' not in content):
+            errors.append(f'{path}: risk path routing missing')
     try:
         code=(root/'lib/providers/apps_provider_install.dart').read_text(encoding='utf8')
         first=code.index('final r05 = await _r05BeginAttempt(')

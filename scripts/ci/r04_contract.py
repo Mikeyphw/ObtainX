@@ -79,9 +79,8 @@ def verify(root:Path=ROOT)->int:
         '.github/workflows/obtainx-r02-rt02c.yml',
     ):
         workflow=read(workflow_path)
-        for marker in ("- 'lib/services/r04_*'", "- 'lib/app_sources/github.dart'",
-                       "- 'test/r04_*'", "- 'scripts/ci/r04_*'"):
-            gate(marker in workflow, workflow_path+' missing CI path '+marker)
+        gate('scripts/ci/obtainx_ci_policy.py plan --head' in workflow and
+             '    paths:' not in workflow, workflow_path+' missing exact scope/full event route')
     gate('r04ActionsArchiveEvidenceKey' in github and
          "additionalSettings[r04ActionsArchiveEvidenceKey] = <String, dynamic>{" in github and
          "additionalSettings.remove(r04ActionsArchiveEvidenceKey)" in github and

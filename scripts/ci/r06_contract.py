@@ -82,7 +82,7 @@ def verify(root:Path=ROOT)->int:
   'flutter test --no-pub --reporter expanded')
  for p in FILES:
   if not p.startswith('.github/workflows/obtainx-r02-'):continue
-  contains(p,"- 'lib/pages/app.dart'", "- 'lib/components/r06_*'", "- 'test/r06_*'", "- 'scripts/ci/r06_*'")
+  contains(p,"scripts/ci/obtainx_ci_policy.py plan --head", "ready_for_review, converted_to_draft")
  try:
   baseline=json.loads(files['docs/R00_BASELINE.json'])
   if baseline.get('roadmap_sha256') != hashlib.sha256((root/'docs/ROADMAP.md').read_bytes()).hexdigest():

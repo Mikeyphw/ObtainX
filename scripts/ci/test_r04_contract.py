@@ -74,7 +74,7 @@ class R04MutationContract(unittest.TestCase):
         self._mutation(PATHS[4],
           'python3 -B scripts/ci/r04_contract.py --check','echo skip')
     def test_remove_android_workflow_r04_gate(self):
-        self._mutation(PATHS[10], "- 'test/r04_*'", "- 'docs/r04_*'")
+        self._mutation(PATHS[10], "scripts/ci/obtainx_ci_policy.py plan --head", "- 'docs/r04_*'")
     def test_remove_zip_sha256_comparison(self):
         self._mutation(PATHS[11], 'if (actual != expected)', 'if (false)')
     def test_remove_pre_extraction_archive_integrity_gate(self):

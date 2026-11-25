@@ -35,7 +35,7 @@ class R07ContractTests(unittest.TestCase):
   p.write_text(p.read_text()+'\n// await _installJournal.recoverInterruptedOnce()\n')
   self.assertTrue(any('in-flight' in x for x in module.verify(self.root)))
  def test_reject_r02_risk_omission(self):
-  self.mutate(module.R02_WORKFLOWS[0],"- 'lib/services/r07_*'")
+  self.mutate(module.R02_WORKFLOWS[0],"scripts/ci/obtainx_ci_policy.py plan --head")
   self.assertTrue(any('risk path' in x for x in module.verify(self.root)))
  def test_reject_roamdap_digest_tamper(self):
   with (self.root/'docs/ROADMAP.md').open('ab') as f:f.write(b'\nmodified')

@@ -123,7 +123,7 @@ class RT02FP02Contracts(unittest.TestCase):
                       "inv.get('signed_with_ephemeral_ci_key') is False")
 
     def test_refuse_skipped_p02_retrigger(self):
-        self.mutation(C.WORKFLOW,"      - 'scripts/ci/r02f_p02_*'",
+        self.mutation(C.WORKFLOW,"scripts/ci/obtainx_ci_policy.py plan --head",
                       "      - 'docs/**'")
 
     def test_refuse_missing_preceding_rt02c(self):

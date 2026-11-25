@@ -64,7 +64,7 @@ def inspect(root: Path = ROOT) -> list[str]:
     for needle in required_workflow:
         if needle not in w:
             p.append('hosted API36 workflow requirement missing: ' + needle)
-    if w.count('test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"') != 2:
+    if w.count('test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"') != 3:
         p.append('source binding required in both bootstrap and receipt initialization')
     if ('uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262' not in w
         or 'flutter-version: \'3.47.6\'' not in w):

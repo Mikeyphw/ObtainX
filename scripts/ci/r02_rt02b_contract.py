@@ -29,6 +29,8 @@ def inspect(root:Path=ROOT)->list[str]:
             errors.append('missing source '+rel);docs[rel]=''
         else: docs[rel]=p.read_text('utf8')
     w=docs[WORKFLOW];h=docs[HOST];f=docs[FIXTURE];d=docs[DART]
+    if w.count('test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"') != 2:
+        errors.append("exact source guard must exist in planner and runtime job")
     must={
         R00:("'obtainx-r02-rt02b.yml'", 'unexpected = names - EXPECTED_WORKFLOWS',
              'missing = EXPECTED_WORKFLOWS - names'),

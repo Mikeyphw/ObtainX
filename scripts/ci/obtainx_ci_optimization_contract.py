@@ -20,9 +20,9 @@ FILES = (SOURCE, FLUTTER, *HEAVY)
 POLICY = 'scripts/ci/obtainx_ci_policy.py'
 RISK = 'scripts/ci/*optimization*'
 LABEL = 'ci:development-only'
-EVENT_TYPES = 'types: [opened, reopened, synchronize, labeled, unlabeled]'
-DEFER_EXPR = "github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'ci:development-only')"
-REFUSE_EXPR = "github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:development-only')"
+EVENT_TYPES = 'types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review, converted_to_draft]'
+DEFER_EXPR = "needs.scope.outputs."
+REFUSE_EXPR = "steps.scope.outputs.mode == 'scoped'"
 UPLOAD = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
 EMULATOR = 'ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d'
 OPT03_HELPER = 'scripts/ci/obtainx_ci_optimization_opt03_apk_cache.py'
@@ -67,7 +67,7 @@ def inspect(root: Path = ROOT) -> list[str]:
             source.count(guard_name)!=1 or
             source.count(contract_step)!=1 or
             source.find(guard_name)<source.find(contract_step) or
-            '        if: ${{ '+REFUSE_EXPR+' }}\n' not in guarded or
+            '        if: '+REFUSE_EXPR+'\n' not in guarded or
             'OX_CI_DEVELOPMENT_ONLY_NOT_QUALIFIED' not in guarded or
             '          exit 1\n' not in guarded or
             '  runs-on: ubuntu-24.04' not in source):
@@ -75,7 +75,7 @@ def inspect(root: Path = ROOT) -> list[str]:
     if 'python3 -B scripts/ci/obtainx_ci_optimization_contract.py --check' not in source or \
             "python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v" not in source:
         errors.append('optimization/security source tests must be mandatory')
-    if "needs.scope.outputs.full_flutter == 'true' && !contains(github.event.pull_request.labels.*.name, 'ci:development-only')" not in flutter:
+    if "needs.scope.outputs.full_flutter == 'true'" not in flutter:
         errors.append('full Flutter must be deferred only with explicit development-only label')
     if 'needs.scope.outputs.targeted_flutter' not in flutter or \
             'flutter test --no-pub test/archive_extraction_security_test.dart' not in flutter or \
@@ -84,14 +84,11 @@ def inspect(root: Path = ROOT) -> list[str]:
         errors.append('full/targeted Flutter and security/compile paths must remain intact')
     for rel in HEAVY:
         content=files[rel]
-        if DEFER_EXPR not in content or \
-                '    if: ${{ '+DEFER_EXPR+' }}' not in content:
-            errors.append('Android gate not conditionally deferred safely: '+rel)
-        if '  pull_request:\n    paths:' not in content or \
-                ".github/workflows/**'" not in content:
-            errors.append('high-risk Android PR path trigger lost: '+rel)
-        if "      - '"+RISK+"'" not in content:
-            errors.append('CI optimizer source change could skip Android gate: '+rel)
+        lane = ('api36','rt02','rt02b','rt02c')[HEAVY.index(rel)]
+        if ('    needs: scope\n    if: '+DEFER_EXPR+lane+" == 'true'" not in content or
+                'scripts/ci/obtainx_ci_policy.py plan --head' not in content or
+                '    paths:' in content or '    paths-ignore:' in content):
+            errors.append('Android gate must route through exact-SHA scope with all PR events: '+rel)
         if content.count(EMULATOR)!=1 or 'api-level: 36' not in content:
             errors.append('exact pinned API36 emulator changed or duplicated: '+rel)
         if content.count(UPLOAD)!=1 or \

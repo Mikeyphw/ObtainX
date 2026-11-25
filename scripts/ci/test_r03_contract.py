@@ -86,6 +86,6 @@ class R03MutationTests(unittest.TestCase):
     def test_remove_ci_risk_scope(self):
         self.mutated(PATHS[3],"'lib/services/r03_*'", "'docs/r03_*'")
     def test_remove_rt02c_path_gate(self):
-        self.mutated(PATHS[9],"- 'test/r03_*'", "- 'docs/r03_*'")
+        self.mutated(PATHS[9],"scripts/ci/obtainx_ci_policy.py plan --head", "- 'docs/r03_*'")
 
 if __name__=='__main__': unittest.main(verbosity=2)

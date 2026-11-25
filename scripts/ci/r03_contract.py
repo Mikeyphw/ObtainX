@@ -77,16 +77,15 @@ def verify(root:Path=ROOT)->int:
     assert_has('length == fullContentLength' not in provider,
         'old length-only cache qualification retained')
     assert_has("'lib/providers/apps_provider.dart'" in scope and
-        "'lib/services/r03_*'" in scope and "'test/r03_*'" in scope,
+        "    'lib/services/r03_*'," in scope and "'test/r03_*'" in scope,
         'R03 risk paths are not full CI gated')
     for p in ('.github/workflows/obtainx-r02-api36.yml',
               '.github/workflows/obtainx-r02-rt02.yml',
               '.github/workflows/obtainx-r02-rt02b.yml',
               '.github/workflows/obtainx-r02-rt02c.yml'):
         src=read(p)
-        for expected in ("- 'lib/services/r03_*'", "- 'test/r03_*'",
-                         "- 'lib/providers/apps_provider.dart'"):
-            assert_has(expected in src,p+' missing full hosted scope '+expected)
+        assert_has('scripts/ci/obtainx_ci_policy.py plan --head' in src and
+                   '    paths:' not in src, p+' missing exact scope/full event route')
     assert_has('python3 -B scripts/ci/r03_contract.py --check' in contracts,
         'R03 Python contract is not executed by hosted CI')
     assert_has('flutter test --no-pub test/r03_download_engine_test.dart' in flutter,

@@ -25,3 +25,9 @@
 ## R10-F03-HF01 - Analyzer repair
 
 Explicit Flutter semantics import supplies `CustomSemanticsAction` to the existing swipe row. The source-contract test requires the import and production action wiring. This addresses the shared compiler failure on all five failed workflows; hosted analyzer, widget and Android runtime verification remain pending on the new exact commit.
+
+## R10-F03-HF02 — Gesture cancellation and swipe visual regression
+
+HF01 hosted source `8b1a3a2e7c2abc012e0fe767e71ea36dc7135feb` passed the analyzer and five required workflows; the full Flutter test step failed in two existing cases. Flutter ends accepted drags on both pointer-up and pointer-cancel, so a recognizer end alone is not an authorization to pin or launch. The row now consumes a single actual release, refuses cancellations and ambiguous multi-pointer drags, preserves haptic arming and guarded action eligibility, and retains non-gesture alternatives. Tests retain the deliberately incomplete persistence fake so an accidental pin is still an error, assert cancellation state and tactile type, and exercise browser dispatch only after actual release in both directions.
+
+The reduced-visual-effects golden requires the original finger-linked reveal proportions; retain that direct manipulation rather than weakening or regenerating the golden. Both app low-fidelity and system disabled-animation preferences still suppress the timed settle. The system accessibility preference additionally disables reveal scaling. Hosted golden and widget execution on the repaired SHA are required; physical feedback and TV/screen reader verification remain separate.

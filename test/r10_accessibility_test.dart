@@ -28,6 +28,38 @@ void main() {
     expect(threshold.update(-120, left: false, right: true), isFalse);
     expect(R10SwipeThreshold.direction(80, left: true, right: false), 0);
   });
+  test('swipe requires a tracked single-pointer release, once only', () {
+    final release = R10SwipeRelease();
+    expect(release.consumeRelease(), isFalse);
+    release.pointerDown(1);
+    release.pointerCancel(1);
+    expect(release.consumeRelease(), isFalse);
+    release.pointerDown(2);
+    release.pointerDown(3);
+    release.pointerUp(2);
+    release.pointerUp(3);
+    expect(release.consumeRelease(), isFalse);
+    release.pointerDown(4);
+    release.invalidate();
+    release.pointerUp(4);
+    expect(release.consumeRelease(), isFalse);
+    release.pointerDown(5);
+    release.pointerUp(5);
+    expect(release.consumeRelease(), isTrue);
+    expect(release.consumeRelease(), isFalse);
+    release.pointerDown(6);
+    release.pointerCancel(6);
+    release.pointerDown(7);
+    release.pointerUp(7);
+    expect(release.consumeRelease(), isTrue);
+    release.pointerUp(999);
+    expect(release.consumeRelease(), isFalse);
+  });
+  test('direct drag reveal preserves proportions unless system motion is disabled', () {
+    expect(r10SwipeRevealScale(0.5, disableAnimations: false), closeTo(0.94, 0.0001));
+    expect(r10SwipeRevealScale(0.5, disableAnimations: true), 1.0);
+    expect(r10SwipeRevealScale(1.0, disableAnimations: false), 1.0);
+  });
   test('saved swipe indices stay stable and new action persists by name', () async {
     SharedPreferences.setMockInitialValues({'rightSwipeAction': 7});
     final settings = SettingsProvider()..prefs = await SharedPreferences.getInstance();

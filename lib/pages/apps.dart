@@ -1517,6 +1517,7 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
     with AutomaticKeepAliveClientMixin, SingleTickerProviderStateMixin {
   double _dragOffset = 0;
   final R10SwipeThreshold _swipeThreshold = R10SwipeThreshold();
+  final R10SwipeRelease _swipeRelease = R10SwipeRelease();
 
   // Eases [_dragOffset] back to 0 on release so the revealed action (icon +
   // label) slides and fades out smoothly instead of snapping — mirroring
@@ -1812,7 +1813,7 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
     final TextStyle? labelStyle = Theme.of(context).textTheme.labelLarge
         ?.copyWith(color: iconColor, fontWeight: FontWeight.w600);
 
-    final bool reduceMotion = r10ReduceMotion(context, context.read<SettingsProvider>().reduceVisualEffects);
+    final bool disableAnimations = MediaQuery.disableAnimationsOf(context);
     final Set<SwipeAction> availableActions = {
       if (canSwipeLeft) widget.leftAction,
       if (canSwipeRight) widget.rightAction,
@@ -1825,7 +1826,7 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
         unawaited(_executeAction(action, context));
       }
     }
-    final Widget swipeChild = GestureDetector(
+    final Widget swipeGesture = GestureDetector(
       onHorizontalDragStart: (_) {
         _settleController.stop();
         _swipeThreshold.reset();
@@ -1845,6 +1846,10 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
         }
       },
       onHorizontalDragEnd: (_) {
+        if (!_swipeRelease.consumeRelease()) {
+          _settleToZero();
+          return;
+        }
         final int direction = R10SwipeThreshold.direction(_dragOffset,
           left: canSwipeLeft, right: canSwipeRight);
         _swipeThreshold.reset();
@@ -1855,7 +1860,10 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
           _settleToZero();
         }
       },
-      onHorizontalDragCancel: _settleToZero,
+      onHorizontalDragCancel: () {
+        _swipeRelease.invalidate();
+        _settleToZero();
+      },
       child: ClipRect(
         child: Stack(
           children: [
@@ -1868,7 +1876,8 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
                   child: Opacity(
                     opacity: revealProgress,
                     child: Transform.scale(
-                      scale: reduceMotion ? 1 : 0.88 + 0.12 * revealProgress,
+                      scale: r10SwipeRevealScale(revealProgress,
+                        disableAnimations: disableAnimations),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: bgIconLeading
@@ -1894,6 +1903,14 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
           ],
         ),
       ),
+    );
+    final Widget swipeChild = Listener(
+      onPointerDown: (event) => _swipeRelease.pointerDown(event.pointer),
+      onPointerUp: (event) => _swipeRelease.pointerUp(event.pointer),
+      onPointerCancel: (event) => _swipeRelease.pointerCancel(event.pointer),
+      onPointerPanZoomStart: (event) => _swipeRelease.pointerDown(event.pointer),
+      onPointerPanZoomEnd: (event) => _swipeRelease.pointerUp(event.pointer),
+      child: swipeGesture,
     );
     // The configured actions are reachable without a horizontal gesture.
     // Only show the extra control for remote/directional input to retain the

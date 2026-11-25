@@ -25,6 +25,49 @@ class R10SwipeThreshold {
   void reset() => _armed = 0;
 }
 
+/// A drag-end callback alone does not establish a successful release: Flutter
+/// also ends accepted drags on pointer cancellation. Authorize one action only
+/// after the actual single-pointer up event, before recognizer dispatch.
+class R10SwipeRelease {
+  final Set<int> _pointers = <int>{};
+  bool _single = false;
+  bool _released = false;
+
+  void pointerDown(int pointer) {
+    _single = _pointers.isEmpty;
+    _released = false;
+    _pointers.add(pointer);
+  }
+
+  void pointerUp(int pointer) {
+    final only = _pointers.length == 1;
+    final tracked = _pointers.remove(pointer);
+    _released = tracked && only && _single;
+  }
+
+  void pointerCancel(int pointer) {
+    _pointers.remove(pointer);
+    invalidate();
+  }
+
+  void invalidate() {
+    _single = false;
+    _released = false;
+  }
+
+  bool consumeRelease() {
+    final result = _released;
+    invalidate();
+    return result;
+  }
+}
+
+/// Direct manipulation retains its existing visual proportions. The platform
+/// accessibility preference disables scaling; both motion preferences still
+/// suppress the time-driven settle animation in the row.
+double r10SwipeRevealScale(double progress, {required bool disableAnimations}) =>
+    disableAnimations ? 1.0 : 0.88 + 0.12 * progress;
+
 /// The tracked listing's original source, not its latest artifact or a
 /// different listing's URL. Reject non-web schemes and embedded credentials.
 Uri? r10SourceHomepage(String source) {

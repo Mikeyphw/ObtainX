@@ -32,6 +32,28 @@ class R10Accessibility(unittest.TestCase):
         self.assertIn("import 'package:flutter/semantics.dart' show CustomSemanticsAction;", apps)
         self.assertIn('CustomSemanticsAction(label: _actionLabel(action))', apps)
         self.assertIn('customSemanticsActions:', apps)
+    def test_swipe_release_gate_and_cancel_regressions(self):
+        apps=read('lib/pages/apps.dart')
+        self.assertIn('final R10SwipeRelease _swipeRelease', apps)
+        for token in ('onPointerDown:', 'onPointerUp:', 'onPointerCancel:', 'onPointerPanZoomStart:', 'onPointerPanZoomEnd:', '_swipeRelease.invalidate();', 'if (!_swipeRelease.consumeRelease())'):
+            self.assertIn(token, apps)
+        end=apps.split('onHorizontalDragEnd: (_) {',1)[1].split('onHorizontalDragCancel:',1)[0]
+        self.assertLess(end.index('consumeRelease()'),end.index('runAction('))
+        helper=read('lib/components/r10_accessibility.dart')
+        self.assertIn('_released = tracked && only && _single;', helper)
+        self.assertIn('void pointerCancel(int pointer)', helper)
+        fixture=read('test/apps_scroll_work_test.dart')
+        for token in ('await gesture.cancel();', 'await gesture.up();', 'expect(launches.length, before + (cancel ? 0 : 1))', 'app.pinned, isFalse', 'HapticFeedbackType.selectionClick'):
+            self.assertIn(token, fixture)
+    def test_swipe_reduced_motion_and_existing_golden_contract(self):
+        apps=read('lib/pages/apps.dart')
+        self.assertIn('r10SwipeRevealScale(revealProgress,', apps)
+        self.assertIn('final bool disableAnimations = MediaQuery.disableAnimationsOf(context);', apps)
+        settle=apps.split('void _settleToZero() {',1)[1].split('@override',1)[0]
+        self.assertIn('r10ReduceMotion(context, context.read<SettingsProvider>().reduceVisualEffects)',settle)
+        helper=read('lib/components/r10_accessibility.dart')
+        self.assertIn('disableAnimations ? 1.0 : 0.88 + 0.12 * progress',helper)
+        self.assertIn("matchesGoldenFile('goldens/app-row-swiping-$reduceEffects.png')",read('test/apps_scroll_work_test.dart'))
     def test_nav_focus_and_layout(self):
         home=read('lib/pages/home.dart')
         for token in ('R10NavigationStrip(', 'R10NavigationTarget(', 'ExcludeFocus(', 'ExcludeSemantics(', 'reduceMotion: reduceMotion', 'scrollable: true', 'r10SettingsActivityCenter'):

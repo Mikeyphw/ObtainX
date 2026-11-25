@@ -144,6 +144,8 @@ def inspect(root:Path=ROOT)->list[str]:
     for p,markers in anchors.items():
         for m in markers:
             if m not in docs[p]:errors.append(p+': protected source evidence missing '+m)
+    if re.search(r'(?m)^\s*flutter\s+analyze[^\n]*--no-fatal-warnings', w):
+        errors.append('HF12: fatal analyzer warnings must remain enabled')
     if any(w.count(token)!=1 for token in ('python3 -B scripts/ci/r02_rt02_fixture.py --out',
                                             'python3 -B scripts/ci/r02_rt02c_fixture.py --out')):
         errors.append('one pre-emulator build per fixture category required')
@@ -153,6 +155,18 @@ def inspect(root:Path=ROOT)->list[str]:
         errors.append('GitHub workflow write permission forbidden')
     if re.search(r'(?i)gh\s+release\s+create|flutter\s+build\s+apk.*--release',w):
         errors.append('publication forbidden')
+    # HF12: these compile-time environment constants all default to "" when
+    # the analyzer runs without --dart-define. A set literal over them triggers
+    # equal_elements_in_set. Require the runtime deduplication assertion and
+    # reject the exact dangerous three-constant literal in any order/spacing.
+    runtime_distinct = r'(?m)^\s*expect\(\s*\[\s*v1Sha\s*,\s*baseSha\s*,\s*splitSha\s*\]\s*\.toSet\(\)\.length\s*,\s*3\s*\);\s*$'
+    if len(re.findall(runtime_distinct, d)) != 1:
+        errors.append('HF12: require three distinct environment digests via runtime list.toSet assertion')
+    for names in re.findall(r'\{\s*((?:v1Sha|baseSha|splitSha)(?:\s*,\s*(?:v1Sha|baseSha|splitSha)){2})\s*,?\s*\}', d):
+        if set(re.split(r'\s*,\s*', names)) == {'v1Sha', 'baseSha', 'splitSha'}:
+            errors.append('HF12: compile-time environment digest set literal forbidden')
+    if re.search(r'(?m)^\s*//\s*ignore(?:_for_file)?\s*:[^\n]*\bequal_elements_in_set\b', d):
+        errors.append('HF12: analyzer warning suppression forbidden')
     if d.count('extractZipOffIsolate(')!=2 or d.count('resolveInstallBundlePlan(')!=2 or d.count('OX_R02C_DART_STAGE=PREINSTALL_REFUSED')!=2:
         errors.append('archive scenario redundancy or negative path missing')
     if docs[R00_TEST].count("'obtainx-r02-rt02c.yml'") < 5:

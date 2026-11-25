@@ -61,6 +61,34 @@ class SourceMutations(unittest.TestCase):
         self.mutation(C.SOURCE_WF,'python3 scripts/ci/r02_rt02c_contract.py --check','echo pass')
     def test_no_mock_installer(self):
         self.mutation(C.DART,'StockInstaller(SettingsProvider()).installApk(','fakeInstaller(')
+    def test_hf12_original_environment_constant_set_refused(self):
+        self.mutation(C.DART, 'expect([v1Sha, baseSha, splitSha].toSet().length, 3);',
+                      'expect({v1Sha, baseSha, splitSha}.length, 3);')
+    def test_hf12_reordered_constant_set_refused_even_with_good_assertion(self):
+        good = 'expect([v1Sha, baseSha, splitSha].toSet().length, 3);'
+        self.mutation(C.DART, good, good + '\n    expect({ splitSha,\n v1Sha, baseSha, }.length, 3);')
+    def test_hf12_missing_distinct_assertion_refused(self):
+        self.mutation(C.DART, 'expect([v1Sha, baseSha, splitSha].toSet().length, 3);', 'expect(true, true);')
+    def test_hf12_weakened_distinct_count_refused(self):
+        self.mutation(C.DART, 'expect([v1Sha, baseSha, splitSha].toSet().length, 3);',
+                      'expect([v1Sha, baseSha, splitSha].toSet().length, 2);')
+    def test_hf12_list_length_without_deduplication_refused(self):
+        self.mutation(C.DART, 'expect([v1Sha, baseSha, splitSha].toSet().length, 3);',
+                      'expect([v1Sha, baseSha, splitSha].length, 3);')
+    def test_hf12_duplicate_digest_argument_refused(self):
+        self.mutation(C.DART, 'expect([v1Sha, baseSha, splitSha].toSet().length, 3);',
+                      'expect([v1Sha, v1Sha, splitSha].toSet().length, 3);')
+    def test_hf12_lint_suppression_refused(self):
+        self.mutation(C.DART, 'void main() {', '// ignore_for_file: equal_elements_in_set\nvoid main() {')
+    def test_hf12_analyzer_warning_downgrade_refused(self):
+        self.mutation(C.WF, 'flutter analyze integration_test lib test',
+                      'flutter analyze integration_test lib test --no-fatal-warnings')
+    def test_hf12_runtime_assertion_whitespace_allowed(self):
+        p=self.root/C.DART
+        text=p.read_text();p.write_text(text.replace(
+            'expect([v1Sha, baseSha, splitSha].toSet().length, 3);',
+            'expect( [ v1Sha, baseSha,\n splitSha ].toSet().length, 3 );'))
+        self.assertEqual(C.inspect(self.root), [])
     def test_owned_foreground_gate_required(self):
         self.mutation(C.DART, 'owner.sealForHandoff(nativeCancelable: true)', 'true')
     def test_native_gate_dispatch_required(self):

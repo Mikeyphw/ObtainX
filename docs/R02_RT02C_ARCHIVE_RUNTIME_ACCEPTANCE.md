@@ -24,3 +24,13 @@ approval, and independent host package-state verification are required. No
 negative case may reach the session bridge or publish a session identity. The
 previous exact-head run `45512130442` failed before completing a case; no new
 hosted result is claimed by this change.
+
+## HF12 — analyzer-safe digest uniqueness
+
+The three `String.fromEnvironment` constants can have equal default values
+when analyzed without compile-time defines. Constructing the set through a
+list's runtime `toSet()` preserves the distinct-digest assertion without the
+static duplicate-set warning. The source gate and mutation tests reject the
+original literal, missing/relaxed uniqueness, duplicate inputs and analyzer
+warning suppression; actual strict hosted analysis remains required. All
+HF11 owned-session and seven-case receipt requirements remain unchanged.

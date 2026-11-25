@@ -1,3 +1,22 @@
+# ObtainX — R08-F05 / RT02C-HF12 analyzer regression (25 November 2026)
+
+**Preimage:** PR #30 `a01e6dd2718880f231869d5a850f12e1222dc897`.
+Source/contract integrity, hosted Flutter and API36 bootstrap passed. RT02
+`45515825848`, RT02B `45515826206` and RT02C `45515826129` all stopped before
+Android execution with `equal_elements_in_set` at the HF11 digest assertion.
+
+**Repair:** use `[v1Sha, baseSha, splitSha].toSet().length` at runtime, preserving
+exactly three distinct digests. The RT02C source gate rejects the original
+compile-time set literal (including reordered elements), missing/weakened
+assertions, duplicate inputs, and warning suppression. Mutation tests exercise
+the rejected cases and permit formatting variation. Existing strict hosted
+integration analysis and all seven Android cases remain mandatory. The Python
+source guard is not a substitute for actual Dart analysis or hosted Android
+acceptance. No Gradle runs locally. R02, R07 and R08 acceptance remain open;
+R09, R10, R11 and R12 remain implementation/qualification work.
+
+---
+
 # ObtainX — RT02C-HF11 owned foreground session (24 November 2026)
 
 **Preimage:** PR #30 `33a9a6fa489111f0b5f02744bdb07fb708d1e84e`.

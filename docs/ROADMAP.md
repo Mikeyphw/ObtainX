@@ -1,3 +1,7 @@
+## R10-F03-HF01 — Flutter semantics import repair
+
+Exact failed PR #30 source `f6e15991dd665b57754a12bcbb6a9a6d5957497a` (tree `1049a95d54f9ede50e78957bbc5f8718cf956835`). Source integrity passed; hosted Flutter, API36 bootstrap, RT02, RT02B and RT02C failed at the undefined `CustomSemanticsAction` in `lib/pages/apps.dart` (runs 45641502056, 45641501610, 45641501456, 45641501824, 45641501464). Explicitly import the Flutter semantics declaration and guard the production custom action wiring. No accessibility action, installer policy, test or qualification gate removed. Six full hosted workflows must qualify the new head; physical acceptance and historical native session-state debt remain pending. Remaining R11 integrations, policy and history; R12 final qualification and release.
+
 ## R10-F03 — responsive interaction, homepage and accessibility
 
 Base: PR #30 `748aca044aa698648e66e7cf0feb637cee545b79`; all six full hosted workflows passed (45632972344, 45632972643, 45632972567, 45632972463, 45632972492, 45632972446). Preserve historical receipt and native acceptance-state debt. Implement swipe homepage and tactile feedback, gesture alternatives, adaptive shell/detail actions, growing dropdowns, keyboard/remote focus and reduced motion. Audit French, Turkish and Japanese keys/placeholders with explicit fallback inventory. F03 hosted analysis/runtime and physical acceptance pending. Remaining R11 (integrations, policy and history) and R12 (qualification, packaging and release).

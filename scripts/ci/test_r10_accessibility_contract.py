@@ -27,6 +27,11 @@ class R10Accessibility(unittest.TestCase):
         self.assertIn("{'http', 'https'}",helper)
         self.assertIn('uri.userInfo.isNotEmpty',helper)
         self.assertIn('LaunchMode.externalApplication',helper)
+    def test_custom_semantics_action_import(self):
+        apps=read('lib/pages/apps.dart')
+        self.assertIn("import 'package:flutter/semantics.dart' show CustomSemanticsAction;", apps)
+        self.assertIn('CustomSemanticsAction(label: _actionLabel(action))', apps)
+        self.assertIn('customSemanticsActions:', apps)
     def test_nav_focus_and_layout(self):
         home=read('lib/pages/home.dart')
         for token in ('R10NavigationStrip(', 'R10NavigationTarget(', 'ExcludeFocus(', 'ExcludeSemantics(', 'reduceMotion: reduceMotion', 'scrollable: true', 'r10SettingsActivityCenter'):

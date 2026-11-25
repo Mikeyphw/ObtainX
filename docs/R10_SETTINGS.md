@@ -21,3 +21,7 @@
 - Compact shell navigation has scrollable, keyboard-activatable 48dp targets, with selected labels in wider compact viewports and semantic labels at all sizes. Inactive tabs cannot receive focus or semantics; TV rail scrolls and wraps labels. Existing explicit phone layout preference is retained. System reduced motion and app visual-effects preference govern the shell and swipe transitions. Platform text scaling is no longer clamped at 120%; detail actions and dropdown menus grow rather than shrink labels.
 - `R10_LOCALE_REVIEW.json` enumerates every English/French/Turkish/Japanese missing, extra, blank and placeholder mismatch. New action labels translated in en/fr/tr/ja/pt/pt-BR. Existing untranslated keys (90 French, 101 Turkish, 101 Japanese) remain explicit English fallback, not translated parity. Long label and large-text fixtures cover new shared controls. Independent device and language-review acceptance remain pending.
 - Hosted Flutter analyzer, actual phone/split-screen/TV navigation, screen reader, platform haptic and contrast checks are separate acceptance gates. R11 and R12 remain.
+
+## R10-F03-HF01 - Analyzer repair
+
+Explicit Flutter semantics import supplies `CustomSemanticsAction` to the existing swipe row. The source-contract test requires the import and production action wiring. This addresses the shared compiler failure on all five failed workflows; hosted analyzer, widget and Android runtime verification remain pending on the new exact commit.

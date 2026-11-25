@@ -19,6 +19,7 @@ import 'package:flutter/rendering.dart'
         ClipRectLayer,
         SliverPhysicalParentData,
         RenderSliver;
+import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:progress_indicator_m3e/progress_indicator_m3e.dart';

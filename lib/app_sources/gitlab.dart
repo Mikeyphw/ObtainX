@@ -146,7 +146,7 @@ class GitLab extends AppSource {
     final pat = await getPATIfAny(hostChanged ? additionalSettings : {});
     return {
       HttpHeaders.refererHeader: 'https://${hosts[0]}',
-      if (pat != null) 'PRIVATE-TOKEN': pat,
+      'PRIVATE-TOKEN': ?pat,
     };
   }
 

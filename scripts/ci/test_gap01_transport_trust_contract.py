@@ -19,7 +19,7 @@ class Gap01TransportTrust(unittest.TestCase):
   for fn in ('probeDownloadResponseMetadata','checkPartialDownloadHash','checkETagHeader','getDownloadSize','_downloadFile'):
    self.assertIn('HttpService().sourceRequestStreamResponse(', code.split('> '+fn+'(',1)[1].split('\n}\n',1)[0],fn)
  def test_auth_paths_and_html_asset_binding(self):
-  gl=text('lib/app_sources/gitlab.dart');self.assertNotIn('private_token=',gl);self.assertIn("if (pat != null) 'PRIVATE-TOKEN': pat",gl);self.assertIn("sameRequestOrigin(uri, Uri.parse('https://${hosts[0]}'))",gl)
+  gl=text('lib/app_sources/gitlab.dart');self.assertNotIn('private_token=',gl);self.assertIn("'PRIVATE-TOKEN': ?pat",gl);self.assertIn("sameRequestOrigin(uri, Uri.parse('https://${hosts[0]}'))",gl)
   gh=text('lib/app_sources/github.dart');self.assertIn('_canSendSourceToken(requestUri, additionalSettings)',gh);self.assertIn('sameRequestOrigin(uri, api)',gh)
   self.assertIn('getAssetRequestHeaders(app.additionalSettings, app.url, url)',text('lib/providers/apps_provider_install.dart'))
   self.assertIn("crossedOrigin ? {...additionalSettings, 'requestHeader': []}",text('lib/app_sources/html.dart'))

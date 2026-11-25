@@ -17,8 +17,11 @@ class _GitHub extends GitHub {
 }
 
 class _GitLab extends GitLab {
+  _GitLab({this.pat = 'fixture-secret'});
+  final String? pat;
+
   @override
-  Future<String?> getPATIfAny(Map<String, dynamic> settings) async => 'fixture-secret';
+  Future<String?> getPATIfAny(Map<String, dynamic> settings) async => pat;
 }
 
 void main() {
@@ -118,6 +121,13 @@ void main() {
   test('GitLab header stays on service origin and no token is injected into asset URL', () async {
     final source = _GitLab();
     expect((await source.getRequestHeaders({}, 'https://gitlab.com/api/v4/projects'))?['PRIVATE-TOKEN'], 'fixture-secret');
+    final anonymous = _GitLab(pat: null);
+    final anonymousHeaders = await anonymous.getRequestHeaders(
+      {}, 'https://gitlab.com/api/v4/projects',
+    );
+    expect(anonymousHeaders, isNotNull);
+    expect(anonymousHeaders!.containsKey('PRIVATE-TOKEN'), isFalse);
+    expect(anonymousHeaders[HttpHeaders.refererHeader], 'https://gitlab.com');
     for (final url in ['http://gitlab.com/a', 'https://gitlab.com:8443/a', 'https://gitlab.com.evil.test/a', 'https://storage.test/a']) {
       expect(await source.getRequestHeaders({}, url), isNull);
       expect(await source.assetUrlPrefetchModifier(url, 'https://gitlab.com/a/b', {}), url);

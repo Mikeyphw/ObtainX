@@ -306,7 +306,26 @@ class MainActivity : FlutterActivity() {
     private val deviceAppsExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    // SHOW_APP_INFO is an untrusted navigation request, not installer authority.
+    // Strip all extras, flags, ClipData and caller-supplied data before passing
+    // it through the existing app_links cold/warm delivery mechanism.
+    private fun normalizeR11AppInfoIntent(incoming: Intent): Intent {
+        if (incoming.action != "android.intent.action.SHOW_APP_INFO") return incoming
+        val target = try {
+            incoming.getStringExtra(Intent.EXTRA_PACKAGE_NAME)
+        } catch (_: RuntimeException) {
+            null
+        }
+        if (target == null || target.length > 255 ||
+            !Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+").matches(target)) {
+            return Intent(Intent.ACTION_MAIN)
+        }
+        return Intent(Intent.ACTION_VIEW, Uri.Builder().scheme("obtainium")
+            .authority("open").appendQueryParameter("id", target).build())
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        setIntent(normalizeR11AppInfoIntent(intent))
         installNativeCrashHandler(this)
         super.onCreate(savedInstanceState)
         sweepOrphanedReleaseCache(applicationContext)
@@ -422,7 +441,8 @@ class MainActivity : FlutterActivity() {
         }, FOCUS_REGAIN_SETTLE_MS)
     }
 
-    override fun onNewIntent(intent: Intent) {
+    override fun onNewIntent(incomingIntent: Intent) {
+        val intent = normalizeR11AppInfoIntent(incomingIntent)
         try {
             super.onNewIntent(intent)
         } catch (ex: IllegalStateException) {

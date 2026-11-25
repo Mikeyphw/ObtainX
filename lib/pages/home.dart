@@ -10,7 +10,7 @@ import 'package:obtainium/layout_breakpoints.dart';
 import 'package:obtainium/components/r10_accessibility.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/pages/add_app.dart';
-import 'package:obtainium/pages/app.dart' show loadIconsAndScanStoresFor;
+import 'package:obtainium/pages/app.dart' show AppPage, loadIconsAndScanStoresFor;
 import 'package:obtainium/pages/apps.dart';
 import 'package:obtainium/pages/import_export.dart';
 import 'package:obtainium/pages/import_from_url_list.dart'
@@ -22,6 +22,8 @@ import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/services/shared_url_receiver.dart';
 import 'package:obtainium/services/r08_source_policy.dart';
+import 'package:obtainium/services/r11_external_requests.dart';
+import 'package:obtainium/services/r11_automation.dart';
 import 'package:provider/provider.dart';
 
 /// The link import that pasted [text] holds, as one `obtainium://` link, or
@@ -466,11 +468,114 @@ class HomePageState extends State<HomePage> {
       }
     }
 
+    Future<App?> chooseExternalListing(String package) async {
+      await appsProvider.waitForInitialLoad();
+      if (!mounted || !navigator.mounted) return null;
+      final candidates = r11PackageListings(appsProvider.apps, package);
+      if (candidates.isEmpty) {
+        showMessage(tr('r11ListingNotFound'));
+        return null;
+      }
+      final App? selected = candidates.length == 1
+          ? candidates.single
+          : await showDialog<App>(
+              context: navigator.context,
+              builder: (dialog) => SimpleDialog(
+                title: Text(tr('r11ChooseListing')),
+                children: [
+                  for (final app in candidates)
+                    SimpleDialogOption(
+                      onPressed: () => Navigator.pop(dialog, app),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(app.finalName),
+                          Text('${Uri.tryParse(app.url)?.host ?? ''} · ${app.listingKey}'),
+                        ],
+                      ),
+                    ),
+                  SimpleDialogOption(
+                    onPressed: () => Navigator.pop(dialog),
+                    child: Text(tr('cancel')),
+                  ),
+                ],
+              ),
+            );
+      if (selected == null || !mounted || !navigator.mounted) return null;
+      final live = r11ExactLiveListing(appsProvider.apps, selected);
+      if (live == null) showMessage(tr('r11ListingChanged'), isError: true);
+      return live?.deepCopy();
+    }
+
+    Future<void> handleOpenPackage(Uri uri) async {
+      final package = r11PackageFromLink(uri);
+      if (package == null) {
+        showMessage(tr('r11InvalidPackage'), isError: true);
+        return;
+      }
+      final selected = await chooseExternalListing(package);
+      if (selected == null || !mounted || !navigator.mounted) return;
+      // Standalone route: never substitute a visible row in a filtered,
+      // wide-layout or folder list. Keep the caller's current tab/draft intact.
+      unawaited(navigator.push(MaterialPageRoute<void>(builder: (_) =>
+        Consumer<AppsProvider>(builder: (context, provider, _) {
+          final live = r11ExactLiveListing(provider.apps, selected);
+          return live == null
+              ? Scaffold(appBar: AppBar(), body: Center(child: Text(tr('r11ListingChanged'))))
+              : AppPage(appId: live.listingKey, suppressAutoCheck: true);
+        }),
+      )));
+    }
+
+    Future<void> handleAutomation(Uri uri) async {
+      final request = R11AutomationRequest.parse(uri);
+      final settings = appsProvider.settingsProvider;
+      if (request == null || !settings.r11AutomationEnabled) {
+        showMessage(tr('r11AutomationRefused'), isError: true);
+        return;
+      }
+      final selected = await chooseExternalListing(request.package);
+      if (selected == null || !mounted || !navigator.mounted ||
+          !settings.r11AutomationEnabled || !appsProvider.isForeground) return;
+      final approved = await showDialog<bool>(context: navigator.context,
+        builder: (dialog) => AlertDialog(
+          title: Text(tr('r11AutomationConfirm')),
+          content: Text('${selected.finalName}\n${selected.id}\n'
+            '${Uri.tryParse(selected.url)?.host ?? ''}\n'
+            '${selected.latestVersion}\n'
+            '${tr('r11Action_${request.action.name}')}\n\n${tr('r11AutomationDisclosure')}'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false), child: Text(tr('cancel'))),
+            FilledButton(onPressed: () => Navigator.pop(dialog, true), child: Text(tr('continue'))),
+          ],
+        ),
+      );
+      if (approved != true || !mounted || !navigator.mounted ||
+          !settings.r11AutomationEnabled || !appsProvider.isForeground) return;
+      try {
+        if (await getInstalledInfo(r11TaskerPackage, printErr: false) == null) {
+          showMessage(tr('r11TaskerMissing'), isError: true);
+          return;
+        }
+        final result = await r11RunAutomation(appsProvider, settings, request, selected);
+        if (!mounted || !settings.r11AutomationEnabled || !appsProvider.isForeground) return;
+        await r11SendTaskerResult(request, result);
+        showMessage(tr('r11AutomationResult'));
+      } catch (_) {
+        // Never send raw exceptions, source URLs, or credentials to a caller.
+        if (mounted) showMessage(tr('r11AutomationFailed'), isError: true);
+      }
+    }
+
     Future<void> interpretLink(Uri uri) async {
       final action = uri.host;
       try {
         if (uri.scheme != 'obtainium') throw UnsupportedURLError();
-        if (action == 'add') {
+        if (action == 'open') {
+          await handleOpenPackage(uri);
+        } else if (action == 'automation') {
+          await handleAutomation(uri);
+        } else if (action == 'add') {
           await handleAddUrl(obtainiumAddUrl(uri));
         } else if (action == 'app' || action == 'apps') {
           // Added as Import from URL list adds whatever is typed into it
@@ -539,41 +644,32 @@ class HomePageState extends State<HomePage> {
       return interpretLink(uri);
     }
 
-    // Check initial link if app was in cold state (terminated)
     final linkGate = IncomingSourceLinkGate();
-    Uri? appLink;
-    try {
-      appLink = await _appLinks.getInitialLink();
-      if (appLink != null && mounted) {
-        await interpretIncomingLink(appLink);
-      }
-    } catch (e) {
-      // A malformed cold-start link must not prevent warm listeners starting.
-      if (mounted) showError(e);
-    }
-    if (!mounted) return;
-    _sharedUrlReceiver.listen(handleSharedText);
-    final String? initialSharedText = await _sharedUrlReceiver
-        .getInitialSharedText();
-    if (initialSharedText != null) {
-      await handleSharedText(initialSharedText);
-    }
-    // Handle link when app is in warm state (front or background)
-    if (!mounted) return;
-    if (appLink != null) linkGate.accept(appLink, DateTime.now());
-    // Serialize distinct arrivals. A repeated cold echo is not permission to
-    // drop a different warm link, and failures cannot poison later arrivals.
     Future<void> pendingLink = Future<void>.value();
-    _linkSubscription = _appLinks.uriLinkStream.listen((uri) {
-      if (!linkGate.accept(uri, DateTime.now())) return;
+    var pendingCount = 0;
+    void enqueueLink(Uri uri) {
+      if (pendingCount >= 8 || !linkGate.accept(uri, DateTime.now())) return;
+      pendingCount++;
       pendingLink = pendingLink.then((_) async {
         if (mounted) await interpretIncomingLink(uri);
       }).catchError((Object error) {
         if (mounted) showError(error);
-      });
-    }, onError: (Object error) {
-      if (mounted) showError(error);
-    });
+      }).whenComplete(() { pendingCount--; });
+    }
+    try {
+      final initial = await _appLinks.getInitialLink();
+      if (!mounted) return;
+      if (initial != null) enqueueLink(initial);
+    } catch (e) {
+      if (mounted) showError(e);
+    }
+    if (!mounted) return;
+    _linkSubscription = _appLinks.uriLinkStream.listen(enqueueLink,
+      onError: (Object error) { if (mounted) showError(error); });
+    _sharedUrlReceiver.listen(handleSharedText);
+    final String? initialSharedText = await _sharedUrlReceiver.getInitialSharedText();
+    if (mounted && initialSharedText != null) await handleSharedText(initialSharedText);
+
   }
 
   Widget _floatingHomeNavigationBar({

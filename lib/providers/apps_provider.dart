@@ -24,6 +24,7 @@ import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/http/obtainx_user_agent.dart';
 import 'package:obtainium/http/response_bytes.dart';
 import 'package:obtainium/services/app_check_store.dart';
+import 'package:obtainium/services/r11_schedule.dart';
 import 'package:obtainium/services/r03_download_engine.dart';
 import 'package:obtainium/services/install_precommit_gate.dart';
 import 'package:obtainium/installers/r02f_p03_cancellable_stock.dart';
@@ -334,6 +335,7 @@ Future<File> downloadFileWithRetry(
   bool allowInsecure = false,
   LogsProvider? logs,
   CancellationToken? cancellationToken,
+  R03HistoryBinding? historyBinding,
 }) async {
   int remaining = retries;
   while (true) {
@@ -342,7 +344,7 @@ Future<File> downloadFileWithRetry(
       return await downloadFile(
         url, fileName, fileNameHasExt, onProgress, destDir,
         useExisting: useExisting, headers: headers, allowInsecure: allowInsecure,
-        logs: logs, cancellationToken: cancellationToken,
+        logs: logs, cancellationToken: cancellationToken, historyBinding: historyBinding,
       );
     } catch (error) {
       final int? code = error is ObtainiumError && error.code == 'HTTP_ERROR'
@@ -603,6 +605,7 @@ Future<File> downloadFile(
   int maxBytes = r03MaximumBytes,
   Directory? privateJournalDirectory,
   bool reviewHttpsOnly = false,
+  R03HistoryBinding? historyBinding,
 }) async {
   final bool keepAwakeAcquired =
       await NativeFeatures.acquireDownloadKeepAwake();
@@ -621,6 +624,7 @@ Future<File> downloadFile(
       maxBytes: maxBytes,
       privateJournalDirectory: privateJournalDirectory,
       reviewHttpsOnly: reviewHttpsOnly,
+      historyBinding: historyBinding,
     );
   } finally {
     if (keepAwakeAcquired) {
@@ -643,6 +647,7 @@ Future<File> _downloadFile(
   int maxBytes = r03MaximumBytes,
   Directory? privateJournalDirectory,
   bool reviewHttpsOnly = false,
+  R03HistoryBinding? historyBinding,
 }) async {
   final requestHeaders = withDefaultObtainXUserAgent(headers);
   if (requestHeaders.keys.any((key) =>
@@ -697,6 +702,7 @@ Future<File> _downloadFile(
         headers: requestHeaders, firstResponse: firstResponse, fetch: fetch,
         isCancelled: () => cancellationToken?.isCancelled ?? false,
         useExisting: useExisting,
+        historyBinding: historyBinding,
         onProgress: (progress, received, total) {
           onProgress?.call(progress, received, total);
         },
@@ -1828,6 +1834,11 @@ Future<void> bgUpdateCheck(
   params ??= {};
   final SettingsProvider settingsProvider = settings ?? SettingsProvider();
   await settingsProvider.initializeSettings();
+  if (!forceAll && r11InQuietHours(DateTime.now(), settingsProvider.r11QuietStart,
+      settingsProvider.r11QuietEnd)) {
+    unawaited(bgLogs.add('R11 automatic work postponed: quiet hours.'));
+    return;
+  }
 
   // This task wakes every 15 minutes, not once per update interval, so most
   // wake-ups have nothing to do: no check is due and no background install is
@@ -1926,6 +1937,24 @@ Future<void> bgUpdateCheck(
     unawaited(bgLogs.add('BG update task: Charging restriction in effect.'));
   }
 
+  if (!forceAll) {
+    if (networkRestricted || chargingRestricted) {
+      unawaited(bgLogs.add('R11 automatic work postponed: network or charging restriction.'));
+      await appsProvider.appCheckStore?.close();
+      return;
+    }
+    try {
+      if (!await r11ClaimAutomaticRun(settingsProvider.r11RateMinutes, DateTime.now())) {
+        unawaited(bgLogs.add('R11 automatic work postponed: minimum interval.'));
+        await appsProvider.appCheckStore?.close();
+        return;
+      }
+    } catch (_) {
+      unawaited(bgLogs.add('R11 automatic work postponed: scheduling policy unavailable.'));
+      await appsProvider.appCheckStore?.close();
+      return;
+    }
+  }
   final canInstall = !networkRestricted && !chargingRestricted;
   final silentlyInstallable = <String>[];
 
@@ -2057,7 +2086,16 @@ Future<void> bgUpdateCheck(
   // failed or was postponed for the screen, or one held back by the charging or
   // Wi-Fi limit. That last case is the foreground service's: WorkManager does
   // not start this task until both limits are met.
-  final bool installWaiting = canInstall
+  final bool installStillAllowed = canInstall &&
+      ((forceAll || !r11InQuietHours(DateTime.now(), settingsProvider.r11QuietStart, settingsProvider.r11QuietEnd)) &&
+       (!settingsProvider.bgUpdatesOnWiFiOnly || (await Connectivity().checkConnectivity()).any(
+           (network) => network == ConnectivityResult.wifi || network == ConnectivityResult.ethernet)) &&
+       (!settingsProvider.bgUpdatesWhileChargingOnly || const {BatteryState.charging,
+         BatteryState.full, BatteryState.connectedNotCharging}.contains(await Battery().batteryState)));
+  if (canInstall && !installStillAllowed) {
+    unawaited(bgLogs.add('R11 automatic installation postponed: policy changed during check.'));
+  }
+  final bool installWaiting = installStillAllowed
       ? await _runBGInstallMode(
           silentlyInstallable,
           appsProvider,

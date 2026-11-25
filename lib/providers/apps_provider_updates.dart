@@ -13,6 +13,7 @@ import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/services/bulk_import_service.dart';
+import 'package:obtainium/services/r11_external_requests.dart';
 import 'package:obtainium/services/bulk_scan_cache.dart';
 import 'package:obtainium/services/store_icon_resolver.dart';
 import 'package:obtainium/version/partial_download_version.dart';
@@ -684,13 +685,18 @@ extension AppsProviderUpdates on AppsProvider {
     return fetchedApp;
   }
 
-  Future<App?> fetchUpdate(String appId) async {
-    return SourceRequestSession.run(() => _fetchUpdateInSession(appId));
+  Future<App?> fetchUpdate(String appId, {App? exactListing}) async {
+    if (exactListing != null && (exactListing.listingKey != appId ||
+        r11ExactLiveListing(apps, exactListing) == null)) return null;
+    return SourceRequestSession.run(() => _fetchUpdateInSession(appId,
+      exactListing: exactListing));
   }
 
-  Future<App?> _fetchUpdateInSession(String appId) async {
+  Future<App?> _fetchUpdateInSession(String appId, {App? exactListing}) async {
+    if (exactListing != null && r11ExactLiveListing(apps, exactListing) == null) return null;
     final _FetchedAppUpdate? update = await _fetchUpdateSnapshot(appId);
-    if (update == null) return null;
+    if (update == null || (exactListing != null &&
+        r11ExactLiveListing(apps, exactListing) == null)) return null;
     return mergeFetchedUpdateWithLiveState(
       requestedApp: update.requestedApp,
       liveApp: apps[appId]?.app,

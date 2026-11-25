@@ -1484,6 +1484,32 @@ class SettingsProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  // Only the local Settings UI can authorize incoming automation requests.
+  bool get r11AutomationEnabled => prefs?.get('r11AutomationEnabled') == true;
+
+  set r11AutomationEnabled(bool enabled) {
+    prefs?.setBool('r11AutomationEnabled', enabled);
+    notifyListeners();
+  }
+
+  int _r11Int(int index, int max) {
+    final value = prefs?.get('r11ScheduleV1');
+    return value is List && value.length == 3
+        ? (int.tryParse(value[index].toString()) ?? 0).clamp(0, max) : 0;
+  }
+  int get r11QuietStart => _r11Int(0, 1439);
+  int get r11QuietEnd => _r11Int(1, 1439);
+  int get r11RateMinutes => _r11Int(2, 1440);
+
+  Future<void> setR11Schedule(int start, int end, int minutes) async {
+    await prefs?.setStringList('r11ScheduleV1', [
+      start.clamp(0, 1439).toString(), end.clamp(0, 1439).toString(),
+      minutes.clamp(0, 1440).toString(),
+    ]);
+    bgNextCheckDue = null;
+    notifyListeners();
+  }
+
   bool get bgUpdatesOnWiFiOnly {
     return prefs?.getBool('bgUpdatesOnWiFiOnly') ?? false;
   }

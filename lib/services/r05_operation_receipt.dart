@@ -61,6 +61,7 @@ class R05OperationReceipt {
     required this.backend,
     required this.fileNames,
     required this.kind,
+    this.channelFingerprint,
     this.sourceHost,
     this.sourceBranch,
     this.workflow,
@@ -83,6 +84,7 @@ class R05OperationReceipt {
   final DateTime createdUtc, updatedUtc;
   final int revision;
   final List<String> fileNames;
+  final String? channelFingerprint;
   final String? sourceHost, sourceBranch, workflow, commitSha, downloadSha256;
   final String? archiveSignerSha256, installedSignerSha256, reason;
   final int? runId, runAttempt, artifactId, androidCode, expectedVersionCode, androidVersionCode;
@@ -95,6 +97,7 @@ class R05OperationReceipt {
     required String backend,
     required String kind,
     required List<String> fileNames,
+    String? channelFingerprint,
     String? sourceHost,
     String? sourceBranch,
     String? workflow,
@@ -113,6 +116,7 @@ class R05OperationReceipt {
       backend: backend, kind: kind, fileNames: List.unmodifiable(fileNames),
       stage: R05InstallStage.pending, revision: 0,
       createdUtc: time, updatedUtc: time,
+      channelFingerprint: channelFingerprint,
       sourceHost: sourceHost, sourceBranch: sourceBranch, workflow: workflow,
       runId: runId, runAttempt: runAttempt, commitSha: commitSha,
       artifactId: artifactId, expectedVersionCode: expectedVersionCode, downloadSha256: downloadSha256,
@@ -167,6 +171,7 @@ class R05OperationReceipt {
     'stage': stage.name, 'createdUtc': createdUtc.toIso8601String(),
     'updatedUtc': updatedUtc.toIso8601String(), 'revision': revision,
     'backend': backend, 'kind': kind, 'fileNames': fileNames,
+    if (channelFingerprint != null) 'channelFingerprint': channelFingerprint,
     'sourceHost': sourceHost, 'sourceBranch': sourceBranch,
     'workflow': workflow, 'runId': runId, 'runAttempt': runAttempt,
     'commitSha': commitSha, 'artifactId': artifactId,
@@ -182,7 +187,7 @@ class R05OperationReceipt {
       'workflow','runId','runAttempt','commitSha','artifactId','downloadSha256',
       'archiveSignerSha256','installedSignerSha256','androidCode','expectedVersionCode','androidVersionCode',
       'verifiedUtc','reason'};
-    if (raw.keys.toSet().difference(keys).isNotEmpty ||
+    if (raw.keys.toSet().difference({...keys, 'channelFingerprint'}).isNotEmpty ||
         keys.difference(raw.keys.toSet()).isNotEmpty || raw['schema'] != 1) {
       throw const FormatException('Unrecognized R05 receipt schema');
     }
@@ -235,6 +240,7 @@ class R05OperationReceipt {
       id: id, listingKey: listing, packageId: package, stage: stage.single,
       createdUtc: created, updatedUtc: updated, revision: raw['revision'] as int,
       backend: backend, kind: kind, fileNames: List<String>.unmodifiable(files.cast<String>()),
+      channelFingerprint: _r05Digest(raw['channelFingerprint']),
       sourceHost: sourceHost, sourceBranch: _r05Text(raw['sourceBranch']),
       workflow: _r05Text(raw['workflow']), runId: _r05Positive(raw['runId']),
       runAttempt: _r05Positive(raw['runAttempt']), commitSha: sha,

@@ -16,6 +16,7 @@ import 'package:obtainium/folders/app_folder.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/components/generated_form_renderer.dart';
 import 'package:obtainium/providers/apps_provider.dart';
+import 'package:obtainium/services/r11_external_requests.dart';
 import 'package:obtainium/providers/notifications_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -1762,18 +1763,9 @@ extension AppsProviderLifecycle on AppsProvider {
     // When enabled, open the app's info in the App Manager app instead of the
     // system settings screen (parity with fork main). Falls back to system
     // settings if App Manager isn't installed or the launch fails.
-    if (settingsProvider.openAppInfoInAppManager) {
-      try {
-        final AndroidIntent intent = AndroidIntent(
-          action: 'android.intent.action.VIEW',
-          data: 'app-manager://details?id=$appId',
-        );
-        await intent.launch();
-        return;
-      } catch (_) {
-        // Fall through to standard settings below.
-      }
-    }
+    if (apps.containsListingKey(appId)) appId = apps[appId]!.app.id;
+    if (!r11ValidPackage(appId)) return;
+    if (settingsProvider.openAppInfoInAppManager && await r11OpenAppManager(appId)) return;
     final AndroidIntent intent = AndroidIntent(
       action: 'action_application_details_settings',
       data: 'package:$appId',

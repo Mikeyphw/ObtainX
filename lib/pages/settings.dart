@@ -29,6 +29,8 @@ import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/installers/shizuku_plugin.dart';
 import 'package:obtainium/main.dart';
 import 'package:obtainium/widgets/r07_activity_center_page.dart';
+import 'package:obtainium/widgets/r11_schedule_settings.dart';
+import 'package:obtainium/services/r11_external_requests.dart';
 import 'package:obtainium/widgets/r05_install_activity_page.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/app_sources/gitlab.dart';
@@ -121,7 +123,7 @@ class SettingsPageState extends State<SettingsPage> {
   // Public, localized setting labels only. A hit opens its owning section;
   // platform/backend-dependent controls remain gated there.
   static const _searchLabels = <String, List<String>>{
-    'updates': ['bgUpdateCheckInterval', 'runBgCheckNow', 'foregroundServiceForUpdateChecking',
+    'updates': ['r11Schedule', 'bgUpdateCheckInterval', 'runBgCheckNow', 'foregroundServiceForUpdateChecking',
       'enableBackgroundUpdates', 'bgUpdatesOnWiFiOnly', 'bgUpdatesWhileChargingOnly',
       'checkOnStart', 'checkUpdateOnDetailPage', 'includePrereleasesByDefault',
       'onlyCheckInstalledOrTrackOnlyApps', 'removeOnExternalUninstall', 'parallelDownloads', 'r10SettingsActivityCenter'],
@@ -137,7 +139,7 @@ class SettingsPageState extends State<SettingsPage> {
       'updateButtonsAtTopOfAppPage', 'alwaysUsePhoneLayout', 'showWebInAppView', 'highlightTouchTargets'],
     'interaction': ['leftSwipeAction', 'rightSwipeAction', 'tactileFeedbackEnabled', 'swipeAction_openSource'],
     'warnings': ['showAPKOriginWarnings', 'showAppDowngradeError', 'showBatteryOptimizationPrompt', 'showTrackOnlyWarnings'],
-    'integrations': ['openAppInfoInAppManager', 'beforeNewInstallsShareToAppVerifier',
+    'integrations': ['r11Automation', 'r11AppManagerInspect', 'openAppInfoInAppManager', 'beforeNewInstallsShareToAppVerifier',
       'enableDowngradeModules', 'enableVirusTotalScanning', 'virusTotalApiKeyLabel',
       'installerMode', 'installerModeStock', 'installerModeShizuku', 'installerModeDhizuku',
       'installerModeThirdParty', 'shizukuPretendToBeGooglePlay'],
@@ -889,6 +891,7 @@ class _UpdatesSection extends StatelessWidget {
     sp.enableBackgroundUpdates,
     sp.bgUpdatesOnWiFiOnly,
     sp.bgUpdatesWhileChargingOnly,
+    sp.r11QuietStart, sp.r11QuietEnd, sp.r11RateMinutes,
     sp.checkOnStart,
     sp.checkUpdateOnDetailPage,
     sp.onlyCheckInstalledOrTrackOnlyApps,
@@ -912,6 +915,7 @@ class _UpdatesSection extends StatelessWidget {
         // eligible apps), as opposed to pull-to-refresh's foreground check of
         // only the currently visible list.
         const _RunBgUpdateCheckNowButton(),
+        R11ScheduleSettings(settings: sp),
         ListTile(key: const ValueKey('r07-activity-center'),
           leading: const Icon(Icons.receipt_long_rounded),
           title: Text(tr('r10SettingsActivityCenter')),
@@ -986,8 +990,9 @@ class _UpdatesSection extends StatelessWidget {
                 sp.enableBackgroundUpdates = !sp.enableBackgroundUpdates,
           ),
         );
-      if (sp.enableBackgroundUpdates) {
-        rows
+    }
+    if (sp.updateInterval > 0) {
+      rows
           ..add(
             AppSwitchListTile(
               key: const ValueKey<String>('background_install_wifi_only'),
@@ -1004,7 +1009,6 @@ class _UpdatesSection extends StatelessWidget {
               onChanged: (bool value) => sp.bgUpdatesWhileChargingOnly = value,
             ),
           );
-      }
     }
     rows.addAll(<Widget>[
       AppSwitchListTile(
@@ -2565,6 +2569,7 @@ class _IntegrationsSectionState extends State<_IntegrationsSection>
 
   static int _integrationsSettingsHash(SettingsProvider sp) => Object.hash(
     sp.openAppInfoInAppManager,
+    sp.r11AutomationEnabled,
     sp.beforeNewInstallsShareToAppVerifier,
     sp.enableVirusTotalScanning,
     sp.enableDowngradeModules,
@@ -2587,6 +2592,16 @@ class _IntegrationsSectionState extends State<_IntegrationsSection>
     return M3eExpressiveSettingsCard(
       colorScheme: cs,
       items: [
+        AppSwitchListTile(
+          title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(tr('r11Automation')),
+            Text(tr('r11AutomationDisclosure'), style: Theme.of(context).textTheme.bodySmall),
+          ]),
+          value: sp.r11AutomationEnabled,
+          onChanged: (value) => sp.r11AutomationEnabled = value,
+        ),
+        if (_appManagerInstalled) ListTile(title: Text(tr('r11AppManagerInspect')),
+          subtitle: Text(tr('r11AppManagerHelp'))),
         ExplainedWhenOff(
           reason: !_loading && !_appManagerInstalled
               ? tr('appManagerNotInstalledSnackbar')
@@ -4076,6 +4091,15 @@ class _ExternalInstallerTileState extends State<_ExternalInstallerTile> {
                   tr('chooseExternalInstaller'),
                   style: Theme.of(builderContext).textTheme.titleLarge,
                 ),
+                for (final target in targets.where((target) =>
+                    target.package == r11AppManagerPackage &&
+                    target.activity == '$r11AppManagerPackage.apk.installer.PackageInstallerActivity').take(1))
+                  ListTile(
+                    leading: _targetIcon(target, size: 36),
+                    title: Text(target.label),
+                    subtitle: Text(tr('r11AppManagerHelp')),
+                    onTap: () => Navigator.of(sheetContext).pop(target),
+                  ),
                 const SizedBox(height: 12),
                 M3eExpressiveSettingsCard(
                   items: [

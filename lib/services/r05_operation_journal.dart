@@ -128,6 +128,7 @@ class R05OperationJournal {
     required String backend, required String kind,
     required List<String> fileNames,
     String? sourceHost, String? sourceBranch, String? workflow,
+    String? channelFingerprint,
     int? runId, int? runAttempt, String? commitSha, int? artifactId,
     String? downloadSha256, String? archiveSignerSha256, int? expectedVersionCode,
   }) => _exclusive(() async {
@@ -141,6 +142,7 @@ class R05OperationJournal {
     final receipt = R05OperationReceipt.start(
       id: id, listingKey: listingKey, packageId: packageId,
       backend: backend, kind: kind, fileNames: fileNames,
+      channelFingerprint: channelFingerprint,
       sourceHost: sourceHost, sourceBranch: sourceBranch, workflow: workflow,
       runId: runId, runAttempt: runAttempt, commitSha: commitSha,
       artifactId: artifactId, expectedVersionCode: expectedVersionCode, downloadSha256: downloadSha256,
@@ -184,6 +186,27 @@ class R05OperationJournal {
   });
 
   Future<List<R05OperationReceipt>> list() => _exclusive(_readAll);
+
+  /// Explicit privacy retention; never delete pending, handed-off or unknown
+  /// evidence and never remove live R03 cache records.
+  Future<int> pruneTerminalBefore(DateTime cutoff, {String? listingKey}) =>
+      _exclusive(() async {
+        final all = await _readAll();
+        final root = await _root();
+        var removed = 0;
+        for (final item in all) {
+          if (listingKey != null && item.listingKey != listingKey) continue;
+          if (!const {R05InstallStage.confirmed, R05InstallStage.failed,
+              R05InstallStage.cancelled}.contains(item.stage) ||
+              !item.updatedUtc.isBefore(cutoff.toUtc())) continue;
+          final file = _file(root, item.id);
+          final current = await _read(file);
+          if (current.encode() != item.encode()) continue;
+          await file.delete();
+          removed++;
+        }
+        return removed;
+      });
 
   /// A broadcast has package scope, not operation scope. Never attribute it
   /// to a specific install attempt while two live attempts are ambiguous.

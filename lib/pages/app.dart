@@ -14,6 +14,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:obtainium/components/r10_settings_context.dart';
 import 'package:obtainium/components/r10_accessibility.dart';
+import 'package:obtainium/services/r11_external_requests.dart';
 import 'package:obtainium/app_sources/apkmirror.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/components/app_bottom_sheet.dart';
@@ -910,6 +911,7 @@ class AppPage extends StatefulWidget {
     this.openInEditMode = false,
     this.appsListHeroFolderId,
     this.isEmbedded = false,
+    this.suppressAutoCheck = false,
   });
 
   final String appId;
@@ -922,6 +924,7 @@ class AppPage extends StatefulWidget {
   final bool openInEditMode;
 
   final bool isEmbedded;
+  final bool suppressAutoCheck;
 
   @override
   State<AppPage> createState() => _AppPageState();
@@ -3244,7 +3247,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
     }
     final ThemeData pageThemeForPage = _cachedPageTheme!;
 
-    if (!_scheduledDetailPageRefresh &&
+    if (!widget.suppressAutoCheck && !_scheduledDetailPageRefresh &&
         app != null &&
         settingsProvider.checkUpdateOnDetailPage &&
         app.app.additionalSettings['onDemandOnly'] != true &&
@@ -5304,12 +5307,24 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
                     icon: const Icon(Icons.language_rounded),
                     label: Text(tr('swipeAction_openSource')),
                   ),
+                  if (app.app.id == app.installedInfo?.packageName)
+                    OutlinedButton.icon(
+                      key: const ValueKey('r11-app-manager'),
+                      onPressed: () async {
+                        if (!await r11OpenAppManager(app.app.id) && mounted) {
+                          _showPageError(ObtainiumError(tr('appManagerNotInstalledSnackbar')));
+                        }
+                      },
+                      icon: const Icon(Icons.security),
+                      label: Text(tr('r11AppManagerInspect')),
+                    ),
                   TextButton.icon(
                     key: const ValueKey('r06-install-history'),
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => R07ActivityCenterPage(
                           packageId: app.app.id,
+                          listingKey: app.app.listingKey,
                         ),
                       ),
                     ),

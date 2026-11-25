@@ -2,6 +2,12 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:easy_localization/easy_localization.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:obtainium/services/r11_history.dart';
+import 'package:obtainium/services/r11_external_requests.dart';
 
 import 'package:flutter/material.dart';
 import 'package:obtainium/providers/apps_provider.dart';
@@ -11,8 +17,9 @@ import 'package:obtainium/services/r07_activity_catalog.dart';
 import 'package:provider/provider.dart';
 
 class R07ActivityCenterPage extends StatefulWidget {
-  const R07ActivityCenterPage({super.key, this.packageId, this.operationId, this.catalog});
+  const R07ActivityCenterPage({super.key, this.packageId, this.listingKey, this.operationId, this.catalog});
   final String? packageId;
+  final String? listingKey;
   /// A notification is never allowed to resolve by package or latest attempt.
   final String? operationId;
   /// Injected only by isolated widget tests; normal app reads existing journals.
@@ -29,6 +36,9 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
   Timer? _tick;
   bool _busy = false;
   String _filter = 'all';
+  String _channel = 'all';
+  String? _historyChannel(R07ActivityRecord entry) =>
+      entry.install?.channelFingerprint ?? entry.download?.historyBinding?.channel;
 
   @override
   void initState() {
@@ -110,8 +120,13 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
 
   bool _matchesListing(R07ActivityRecord entry, AppsProvider provider) {
     final key = entry.listingKey;
-    return key != null && provider.apps[key] != null &&
-        provider.apps[key]!.app.id == entry.packageId;
+    if (key == null || !provider.apps.containsListingKey(key)) return false;
+    final live = provider.apps[key]!.app;
+    if (live.id != entry.packageId) return false;
+    final receipt = entry.install;
+    final channel = _historyChannel(entry);
+    if (receipt == null && entry.download == null) return true;
+    return channel == null || channel == r11ChannelFingerprint(live);
   }
 
   Set<R07ActivityAction> _actions(
@@ -164,6 +179,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     if (receipt != null) {
       return 'Attempt: ${receipt.id}\n'
           'Listing: ${receipt.listingKey}\n'
+          'Historical channel: ${receipt.channelFingerprint ?? tr('r11UnknownChannel')}\n'
+          '${tr('r11HistoricalOnly')}\n'
           'Package: ${receipt.packageId}\n'
           'Source: ${receipt.sourceHost ?? 'not recorded'}\n'
           'Branch/workflow: ${receipt.sourceBranch ?? '-'} / ${receipt.workflow ?? '-'}\n'
@@ -184,6 +201,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     }
     return 'Download fingerprint: ${entry.id}\n'
         'Source: ${entry.sourceHost ?? 'not recorded'}\n'
+        'Historical channel: ${_historyChannel(entry) ?? tr('r11UnknownChannel')}\n'
+        '${tr('r11HistoricalOnly')}\n'
         'Stage: ${entry.stage}\n'
         'Verified bytes: ${entry.verifiedBytes ?? 'unknown'}\n'
         'Expected total: ${entry.totalBytes ?? 'unknown'}\n'
@@ -368,6 +387,54 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     );
   }
 
+  Future<void> _exportHistory(List<R07ActivityRecord> records) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final data = Uint8List.fromList(utf8.encode(jsonEncode(r11PublicHistory(records))));
+      await SharePlus.instance.share(ShareParams(files: [
+        XFile.fromData(data, mimeType: 'application/json'),
+      ], fileNameOverrides: ['obtainx-history.json']));
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('r11HistoryFailed'))));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _pruneHistory() async {
+    if (_busy) return;
+    final days = await showDialog<int>(context: context, builder: (dialog) => SimpleDialog(
+      title: Text(tr('r11Retention')),
+      children: [
+        Padding(padding: const EdgeInsets.all(16), child: Text(tr('r11RetentionHelp'))),
+        for (final days in [30, 90, 365]) SimpleDialogOption(
+          onPressed: () => Navigator.pop(dialog, days),
+          child: Text(tr('r11RetentionDays', args: ['$days'])),
+        ),
+        SimpleDialogOption(onPressed: () => Navigator.pop(dialog), child: Text(tr('cancel'))),
+      ],
+    ));
+    if (!mounted || days == null) return;
+    final approved = await showDialog<bool>(context: context, builder: (dialog) => AlertDialog(
+      title: Text(tr('r11RetentionConfirm')),
+      content: Text(tr('r11RetentionDays', args: ['$days'])),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialog, false), child: Text(tr('cancel'))),
+        FilledButton(onPressed: () => Navigator.pop(dialog, true), child: Text(tr('delete')))],
+    ));
+    if (!mounted || approved != true) return;
+    setState(() => _busy = true);
+    try {
+      final count = await R05OperationJournal.instance.pruneTerminalBefore(
+        DateTime.now().toUtc().subtract(Duration(days: days)), listingKey: widget.listingKey);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('r11RetentionResult', args: ['$count']))));
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('r11HistoryFailed'))));
+    } finally {
+      if (mounted) setState(() { _busy = false; _load(); });
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Consumer<AppsProvider>(
     builder: (context, provider, _) => Scaffold(
@@ -387,15 +454,21 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
             ]));
           }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-          final items = snapshot.data!.where((x) {
+          final scoped = snapshot.data!.where((x) {
             if (widget.operationId != null && widget.operationId != x.id) return false;
             if (widget.packageId != null && widget.packageId != x.packageId) return false;
+            if (widget.listingKey != null && widget.listingKey != x.listingKey) return false;
             return switch (_filter) {
               'review' => x.needsReview,
               'done' => x.isFinished,
               _ => true,
             };
           }).toList();
+          final channels = <String>{'all', for (final item in scoped)
+            if (item.install != null || item.download != null) _historyChannel(item) ?? 'unknown'};
+          final channel = channels.contains(_channel) ? _channel : 'all';
+          final items = scoped.where((x) => channel == 'all' ||
+            ((x.install != null || x.download != null) && (_historyChannel(x) ?? 'unknown') == channel)).toList();
           final liveCheck = widget.operationId == null &&
               widget.packageId == null && provider.updateCheckCompleter != null;
           return RefreshIndicator(
@@ -408,6 +481,23 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
                   title: Text('Checking app sources'),
                   subtitle: Text('Active check; source counts are unknown until verified.'),
                 ),
+                if (widget.operationId == null) ...[
+                  Padding(padding: const EdgeInsets.all(12), child: Text(tr('r11HistoricalOnly'))),
+                  Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: DropdownButton<String>(
+                    isExpanded: true, value: channel,
+                    items: [for (final value in channels) DropdownMenuItem(value: value,
+                      child: Text(value == 'all' ? tr('r11AllChannels') : value == 'unknown'
+                        ? tr('r11UnknownChannel') : value, overflow: TextOverflow.ellipsis))],
+                    onChanged: _busy ? null : (value) { if (value != null) setState(() => _channel = value); },
+                  )),
+                  Wrap(spacing: 8, children: [
+                    TextButton.icon(onPressed: _busy ? null : () => _exportHistory(items),
+                      icon: const Icon(Icons.share), label: Text(tr('r11ExportHistory'))),
+                    if (widget.packageId == null || widget.listingKey != null)
+                      TextButton.icon(onPressed: _busy ? null : _pruneHistory,
+                        icon: const Icon(Icons.delete_outline), label: Text(tr('r11Retention'))),
+                  ]),
+                ],
                 if (widget.operationId == null)
                   Padding(padding: const EdgeInsets.all(8), child: SegmentedButton<String>(
                     showSelectedIcon: false,

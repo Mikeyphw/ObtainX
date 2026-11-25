@@ -198,7 +198,8 @@ class R07ActivityCatalog {
           transfer.sourceFingerprint != transfer.jobId) {
         throw const FormatException('R03 receipt identity mismatch');
       }
-      final listing = r07UniqueListingForFile(
+      final historicalOwner = transfer.historyBinding;
+      final listing = historicalOwner?.listingKey ?? r07UniqueListingForFile(
           transfer.fileName, trackedPackages.keys);
       final complete = transfer.finalDigest != null &&
           RegExp(r'^[a-f0-9]{64}$').hasMatch(transfer.finalDigest!) &&
@@ -213,7 +214,7 @@ class R07ActivityCatalog {
         title: listing == null ? transfer.fileName :
             (trackedPackages[listing] ?? transfer.fileName),
         listingKey: listing,
-        packageId: listing == null ? null : trackedPackages[listing],
+        packageId: historicalOwner?.packageId ?? (listing == null ? null : trackedPackages[listing]),
         sourceHost: transfer.origin,
         updatedUtc: stat.modified.toUtc(),
         verifiedBytes: amount, totalBytes: transfer.totalBytes,

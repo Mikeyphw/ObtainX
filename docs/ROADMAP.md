@@ -1,3 +1,9 @@
+## R11 — Integrations, policy and history (consolidated)
+
+Exact preimage PR #30 `120a6c708814f6bb35003ca20a8730cc891747fb`, tree `2aa0ea8490c5dc917e08e1bfb465a57a426da058`: R10-F03-HF02 passed all six hosted workflows (45672205209, 45672205128, 45672205119, 45672205143, 45672205449, 45672205129). Historical physical-device, release and native acceptance-state debt remain visible.
+
+R11-F01 external navigation; R11-F02 opt-in foreground automation; R11-F03 App Manager details/inspection and existing approved external installation lane; R11-F04 listing/channel history with redacted export and terminal-receipt retention; R11-F05 automatic scheduling conditions. These five scopes form one R11 overlay; see [R11 integrations](R11_INTEGRATIONS.md) for exact limits and test matrix. New hosted and physical acceptance pending. R12 final qualification, packaging and release remains.
+
 ## R10-F03-HF02 — cancel-safe swipe and visual preservation
 
 PR #30 HF01 head `8b1a3a2e7c2abc012e0fe767e71ea36dc7135feb` (tree `d35b6040e8c7a40b92be3a259db05a7c2509ba7a`) passed source integrity and all four API36 installer workflows (45660268750, 45660268960, 45660269352, 45660269392, 45660268623). Flutter 45660269765 passed analysis, then reported 1033 passed, one skipped and two failures: canceled threshold swipes reached pin persistence, and reduced-effects swiping differed by 192 pixels. The existing golden triage correctly refused the mixed failure. Require actual single-pointer release, never dispatch on cancellation, preserve tactile eligibility and semantic actions, restore direct drag visual proportions while still disabling timed settling in reduced motion and scaling when platform animations are disabled. Retain exact goldens and full required workflows. New source-bound hosted qualification and physical acceptance remain pending. R11 integrations, policy and history and R12 final qualification and release remain.

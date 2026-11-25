@@ -38,6 +38,34 @@ class R03InvalidEntityException implements Exception {
 /// A persistent receipt contains no bearer tokens, URL query strings, or
 /// authorization headers. The actual URL and credentials are re-resolved from
 /// the tracked source on each operation, including after application restart.
+/// Optional exact history owner; absent on legacy or non-library transfers.
+class R03HistoryBinding {
+  R03HistoryBinding(this.listingKey, this.packageId, this.channel) {
+    if (listingKey.isEmpty || listingKey.length > 1000 ||
+        listingKey.contains(RegExp(r'[\x00-\x1f/\\]')) ||
+        !RegExp(r'^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$').hasMatch(packageId) ||
+        packageId.length > 255 || !RegExp(r'^[a-f0-9]{64}$').hasMatch(channel)) {
+      throw const FormatException('Invalid R03 history owner');
+    }
+  }
+  final String listingKey, packageId, channel;
+  Map<String, String> toJson() => {'listingKey': listingKey, 'packageId': packageId, 'channel': channel};
+  static R03HistoryBinding? decode(Object? value) {
+    if (value == null) return null;
+    if (value is! Map || value.length != 3 || value['listingKey'] is! String ||
+        value['packageId'] is! String || value['channel'] is! String) {
+      throw const FormatException('Invalid R03 history binding');
+    }
+    return R03HistoryBinding(value['listingKey'] as String, value['packageId'] as String,
+        value['channel'] as String);
+  }
+  @override
+  bool operator ==(Object other) => other is R03HistoryBinding &&
+      other.listingKey == listingKey && other.packageId == packageId && other.channel == channel;
+  @override
+  int get hashCode => Object.hash(listingKey, packageId, channel);
+}
+
 class R03DownloadRecord {
   const R03DownloadRecord({
     required this.jobId,
@@ -52,6 +80,7 @@ class R03DownloadRecord {
     this.lastModified,
     this.finalDigest,
     this.completedBytes,
+    this.historyBinding,
   });
 
   final String jobId;
@@ -66,12 +95,14 @@ class R03DownloadRecord {
   final String? lastModified;
   final String? finalDigest;
   final int? completedBytes;
+  final R03HistoryBinding? historyBinding;
 
   int get validatedBytes => blocks.length * r03ChunkBytes;
   String? get ifRange => etag ?? lastModified;
 
   Map<String, Object?> toJson() => {
     'schema': 'obtainx.r03.download.v1',
+    if (historyBinding != null) 'historyBinding': historyBinding!.toJson(),
     'jobId': jobId,
     'sourceFingerprint': sourceFingerprint,
     'origin': origin,
@@ -125,6 +156,7 @@ class R03DownloadRecord {
       lastModified: input['lastModified'] as String?,
       finalDigest: input['finalDigest'] as String?,
       completedBytes: completed as int?,
+      historyBinding: R03HistoryBinding.decode(input['historyBinding']),
     );
   }
 
@@ -150,6 +182,7 @@ class R03DownloadRecord {
     lastModified: lastModified ?? this.lastModified,
     finalDigest: finalDigest ?? this.finalDigest,
     completedBytes: completedBytes ?? this.completedBytes,
+    historyBinding: historyBinding,
   );
 }
 
@@ -219,6 +252,7 @@ class R03DownloadEngine {
   // transfer owned by another caller, even when URL and destination match.
   static final Map<String, String?> _activeExpectedDigest = {};
   static final Map<String, int> _activeMaxBytes = {};
+  static final Map<String, R03HistoryBinding?> _activeHistory = {};
 
   static String jobKey(Uri url, File destination, Map<String, String> headers) {
     final sorted = headers.entries.toList()
@@ -241,12 +275,14 @@ class R03DownloadEngine {
     required void Function(double?, int?, int?)? onProgress,
     bool useExisting = true,
     String? expectedSha256,
+    R03HistoryBinding? historyBinding,
   }) {
     final key = jobKey(source, destination, headers);
     final existing = _active[key];
     if (existing != null) {
       unawaited(firstResponse.listen((_) {}).cancel());
-      if (_activeExpectedDigest[key] != expectedSha256 || _activeMaxBytes[key] != maxBytes) {
+      if (_activeExpectedDigest[key] != expectedSha256 || _activeMaxBytes[key] != maxBytes ||
+          _activeHistory[key] != historyBinding) {
         return Future<File>.error(const R03InvalidEntityException(
           'conflicting trusted digest for active transfer'));
       }
@@ -257,16 +293,18 @@ class R03DownloadEngine {
       firstResponse: firstResponse, fetch: fetch,
       isCancelled: isCancelled, onProgress: onProgress,
       useExisting: useExisting, expectedSha256: expectedSha256,
-      jobId: key,
+      jobId: key, historyBinding: historyBinding,
     );
     _active[key] = next;
     _activeExpectedDigest[key] = expectedSha256;
     _activeMaxBytes[key] = maxBytes;
+    _activeHistory[key] = historyBinding;
     void clearActive() {
       if (identical(_active[key], next)) {
         _active.remove(key);
         _activeExpectedDigest.remove(key);
         _activeMaxBytes.remove(key);
+        _activeHistory.remove(key);
       }
     }
     // Consume completion and failure without returning the failed Future from
@@ -287,6 +325,7 @@ class R03DownloadEngine {
     required bool useExisting,
     required String jobId,
     String? expectedSha256,
+    R03HistoryBinding? historyBinding,
   }) async {
     await journalDirectory.create(recursive: true);
     final journal = File('${journalDirectory.path}/$jobId.json');
@@ -303,7 +342,7 @@ class R03DownloadEngine {
     final R03DownloadRecord initial = R03DownloadRecord(
       jobId: jobId, sourceFingerprint: jobId, origin: origin,
       finalOrigin: origin, fileName: destination.uri.pathSegments.last,
-      stage: R03Stage.queued, blocks: const [],
+      stage: R03Stage.queued, blocks: const [], historyBinding: historyBinding,
     );
     R03DownloadRecord? previous;
     if (useExisting && await journal.exists()) {
@@ -321,8 +360,16 @@ class R03DownloadEngine {
         // A damaged journal must never authorize reusing stale bytes.
       }
     }
+    if (previous?.historyBinding != null && previous?.historyBinding != historyBinding) {
+      await firstResponse.listen((_) {}).cancel();
+      throw const R03InvalidEntityException('conflicting historical owner for transfer');
+    }
     var response = firstResponse;
-    var active = initial;
+    final effectiveInitial = previous != null && previous.historyBinding == null
+        ? R03DownloadRecord(jobId: initial.jobId, sourceFingerprint: initial.sourceFingerprint,
+          origin: initial.origin, finalOrigin: initial.finalOrigin, fileName: initial.fileName,
+          stage: R03Stage.queued, blocks: const []) : initial;
+    var active = effectiveInitial;
     var committed = <String>[];
     var acceptedBytes = 0;
     int? total;
@@ -411,7 +458,7 @@ class R03DownloadEngine {
       total = responseTotal;
       etag = r03StrongEtag(response.headers.value(HttpHeaders.etagHeader));
       lastModified = response.headers.value(HttpHeaders.lastModifiedHeader);
-      active = initial.copyWith(
+      active = effectiveInitial.copyWith(
         stage: R03Stage.downloading, blocks: committed,
         totalBytes: total, etag: etag, lastModified: lastModified,
         finalOrigin: currentOrigin,

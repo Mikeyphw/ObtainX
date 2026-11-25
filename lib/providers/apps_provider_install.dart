@@ -34,6 +34,8 @@ import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/r04_actions_archive_integrity.dart';
 import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/r05_operation_journal.dart';
+import 'package:obtainium/services/r11_external_requests.dart';
+import 'package:obtainium/services/r03_download_engine.dart' show R03HistoryBinding;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/services/r09_discovery.dart';
@@ -376,6 +378,7 @@ extension AppsProviderInstall on AppsProvider {
         primary.uri.pathSegments.last,
         ...selected.map((f) => f.uri.pathSegments.last),
       ],
+      channelFingerprint: r11ChannelFingerprint(app),
       sourceHost: sourceHost?.isEmpty == true ? null : sourceHost,
       sourceBranch: settings['r04Branch'] is String
           ? settings['r04Branch'] as String : null,
@@ -1029,8 +1032,28 @@ extension AppsProviderInstall on AppsProvider {
     bool allowUserInteraction = false,
     NotificationsProvider? notificationsProvider,
     bool useExisting = true,
+    bool preserveListingIdentity = false,
+    bool Function()? allowExternalContinuation,
     void Function(double? progress, int? received, int? total)? onProgress,
   }) async {
+    final original = app;
+    final originalRelease = preserveListingIdentity ? InstallReleaseSnapshot.fromApp(original) : null;
+    bool matchesListing() {
+      if (!preserveListingIdentity) return apps[app.listingKey] != null;
+      if (allowExternalContinuation?.call() != true) return false;
+      final live = r11ExactLiveListing(apps, original);
+      final expected = originalRelease!;
+      if (live == null || !expected.belongsTo(live)) return false;
+      final release = InstallReleaseSnapshot.fromApp(live);
+      return release.version == expected.version &&
+          release.assetName == expected.assetName &&
+          release.assetUrl == expected.assetUrl;
+    }
+    if (preserveListingIdentity && (!matchesListing() || isTempId(app) ||
+        app.allowIdChange || app.settings.getBool('trackOnly') ||
+        apps[app.listingKey]?.downloadProgress != null)) {
+      throw StateError('External download requires an unchanged, idle listing');
+    }
     final initialNotification = DownloadNotification(
       app.finalName,
       0,
@@ -1040,7 +1063,7 @@ extension AppsProviderInstall on AppsProvider {
     var nativeDownloadServiceStarted = false;
     final cancellationToken = registerDownloadCancellation(app.listingKey);
     try {
-      if (apps[app.listingKey] != null) {
+      if (matchesListing()) {
         apps[app.listingKey]!.downloadProgress = 0;
         apps[app.listingKey]!.downloadReceivedBytes = null;
         apps[app.listingKey]!.downloadTotalBytes = null;
@@ -1056,7 +1079,7 @@ extension AppsProviderInstall on AppsProvider {
       if (reviewBinding != null && reviewBinding.releaseKey != _r09ReleaseKey(app)) {
         throw ObtainiumError(tr('r09ReviewSelectionChanged'));
       }
-      if (apps[app.listingKey] != null) apps[app.listingKey]!.app = app;
+      if (!preserveListingIdentity && matchesListing()) apps[app.listingKey]!.app = app;
       final AppSource source = SourceProvider().getSource(
         app.url,
         overrideSource: app.overrideSource,
@@ -1134,9 +1157,13 @@ extension AppsProviderInstall on AppsProvider {
         int? received,
         int? total,
       ]) {
+        if (preserveListingIdentity && !matchesListing()) {
+          cancellationToken.cancel();
+          return;
+        }
         onProgress?.call(progress, received, total);
         final int? prog = progress?.ceil();
-        if (apps[app.listingKey] != null) {
+        if (matchesListing()) {
           apps[app.listingKey]!.downloadReceivedBytes = received;
           apps[app.listingKey]!.downloadTotalBytes = total;
           apps[app.listingKey]!.downloadProgress = progress;
@@ -1183,6 +1210,9 @@ extension AppsProviderInstall on AppsProvider {
       }
 
       Future<File> runDownload(Map<String, String>? requestHeaders) {
+        if (preserveListingIdentity && !matchesListing()) {
+          throw StateError('External download listing changed');
+        }
         return downloadFileWithRetry(
           downloadUrl,
           fileNameNoExt,
@@ -1197,6 +1227,8 @@ extension AppsProviderInstall on AppsProvider {
               GitHub.r04ModeActions ? false : app.settings.getBool('allowInsecure'),
           logs: logs,
           cancellationToken: cancellationToken,
+          historyBinding: r11ValidPackage(app.id) ? R03HistoryBinding(
+            app.listingKey, app.id, r11ChannelFingerprint(app)) : null,
         );
       }
 
@@ -1241,7 +1273,7 @@ extension AppsProviderInstall on AppsProvider {
           throw ObtainiumError(tr('r09ReviewSelectionChanged'));
         }
       }
-      if (apps[app.listingKey] != null) {
+      if (matchesListing()) {
         apps[app.listingKey]!.downloadProgress = _remainingStepsProgress
             .toDouble();
         notify();
@@ -1317,12 +1349,15 @@ extension AppsProviderInstall on AppsProvider {
         }
         throw ObtainiumError(tr('couldNotGetIdFromApk'))..url = app.url;
       }
-      final (renamedFile, resolvedApp) = await handleAPKIDChange(
-        app,
-        newInfo,
-        downloadedFile,
-        downloadUrl,
-      );
+      if (preserveListingIdentity) {
+        cancellationToken.throwIfCancelled();
+        if (!matchesListing() || newInfo.packageName != original.id) {
+          throw StateError('External download package or listing changed');
+        }
+      }
+      final (renamedFile, resolvedApp) = preserveListingIdentity
+          ? (downloadedFile, app)
+          : await handleAPKIDChange(app, newInfo, downloadedFile, downloadUrl);
       downloadedFile = renamedFile;
       final String resolvedAppId = resolvedApp.id;
       // handleAPKIDChange renames a bare APK once the real package id is known.
@@ -1331,12 +1366,14 @@ extension AppsProviderInstall on AppsProvider {
       }
       // Deduced icons are only ever read for apps that aren't installed yet, so
       // skip the extraction cost entirely on ordinary updates to installed apps.
-      if (apps[resolvedAppId]?.installedInfo == null) {
-        await storeIconFromApkArchive(resolvedAppId, parsedArchivePath);
+      if (!preserveListingIdentity) {
+        if (apps[resolvedAppId]?.installedInfo == null) {
+          await storeIconFromApkArchive(resolvedAppId, parsedArchivePath);
+        }
       }
       // Delete older versions of the file if any (keyed to the resolved id,
       // since the id may have changed from a placeholder to the real package).
-      for (var file in downloadedFile.parent.listSync()) {
+      for (var file in preserveListingIdentity ? <FileSystemEntity>[] : downloadedFile.parent.listSync()) {
         final fn = file.path.split('/').last;
         if (fn.startsWith('$resolvedAppId-') &&
             FileSystemEntity.isFileSync(file.path) &&
@@ -1380,7 +1417,8 @@ extension AppsProviderInstall on AppsProvider {
         await NativeFeatures.stopDownloadForegroundService();
       }
       unawaited(notificationsProvider?.cancel(notifId));
-      if (apps[app.listingKey] != null) {
+      if ((!preserveListingIdentity && matchesListing()) ||
+          (preserveListingIdentity && r11ExactLiveListing(apps, original) != null)) {
         apps[app.listingKey]!.downloadProgress = null;
         apps[app.listingKey]!.downloadReceivedBytes = null;
         apps[app.listingKey]!.downloadTotalBytes = null;

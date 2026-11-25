@@ -165,6 +165,7 @@ class _AppFilePickerState extends State<AppFilePicker> {
       '${tr('r09ArtifactSize')}: ${result.bytes} B',
       '${tr(result.actionsDigestVerified ? 'r09ReviewActionsDigest' : 'r09ReviewLocalDigest')}: ${result.artifactSha256}',
       tr(result.signerStatus),
+      tr('r10CertificateHint'),
       if (result.installedVersionCode != null)
         "${tr('installed')}: ${result.installedVersionName ?? tr('unknown')} (${result.installedVersionCode})",
       ...result.refusals.map((reason) => tr(reason)),

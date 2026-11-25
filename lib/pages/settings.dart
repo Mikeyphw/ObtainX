@@ -11,6 +11,7 @@ import 'package:expressive_loading_indicator/expressive_loading_indicator.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
+import 'package:obtainium/components/r10_settings_context.dart';
 import 'package:obtainium/app_distribution.dart';
 import 'package:obtainium/layout_breakpoints.dart';
 import 'package:obtainium/widgets/help_hint_icon.dart';
@@ -1390,10 +1391,12 @@ class _SourceSpecificSectionState extends State<_SourceSpecificSection> {
             children: [
               Row(
                 children: [
-                  Text(
-                    tr('personalAccessTokenPAT'),
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
+                  Expanded(
+                    child: Text(
+                      tr('personalAccessTokenPAT'),
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   HelpHintIcon(
@@ -1403,6 +1406,7 @@ class _SourceSpecificSectionState extends State<_SourceSpecificSection> {
                   ),
                 ],
               ),
+              const R10ContextHint('r10TokenHint'),
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -1591,12 +1595,20 @@ class _SourceSpecificSectionState extends State<_SourceSpecificSection> {
             sp.setSettingBool(GitHub.githubReqPrefixUseTokenKey, val);
           },
         ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: kM3eSettingsCardHorizontalInset),
+          child: R10ContextHint('r10ProxyTokenHint'),
+        ),
         AppSwitchListTile(
           title: Text(tr('repoRenamedCheck')),
           value: sp.getSettingBool('checkRepoRename') ?? false,
           onChanged: (val) {
             sp.setSettingBool('checkRepoRename', val);
           },
+        ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: kM3eSettingsCardHorizontalInset),
+          child: R10ContextHint('r10TokenHint'),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(
@@ -2723,6 +2735,10 @@ class _IntegrationsSectionState extends State<_IntegrationsSection>
             );
           },
         ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: kM3eSettingsCardHorizontalInset),
+          child: R10ContextHint('r10VirusTotalHint'),
+        ),
         Padding(
           padding: const EdgeInsets.fromLTRB(
             kM3eSettingsCardHorizontalInset,
@@ -2936,6 +2952,7 @@ class _IntegrationsSectionState extends State<_IntegrationsSection>
                   }
                 },
               ),
+              R10ContextHint(r10InstallerExplanationKey(sp.installerMode)),
               if (sp.installerMode == 'shizuku')
                 AppSwitchListTile(
                   contentPadding: EdgeInsets.zero,

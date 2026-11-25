@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:obtainium/components/r10_settings_context.dart';
 import 'package:obtainium/app_sources/apkmirror.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/components/app_bottom_sheet.dart';
@@ -4972,6 +4973,10 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
             },
           ),
         );
+      }
+
+      if (securityCertificateHashes.isNotEmpty || app?.installedInfo != null) {
+        securityCardChildren.add(const R10ContextHint('r10CertificateHint'));
       }
 
       final versionCard = _materialAppPageSectionCard(

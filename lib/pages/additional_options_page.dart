@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/components/custom_app_bar.dart';
 import 'package:obtainium/components/generated_form_renderer.dart';
+import 'package:obtainium/components/r10_settings_context.dart';
 import 'package:obtainium/components/version_regex_assist_dialog.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/providers/apps_provider.dart';
@@ -168,6 +169,8 @@ class _AdditionalOptionsPageState extends State<AdditionalOptionsPage> {
   Map<String, dynamic> _values = {};
   Map<String, dynamic> _baselineValues = {};
   bool _baselineReady = false;
+  Map<String, dynamic> _sourceDefaults = {};
+  int _formRevision = 0;
   bool _valid = false;
   bool _saving = false;
 
@@ -210,6 +213,7 @@ class _AdditionalOptionsPageState extends State<AdditionalOptionsPage> {
       overrideSource: app.overrideSource,
     );
     _items = cloneFormItems(source.combinedAppSpecificSettingFormItems);
+    _sourceDefaults = getDefaultValuesFromFormItems(_items);
     for (final List<GeneratedFormItem> row in _items) {
       for (final GeneratedFormItem element in row) {
         if (appAdditionalSettings[element.key] != null) {
@@ -338,6 +342,43 @@ class _AdditionalOptionsPageState extends State<AdditionalOptionsPage> {
         }
       });
     }
+  }
+
+  Future<void> _resetDraft() async {
+    if (_saving || !_baselineReady) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(tr('r10ResetOptions')),
+        content: Text(tr('r10ResetOptionsBody')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(tr('cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(tr('r10ResetOptions')),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true || _saving) return;
+    setState(() {
+      _items = r10ResetOptionDraft(
+        items: _items,
+        defaults: _sourceDefaults,
+        current: _values,
+      );
+      _values = getDefaultValuesFromFormItems(_items);
+      _formRevision++;
+      _valid = false;
+    });
+    // GeneratedForm validates its recreated fields while building. Rebuild
+    // the parent after that callback so Save reflects the new draft validity.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _onSave() async {
@@ -715,23 +756,38 @@ class _AdditionalOptionsPageState extends State<AdditionalOptionsPage> {
                       fabBottomPadding + 124,
                     ),
                     sliver: SliverToBoxAdapter(
-                      child: GeneratedForm(
-                        items: _items,
-                        assistSourceUrl: appInMem?.app.url,
-                        outlinedInputFields: true,
-                        prominentSectionHeaders: true,
-                        wrapFormSectionsInCards: true,
-                        onValueChanges: (values, valid, isBuilding) {
-                          if (isBuilding) {
-                            _values = values;
-                            _valid = valid;
-                          } else {
-                            setState(() {
-                              _values = values;
-                              _valid = valid;
-                            });
-                          }
-                        },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton.icon(
+                              key: const ValueKey('r10-reset-options'),
+                              onPressed: _saving ? null : _resetDraft,
+                              icon: const Icon(Icons.restart_alt),
+                              label: Text(tr('r10ResetOptions')),
+                            ),
+                          ),
+                          GeneratedForm(
+                            key: ValueKey(_formRevision),
+                            items: _items,
+                            assistSourceUrl: appInMem?.app.url,
+                            outlinedInputFields: true,
+                            prominentSectionHeaders: true,
+                            wrapFormSectionsInCards: true,
+                            onValueChanges: (values, valid, isBuilding) {
+                              if (isBuilding) {
+                                _values = values;
+                                _valid = valid;
+                              } else {
+                                setState(() {
+                                  _values = values;
+                                  _valid = valid;
+                                });
+                              }
+                            },
+                          ),
+                        ],
                       ),
                     ),
                   ),

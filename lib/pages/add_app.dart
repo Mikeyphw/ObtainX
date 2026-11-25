@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:expressive_loading_indicator/expressive_loading_indicator.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:obtainium/components/r10_settings_context.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/layout_breakpoints.dart';
 import 'package:obtainium/components/app_page_section_title.dart';
@@ -1898,6 +1899,7 @@ class AddAppPageState extends State<AddAppPage> {
             ),
           ],
         ),
+        const R10ContextHint('r10SourceOverrideHint'),
         const SizedBox(height: 16),
       ],
     );

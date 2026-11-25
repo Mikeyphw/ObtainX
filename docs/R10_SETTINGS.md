@@ -6,3 +6,10 @@
 - New navigation strings have en/fr/tr/ja/pt/pt-BR parity; other supported languages use the existing fallback. Full existing translation parity is not asserted.
 - `test/r10_settings_navigation_test.dart` drives the actual search and navigation widgets. `scripts/ci/test_r10_settings_contract.py` checks production wiring, retained controls, labels, translations, and safe scoped CI impact. Physical TV/screen-reader/IME qualification remains separate.
 - R10-F02 (per-app reset, live regex preview and inline explanations) and R10-F03 (other layout clipping, swipe haptics, homepage, wider keyboard/remote coverage and locale audit) are not claimed by F01.
+
+## R10-F02 — Contextual settings and preview
+
+- Reset stages the source defaults for an explicit tuning allowlist. Confirmation precedes the draft change; the existing save/discard route retains credential, source binding, tracking, trust and unknown fields. Disabled controls stay disabled.
+- Existing regex assist for add and edit offers editable expressions and group selection, filename-only APK matching with inversion, release-title and version samples, and version extraction using the production evaluator. Samples are capped and evaluated in a cancelable isolate with a one-second result deadline. No new source request is implied.
+- Inline help describes selected installer capabilities, credential/proxy and VirusTotal handling, source override, version detection and signer evidence without changing install or trust policy. Six existing localization sets updated.
+- Hosted Flutter and physical-device acceptance remain pending for F02. R10-F03, R11 and R12 remain.

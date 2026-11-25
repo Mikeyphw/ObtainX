@@ -1,3 +1,7 @@
+## R10-F02 — contextual settings and regex preview
+
+Base: PR #30 `108072be51feed1a16580a7307d35dc303cbe785`; all six hosted workflows passed, including the source-bound API36 cache retry. Reset source-specific tuning drafts; preserve identity, security, tracking and credentials; use the existing explicit save/discard path. Bounded regex sample preview uses production filter/extraction semantics. Explain installer modes, tokens/proxy, scanning, certificates, source override and version detection in context. No installer-policy changes. F02 hosted and physical-device acceptance pending. Remaining R10-F03 (broader accessibility/responsive UI, homepage, haptics, TV and locale audit), R11 and R12.
+
 # ObtainX — R10-F01 settings navigation and accessibility (25 November 2026)
 
 **Exact preimage:** PR #30 `43bdce31c357680844c8cb822a6b7e0cedbae341`, tree `327a4ca8d6dec418f7dc7e5dcf9a52cd9362b7e9`. All six hosted workflows passed (45614779758, 45614779765, 45614779793, 45614779913, 45614779721, 45614779728), including real RT02C archive sessions and independent package-state checks. R09 physical acceptance and historical debt remain.

@@ -2773,10 +2773,11 @@ class _DownloadApkToIdentifyAppDialogState
         return;
       }
       if (!mounted) return;
-      final selectedApkIndex = _currentApp.apkUrls
-          .map((e) => e.value)
-          .toList()
-          .indexOf(apkUrl.value);
+      final selectedApkIndex = _currentApp.apkUrls.indexWhere(
+          (e) => e.key == apkUrl.key && e.value == apkUrl.value);
+      if (selectedApkIndex < 0) {
+        throw ObtainiumError(tr('r09ReviewSelectionChanged'));
+      }
       if (selectedApkIndex >= 0) {
         _currentApp = _currentApp.copyWith(preferredApkIndex: selectedApkIndex);
       }

@@ -66,8 +66,8 @@ class R04FinalMutationTests(unittest.TestCase):
           '"base_branch": "feature/obtainx-r03-resumable-download-engine-20261115"')
     def test_skip_archive_verification(self):
         self.mutated('lib/providers/apps_provider_install.dart',
-          'await verifyR04ActionsArchiveBeforeExtraction(',
-          'await disableR04Verification(')
+          'await verifyR04ActionsArchiveBeforeExtraction(\n        archive: downloadedFile,',
+          'await disableR04Verification(\n        archive: downloadedFile,')
     def test_remove_expired_receipt_gate(self):
         self.mutated('lib/services/r04_actions_archive_integrity.dart',
           'expiresAt == null || !expiresAt.isAfter(now.toUtc())',

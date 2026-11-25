@@ -86,9 +86,10 @@ def verify(root:Path=ROOT)->int:
          "additionalSettings.remove(r04ActionsArchiveEvidenceKey)" in github and
          "if (archive.archiveSha256 == null)" in github,
          'Actions selection must persist a source-bound required ZIP digest')
-    gate("await verifyR04ActionsArchiveBeforeExtraction(" in installer and
-         installer.index('await verifyR04ActionsArchiveBeforeExtraction(') <
-         installer.index('final artifactFormat = installArtifactFormat('),
+    production = installer[installer.index('Future<Object> downloadApp('):]
+    gate("await verifyR04ActionsArchiveBeforeExtraction(" in production and
+         production.index('await verifyR04ActionsArchiveBeforeExtraction(') <
+         production.index('final artifactFormat = installArtifactFormat('),
          'Actions archive must be hashed before extraction or Android installation')
     for marker in (
         "additionalSettings['r04GitHubSourceMode'] != 'actions'",

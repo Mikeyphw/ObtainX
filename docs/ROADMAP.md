@@ -1,3 +1,11 @@
+# ObtainX — R09-F02 manifest-backed artifact review (25 November 2026)
+
+**Preimage:** PR #30 `00e75b8f7510edd4b2868768b6af453522102bf0`. Six exact-head hosted runs passed: 45540847786, 45540847761, 45540847851, 45540847720, 45540847812, 45540847781. R09-F01 and incremental CI have hosted qualification on that predecessor; no transfer of acceptance to this tree.
+
+**R09-P05 follow-up:** explicit bounded review of actual APK bytes, package/version/SDK/split/ABI and observed certificates; existing Actions identity and digest validation, private staging, HTTPS redirect isolation, bundle planner, exact selection digest before normal extraction. No automatic install or attestation claim. R09-P01–P06 implementation scope retained; actual hosted analyzer, signed-fixture manifest inspection and physical UI acceptance remain pending. This touches Android and shared transfer/install paths, requiring full impact CI. R02 device/backend, R07 persistent activity, R08 provider qualification, R09 acceptance, R10, R11 and R12 remain.
+
+---
+
 # R09-F01-F01 — strict Dart analyzer correction (25 November 2026)
 
 Exact preimage `b9214fc3a1475cbcc5231dae381b94a67b1b9dfd` (PR #30).

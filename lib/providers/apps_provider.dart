@@ -600,6 +600,9 @@ Future<File> downloadFile(
   bool allowInsecure = false,
   LogsProvider? logs,
   CancellationToken? cancellationToken,
+  int maxBytes = r03MaximumBytes,
+  Directory? privateJournalDirectory,
+  bool reviewHttpsOnly = false,
 }) async {
   final bool keepAwakeAcquired =
       await NativeFeatures.acquireDownloadKeepAwake();
@@ -615,6 +618,9 @@ Future<File> downloadFile(
       allowInsecure: allowInsecure,
       logs: logs,
       cancellationToken: cancellationToken,
+      maxBytes: maxBytes,
+      privateJournalDirectory: privateJournalDirectory,
+      reviewHttpsOnly: reviewHttpsOnly,
     );
   } finally {
     if (keepAwakeAcquired) {
@@ -634,13 +640,16 @@ Future<File> _downloadFile(
   bool allowInsecure = false,
   LogsProvider? logs,
   CancellationToken? cancellationToken,
+  int maxBytes = r03MaximumBytes,
+  Directory? privateJournalDirectory,
+  bool reviewHttpsOnly = false,
 }) async {
   final requestHeaders = withDefaultObtainXUserAgent(headers);
   if (requestHeaders.keys.any((key) =>
       key.toLowerCase() == 'range' || key.toLowerCase() == 'if-range')) {
     throw const FormatException('R03 cannot accept a source-defined byte range');
   }
-  final responseClient = createHttpClient(allowInsecure);
+  final responseClient = createHttpClient(allowInsecure && !reviewHttpsOnly);
   void abortDownload() => responseClient.close(force: true);
   cancellationToken?.addListener(abortDownload);
   try {
@@ -649,6 +658,7 @@ Future<File> _downloadFile(
         (await HttpService().sourceRequestStreamResponse(
           'GET', url, requestHeaders, {'allowInsecure': allowInsecure},
           sharedClient: responseClient,
+          reviewHttpsOnly: reviewHttpsOnly,
         )).value.value;
     final firstResponse = await fetch(requestHeaders);
     final suggested = extractDownloadFileNameFromContentDisposition(
@@ -678,7 +688,8 @@ Future<File> _downloadFile(
     final downloadedFile = File('$destDir/$finalName');
     final privateSupport = await getApplicationSupportDirectory();
     final engine = R03DownloadEngine(
-      journalDirectory: Directory('${privateSupport.path}/r03-download-journal'),
+      journalDirectory: privateJournalDirectory ?? Directory('${privateSupport.path}/r03-download-journal'),
+      maxBytes: maxBytes,
     );
     try {
       return await engine.download(

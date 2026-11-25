@@ -114,8 +114,9 @@ def verify(root: Path = ROOT) -> int:
       'GitHub.r04ModeActions ||',
     ))
     # The GitHub artifact ZIP must be hashed BEFORE archive extraction.
-    verify_position = data[FILES[7]].find('await verifyR04ActionsArchiveBeforeExtraction(')
-    extract_position = data[FILES[7]].find('final artifactFormat = installArtifactFormat(')
+    production_start = data[FILES[7]].find('Future<Object> downloadApp(')
+    verify_position = data[FILES[7]].find('await verifyR04ActionsArchiveBeforeExtraction(', production_start)
+    extract_position = data[FILES[7]].find('final artifactFormat = installArtifactFormat(', production_start)
     if verify_position < 0 or extract_position < 0 or verify_position > extract_position:
         failures.append('P02 digest gate must precede APK/archive extraction')
     require(FILES[8], (

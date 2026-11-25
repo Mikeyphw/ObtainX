@@ -10,8 +10,11 @@ import 'package:obtainium/installers/stock_installer.dart';
 import 'package:obtainium/installers/r02f_p03_cancellable_stock.dart';
 import 'package:obtainium/services/install_precommit_gate.dart';
 import 'package:obtainium/providers/settings_provider.dart';
+import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
+import 'package:obtainium/services/r09_artifact_inspection.dart';
+import 'package:path_provider/path_provider.dart';
 
 const packageName = 'dev.bikram.obtainx.rt02.fixture';
 const controlToken = String.fromEnvironment('OX_R02C_CONTROL_TOKEN');
@@ -216,6 +219,42 @@ Future<int?> runScenario(String caseName, String archiveSha) async {
       expect(plan.versionCode, 2);
       expect(plan.sessionPaths.length, 2);
       expect(plan.requiresSplitSession, isTrue);
+      if (caseName == 'apks') {
+        final stage = await (await getTemporaryDirectory()).createTemp('r09-review-');
+        try {
+          final inspected = <R09ApkFacts>[];
+          for (final file in apkFiles) {
+            final name = file.uri.pathSegments.last;
+            final copy = await file.copy('${stage.path}/$name');
+            final facts = await inspectR09Apk(copy, name);
+            expect(facts.packageName, packageName);
+            expect(facts.versionCode, 2);
+            expect(facts.minSdk, 26);
+            expect(facts.sha256, name == 'config.x86_64.apk' ? splitSha : baseSha);
+            expect(facts.split, name == 'config.x86_64.apk' ? 'config.x86_64' : null);
+            inspected.add(facts);
+          }
+          final baseFacts = inspected.singleWhere((member) => member.split == null);
+          expect(baseFacts.signers, isNotEmpty);
+          final installed = await getInstalledInfo(packageName, light: false, throwOnError: true);
+          expect(installed?.versionCode, 1);
+          final installedSigners = certificateHashesFromSignatures(installed?.signingInfo?.apkContentSigners ?? const <List<int>>[])
+              .map((value) => value.replaceAll(':', '').toLowerCase()).toList();
+          expect(installedSigners, isNotEmpty);
+          final review = reviewR09Artifact(artifactSha256: archiveSha, bytes: await input.length(),
+            members: inspected, format: InstallArtifactFormat.apks,
+            supportedAbis: const ['x86_64'], sdk: 36, locales: const ['en-US'],
+            density: 420, expectedPackage: packageName, installedSigners: installedSigners,
+            installedPackageObserved: true, actionsDigestVerified: false);
+          expect(review.refusals, isEmpty);
+          expect(review.signerStatus, 'r09ReviewSignerMatches');
+          expect(review.selectedPaths, hasLength(2));
+          expect(review.eligible, isTrue);
+          debugPrint('OX_R09_MANIFEST_REAL_APK_INSPECTION_PASS');
+        } finally {
+          await stage.delete(recursive: true);
+        }
+      }
       final authorization = await control('call', caseName);
       expect(authorization['authorized'], isTrue);
       debugPrint('OX_R02C_DART_STAGE=INSTALL_CALL');

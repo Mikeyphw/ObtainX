@@ -207,12 +207,18 @@ String r03FinalOrigin(HttpClientResponse response, Uri source) {
 /// journal. A committed .part block has a SHA-256 hash in that journal; an
 /// uncommitted trailing fragment is truncated on recovery.
 class R03DownloadEngine {
-  R03DownloadEngine({required this.journalDirectory});
+  R03DownloadEngine({required this.journalDirectory, this.maxBytes = r03MaximumBytes}) {
+    if (maxBytes <= 0 || maxBytes > r03MaximumBytes) {
+      throw const R03InvalidEntityException('invalid transfer bound');
+    }
+  }
   final Directory journalDirectory;
+  final int maxBytes;
   static final Map<String, Future<File>> _active = {};
   // A caller with different trusted-byte requirements must never inherit a
   // transfer owned by another caller, even when URL and destination match.
   static final Map<String, String?> _activeExpectedDigest = {};
+  static final Map<String, int> _activeMaxBytes = {};
 
   static String jobKey(Uri url, File destination, Map<String, String> headers) {
     final sorted = headers.entries.toList()
@@ -240,7 +246,7 @@ class R03DownloadEngine {
     final existing = _active[key];
     if (existing != null) {
       unawaited(firstResponse.listen((_) {}).cancel());
-      if (_activeExpectedDigest[key] != expectedSha256) {
+      if (_activeExpectedDigest[key] != expectedSha256 || _activeMaxBytes[key] != maxBytes) {
         return Future<File>.error(const R03InvalidEntityException(
           'conflicting trusted digest for active transfer'));
       }
@@ -255,10 +261,12 @@ class R03DownloadEngine {
     );
     _active[key] = next;
     _activeExpectedDigest[key] = expectedSha256;
+    _activeMaxBytes[key] = maxBytes;
     void clearActive() {
       if (identical(_active[key], next)) {
         _active.remove(key);
         _activeExpectedDigest.remove(key);
+        _activeMaxBytes.remove(key);
       }
     }
     // Consume completion and failure without returning the failed Future from
@@ -304,7 +312,9 @@ class R03DownloadEngine {
         if (decoded is! Map<String, dynamic>) throw const FormatException('journal map');
         final candidate = R03DownloadRecord.fromJson(decoded);
         if (candidate.jobId == jobId && candidate.sourceFingerprint == jobId &&
-            candidate.fileName == initial.fileName && candidate.origin == origin) {
+            candidate.fileName == initial.fileName && candidate.origin == origin &&
+            (candidate.totalBytes ?? 0) <= maxBytes &&
+            (candidate.completedBytes ?? 0) <= maxBytes && candidate.validatedBytes <= maxBytes) {
           previous = candidate;
         }
       } catch (_) {
@@ -395,7 +405,7 @@ class R03DownloadEngine {
               response.compressionState == HttpClientResponseCompressionState.decompressed
               ? null : response.contentLength);
       if (responseTotal != null && (responseTotal < acceptedBytes ||
-          responseTotal > r03MaximumBytes)) {
+          responseTotal > maxBytes)) {
         throw const R03InvalidEntityException('invalid expected length');
       }
       total = responseTotal;
@@ -416,7 +426,7 @@ class R03DownloadEngine {
         await for (final incoming in response.timeout(const Duration(seconds: 45))) {
           if (isCancelled()) throw const R03InvalidEntityException('cancelled');
           if (incoming.isEmpty) continue;
-          if (received + incoming.length > r03MaximumBytes ||
+          if (received + incoming.length > maxBytes ||
               (total != null && received + incoming.length > total)) {
             throw const R03InvalidEntityException('response exceeds expected length');
           }

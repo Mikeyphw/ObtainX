@@ -31,7 +31,7 @@ class P05Mutations(unittest.TestCase):
     def test_04_no_sdk_envelope_skip(self):
         self.mutate(C.PROVIDER,'verifyP05SdkEnvelope(', 'ignoredP05SdkEnvelope(')
     def test_05_no_device_profile_skip(self):
-        self.mutate(C.PROVIDER,'validateP05DeviceProfile(', 'ignoredP05DeviceProfile(')
+        self.mutate(C.PROVIDER,'validateP05DeviceProfile(\n      sdk:', 'ignoredP05DeviceProfile(\n      sdk:')
     def test_06_no_symlink_destination_bypass(self):
         self.mutate(C.OBB,'_assertNoSymlinkAncestors(destinationFolder);', '// removed')
     def test_07_no_obb_source_sha_weaken(self):

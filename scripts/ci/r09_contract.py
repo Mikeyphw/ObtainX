@@ -8,8 +8,8 @@ REQUIRED = {
     'lib/pages/apps.dart': ('r09MatchesSearch(filter.searchQuery', 'r09PackageGroups(listedApps.map', 'r09ListingState(', 'AppsListGroupBy.package', "tr('r09CheckVisible')", 'getMassObtainFunction(updatesOnly: true)', "tr('r09EverythingCurrent')", "tr('r09ViewPresets')", 'searchQuery: _searchQuery.text.trim()', 'installedInfo?.versionName'),
     'lib/folders/app_folder.dart': ('r09MatchesSearch(searchQuery', "'searchQuery': searchQuery", "searchQuery: json['searchQuery']"),
     'lib/components/bulk_update_sheet.dart': ('r09SafeBulkSelection(selectedIds, packageByListing)', 'r09SelectListing(selectedIds, appId, packageByListing)', 'r09SafeBulkSelection({...selectedIds, ...groupIds}', 'r09ConflictingListings'),
-    'lib/providers/apps_provider_install.dart': ('r09ChooseArtifact(urlsToSelectFrom', 'r09ActionsEligible(asset', 'r09SafeBulkSelection(appIds, packages)', 'r09ArtifactChoice(appFileUrl.key', 'downloadOnly: pickAnyAsset).eligible)) {\n      return null;\n    }'),
-    'lib/components/app_detail_widgets.dart': ('r09ChooseArtifact(urlsToSelectFrom', 'r09ArtifactChoice(asset.key', 'r09ActionsEligible(asset', 'RadioGroup<int>', 'enabled: choice(entry.value).eligible', 'r09TrackedPackage', 'r09ZipDigest'),
+    'lib/providers/apps_provider_install.dart': ('r09ChooseArtifact(urlsToSelectFrom', 'r09ActionsEligible(asset', 'r09SafeBulkSelection(appIds, packages)', 'r09ArtifactChoice(appFileUrl.key', 'reviewBinding.matches(_r09ReleaseKey(app), actualDigest)', 'reviewHttpsOnly: true', 'await verifyR04ActionsArchiveBeforeExtraction(archive: artifact,', 'validateP05DeviceProfile(sdk: device.version.sdkInt', 'await stage.delete(recursive: true)', 'selectedReview?.eligible', 'selectedReview.releaseKey != selectedRelease', 'downloadOnly: pickAnyAsset).eligible))) {\n      return null;\n    }'),
+    'lib/components/app_detail_widgets.dart': ('r09ChooseArtifact(urlsToSelectFrom', 'r09ArtifactChoice(asset.key', 'r09ActionsEligible(asset', 'RadioGroup<int>', 'enabled: choice(entry.value).eligible', 'r09TrackedPackage', 'r09ZipDigest', 'reviews[keyOf(selected)]', 'widget.inspectCandidate', 'token?.cancel()'),
     'lib/services/r09_discovery.dart': ('r04ValidateArchiveIdentity(', 'isConfigurationSplitApk(name)', 'hints.any(supportedAbis.contains)', 'preferredSourceAbis(abis)', 'counts[packageByListing[id]]'),
     'lib/services/r04_actions_archive_integrity.dart': ('final expected = r04ValidateArchiveIdentity(', 'expiresAt == null || !expiresAt.isAfter(now.toUtc())', 'sha256.bind(archive.openRead())'),
     'lib/widgets/r04_actions_history_dialog.dart': ('readOnly: true', 'enabled: !busy', 'if (row.canSelectAt(now())) {', 'Navigator.of(context).pop(row);\n                                } else {\n                                  setState(() {});', 'rows = const []; searched = false'),
@@ -19,6 +19,12 @@ REQUIRED = {
     'lib/pages/additional_options_page.dart': ('assistSourceUrl:',),
     'test/needs_attention_group_test.dart': ('R09 groups two sources by package', 'group.count, 2', 'r09CheckVisible', 'r09UpdateAll'),
     'test/r04_actions_history_test.dart': ('R09 history cannot select an expired artifact', 'readOnly, isTrue', 'clock = DateTime.utc(2026, 11, 19)'),
+    'lib/services/r09_artifact_inspection.dart': ('sha256FileOffIsolate(file.path) != digest', 'resolveInstallBundlePlan(', 'normalizedSplit != normalizedStem', 'chosenSplits.containsAll(member.requiredSplits)', '_sameSigners(base.signers, installedSigners)'),
+    'android/app/src/main/kotlin/dev/imranr/obtainium/R09ApkInspectionBridge.kt': ('R09ApkManifest.inspect(file)', 'GET_SIGNING_CERTIFICATES', 'Files.isSymbolicLink', 'info.applicationInfo?.minSdkVersion == manifest.minSdk'),
+    'android/app/src/main/kotlin/dev/imranr/obtainium/MainActivity.kt': ('R09ApkInspectionBridge(',),
+    'integration_test/r02c_archive_install_test.dart': ('await inspectR09Apk(copy, name)', 'OX_R09_MANIFEST_REAL_APK_INSPECTION_PASS', 'expect(review.eligible, isTrue)', 'installedSigners: installedSigners'),
+    'lib/services/r03_download_engine.dart': ('_activeMaxBytes[key] != maxBytes', 'responseTotal > maxBytes', 'received + incoming.length > maxBytes'),
+    'lib/providers/source_provider.dart': ('Review requires HTTPS on every hop', '|| reviewCrossOrigin', 'r04ArtifactStorageHeaders(requestHeaders)'),
     'test/r09_discovery_test.dart': ('without URL secrets', 'smart folder search round trips', 'competing installable sources', 'wrong ABI and configuration splits', 'safe default respects eligible', 'exact repository, identity and expiry gate', 'distinguish actual recorded facts'),
 }
 RISK = ('lib/pages/apps.dart','lib/providers/settings_provider.dart','lib/folders/**','lib/components/bulk_update_sheet.dart','lib/components/app_detail_widgets.dart','lib/pages/additional_options_page.dart','lib/widgets/r04_actions_history_dialog.dart','lib/services/r09_*','test/r09_*','scripts/ci/r09_*','scripts/ci/test_r09_*','assets/translations/en.json')
@@ -30,6 +36,11 @@ def verify(root=ROOT):
     for path, tokens in REQUIRED.items():
         code=read(path)
         for token in tokens: require(token in code, path+' missing '+token)
+    provider=read('lib/providers/apps_provider_install.dart')
+    preview=provider[provider.index('Future<R09ArtifactInspection> _inspectR09Candidate('):provider.index('Future<Object> downloadApp(')]
+    require(preview.index('await verifyR04ActionsArchiveBeforeExtraction(') < preview.index('await extractTarballOffIsolate('), 'preview archive digest before extraction')
+    production=provider[provider.index('Future<Object> downloadApp('):provider.index('Future<void> uninstallApp(')]
+    require(production.index('reviewBinding.matches(_r09ReleaseKey(app), actualDigest)') < production.index('final artifactFormat = installArtifactFormat('), 'review digest before normal extraction')
     for glob in RISK: require(repr(glob) in read('scripts/ci/obtainx_ci_policy.py'), 'classifier missing '+glob)
     for name in workflows.WORKFLOWS:
         doc=workflows.parse_workflow(read('.github/workflows/'+name),name)

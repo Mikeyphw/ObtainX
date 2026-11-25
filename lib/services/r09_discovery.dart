@@ -112,16 +112,18 @@ bool r09ActionsEligible(MapEntry<String, String> asset,
 
 MapEntry<String, String>? r09ChooseArtifact(List<MapEntry<String, String>> assets,
     List<String> abis, MapEntry<String, String>? preferred,
-    {bool downloadOnly = false, bool Function(MapEntry<String, String>)? allowed}) {
-  final eligible = assets.where((a) => (allowed?.call(a) ?? true) && r09ArtifactChoice(a.key, abis,
-      downloadOnly: downloadOnly).eligible).toList();
+    {bool downloadOnly = false, bool Function(MapEntry<String, String>)? allowed,
+    R09ArtifactChoice Function(MapEntry<String, String>)? evaluatedChoice}) {
+  R09ArtifactChoice decision(MapEntry<String, String> asset) => evaluatedChoice?.call(asset) ??
+      r09ArtifactChoice(asset.key, abis, downloadOnly: downloadOnly);
+  final eligible = assets.where((a) => (allowed?.call(a) ?? true) && decision(a).eligible).toList();
   for (final asset in eligible) {
     if (asset.key == preferred?.key && asset.value == preferred?.value) return asset;
   }
   if (eligible.isEmpty) return null;
   for (final abi in preferredSourceAbis(abis)) {
     for (final asset in eligible) {
-      if (sourceAssetHasAbi(asset.key, abi)) return asset;
+      if (decision(asset).abiHints.contains(abi)) return asset;
     }
   }
   return eligible.first;

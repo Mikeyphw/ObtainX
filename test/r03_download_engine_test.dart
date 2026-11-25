@@ -179,9 +179,9 @@ void main() {
     }
     Future<File> transfer({bool Function()? cancelled,
       void Function(double?, int?, int?)? progress,
-      bool useExisting = true, String? expectedSha256}) async {
+      bool useExisting = true, String? expectedSha256, int maxBytes = r03MaximumBytes}) async {
       final first = await fetch(const {});
-      return engine().download(
+      return R03DownloadEngine(journalDirectory: engine().journalDirectory, maxBytes: maxBytes).download(
         source: source(), destination: target(),
         headers: const {}, firstResponse: first, fetch: fetch,
         isCancelled: cancelled ?? () => false,
@@ -203,6 +203,19 @@ void main() {
         greaterThanOrEqualTo(record.validatedBytes));
       return record.validatedBytes;
     }
+
+    test('R09 known and unknown lengths never exceed review budget', () async {
+      for (final unknown in [false, true]) {
+        omitLength = unknown;
+        await expectLater(transfer(useExisting: false, maxBytes: 65536),
+          throwsA(isA<R03InvalidEntityException>()));
+        expect(target().existsSync(), isFalse);
+        final part = File('${target().path}.part');
+        if (part.existsSync()) {
+          expect(part.lengthSync(), lessThanOrEqualTo(65536));
+        }
+      }
+    });
 
     test('200 with known length publishes exact verified bytes and receipt', () async {
       final output = await transfer();

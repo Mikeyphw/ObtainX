@@ -6,6 +6,7 @@ import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/services/r09_discovery.dart';
+import 'package:obtainium/services/r09_artifact_inspection.dart';
 import 'package:obtainium/theme/app_dialog_theme.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher_string.dart';
@@ -96,12 +97,14 @@ class AppFilePicker extends StatefulWidget {
     this.initVal,
     this.archs,
     this.pickAnyAsset = false,
+    this.inspectCandidate,
   });
 
   final App app;
   final MapEntry<String, String>? initVal;
   final List<String>? archs;
   final bool pickAnyAsset;
+  final Future<R09ArtifactInspection> Function(MapEntry<String, String>, CancellationToken, void Function(double?, int?, int?))? inspectCandidate;
 
   @override
   State<AppFilePicker> createState() => _AppFilePickerState();
@@ -109,6 +112,76 @@ class AppFilePicker extends StatefulWidget {
 
 class _AppFilePickerState extends State<AppFilePicker> {
   MapEntry<String, String>? fileUrl;
+  bool initialized = false;
+  final reviews = <(String, String), R09ArtifactInspection>{};
+  final failures = <(String, String)>{};
+  CancellationToken? token;
+  double? progress;
+  (String, String) keyOf(MapEntry<String, String> asset) => (asset.key, asset.value);
+  bool get busy => token != null;
+
+  @override
+  void dispose() {
+    token?.cancel();
+    super.dispose();
+  }
+
+  Future<void> inspect(MapEntry<String, String> asset) async {
+    final callback = widget.inspectCandidate;
+    if (callback == null || busy) return;
+    final active = CancellationToken();
+    final key = keyOf(asset);
+    setState(() {
+      token = active;
+      progress = null;
+      reviews.remove(key);
+      failures.remove(key);
+    });
+    try {
+      final result = await callback(asset, active, (_, received, total) {
+        if (!mounted || active.isCancelled) return;
+        setState(() => progress = received != null && total != null && total > 0
+            ? (received / total).clamp(0.0, 1.0).toDouble() : null);
+      });
+      if (!mounted || active.isCancelled) return;
+      setState(() {
+        reviews[key] = result;
+        if (result.eligible && fileUrl == null) {
+          fileUrl = asset;
+        }
+      });
+    } catch (_) {
+      if (mounted && !active.isCancelled) {
+        setState(() => failures.add(key));
+      }
+    } finally {
+      if (mounted) setState(() { token = null; progress = null; });
+    }
+  }
+
+  String reviewDetails(R09ArtifactInspection result) {
+    final lines = <String>[
+      tr(result.eligible ? 'r09ReviewCompatible' : 'r09ReviewIncompatible'),
+      '${tr('r09ArtifactSize')}: ${result.bytes} B',
+      '${tr(result.actionsDigestVerified ? 'r09ReviewActionsDigest' : 'r09ReviewLocalDigest')}: ${result.artifactSha256}',
+      tr(result.signerStatus),
+      if (result.installedVersionCode != null)
+        "${tr('installed')}: ${result.installedVersionName ?? tr('unknown')} (${result.installedVersionCode})",
+      ...result.refusals.map((reason) => tr(reason)),
+    ];
+    for (final member in result.members) {
+      lines.addAll([
+        '${member.name} · ${tr(result.selectedPaths.contains(member.path) ? 'r09ReviewSelected' : 'r09ReviewNotSelected')}',
+        '${member.packageName} · ${member.versionName ?? tr('unknown')} (${member.versionCode})',
+        '${tr('r09ReviewMinSdk')}: ${member.minSdk ?? tr('unknown')} · ${member.split ?? tr('r09ReviewBase')}',
+        '${tr('r09ReviewNativeAbi')}: ${member.nativeAbis.isEmpty ? tr('r09ReviewNoNativeLibs') : member.nativeAbis.join(', ')}',
+        '${tr('r09ReviewLocalDigest')}: ${member.sha256}',
+        '${tr('r09ReviewCertificates')}: ${member.signers.isEmpty ? tr('unknown') : member.signers.join(', ')}',
+      ]);
+    }
+    return lines.join('\n');
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -122,12 +195,27 @@ class _AppFilePickerState extends State<AppFilePicker> {
         r09ActionsEligible(asset, widget.app.additionalSettings, widget.app.url, DateTime.now());
     R09ArtifactChoice choice(MapEntry<String, String> asset) {
       final result = r09ArtifactChoice(asset.key, archs, downloadOnly: widget.pickAnyAsset);
-      return allowed(asset) ? result : R09ArtifactChoice(false, result.abiHints,
-          result.role, 'r09ExpiredOrUnbound');
+      if (!allowed(asset)) return R09ArtifactChoice(false, result.abiHints, result.role, 'r09ExpiredOrUnbound');
+      final review = reviews[keyOf(asset)];
+      if (review != null) {
+        return R09ArtifactChoice(review.eligible, review.members.where((m) => review.selectedPaths.contains(m.path)).expand((m) => m.nativeAbis).toSet().toList(), result.role, review.eligible ? 'r09ReviewCompatible' : 'r09ReviewIncompatible');
+      }
+      if (failures.contains(keyOf(asset))) return R09ArtifactChoice(false, result.abiHints, result.role, 'r09ReviewFailed');
+      return result;
     }
-    fileUrl = r09ChooseArtifact(urlsToSelectFrom, archs, fileUrl ?? widget.initVal,
-        downloadOnly: widget.pickAnyAsset, allowed: allowed);
+    if (!initialized) {
+      fileUrl = r09ChooseArtifact(urlsToSelectFrom, archs, widget.initVal,
+          downloadOnly: widget.pickAnyAsset, allowed: allowed, evaluatedChoice: choice);
+      initialized = true;
+    } else if (fileUrl != null && (!choice(fileUrl!).eligible ||
+        !urlsToSelectFrom.any((asset) => keyOf(asset) == keyOf(fileUrl!)))) {
+      fileUrl = null;
+    }
     String details(MapEntry<String, String> asset) {
+      final reviewed = reviews[keyOf(asset)];
+      if (reviewed != null) {
+        return allowed(asset) ? reviewDetails(reviewed) : '${tr("r09ExpiredOrUnbound")}\n${reviewDetails(reviewed)}';
+      }
       final info = choice(asset);
       final preferred = widget.app.preferredApkIndex;
       final knownSize = preferred >= 0 && preferred < widget.app.apkUrls.length &&
@@ -143,6 +231,28 @@ class _AppFilePickerState extends State<AppFilePicker> {
           '${tr('r09AbiHint')}: ${info.abiHints.isEmpty ? tr('unknown') : info.abiHints.join(', ')}\n'
           '${tr('r09ArtifactSize')}: ${knownSize == null ? tr('unknown') : '$knownSize B'}$trust';
     }
+    Widget row(MapEntry<int, MapEntry<String, String>> entry) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (isTV)
+          ListTile(
+            autofocus: !busy && choice(entry.value).eligible && fileUrl?.key == entry.value.key && fileUrl?.value == entry.value.value,
+            leading: choice(entry.value).eligible ? Radio<int>(value: entry.key) : const Icon(Icons.block),
+            title: Text(entry.value.key), subtitle: Text(details(entry.value)),
+            enabled: choice(entry.value).eligible && !busy,
+            selected: fileUrl?.key == entry.value.key && fileUrl?.value == entry.value.value,
+            onTap: !busy && choice(entry.value).eligible ? () => setState(() => fileUrl = entry.value) : null,
+          )
+        else
+          RadioListTile<int>(title: Text(entry.value.key), subtitle: Text(details(entry.value)),
+            enabled: choice(entry.value).eligible && !busy, value: entry.key),
+        if (widget.inspectCandidate != null)
+          Padding(padding: const EdgeInsets.only(left: 16, bottom: 8), child: OutlinedButton(
+            onPressed: !busy && allowed(entry.value) ? () => inspect(entry.value) : null,
+            child: Text(tr('r09ReviewInspect')),
+          )),
+      ],
+    );
     return AlertDialog(
       scrollable: true,
       title: Text(
@@ -156,7 +266,7 @@ class _AppFilePickerState extends State<AppFilePicker> {
               groupValue: fileUrl == null ? null : urlsToSelectFrom.indexWhere(
                 (asset) => asset.key == fileUrl?.key && asset.value == fileUrl?.value),
               onChanged: (int? val) {
-                if (val != null && val >= 0 && val < urlsToSelectFrom.length &&
+                if (!busy && val != null && val >= 0 && val < urlsToSelectFrom.length &&
                     choice(urlsToSelectFrom[val]).eligible) {
                   setState(() { fileUrl = urlsToSelectFrom[val]; });
                 }
@@ -173,29 +283,9 @@ class _AppFilePickerState extends State<AppFilePicker> {
                       : const SizedBox.shrink(),
                   Text('${tr('r09TrackedPackage')}: ${widget.app.id} · ${widget.app.latestVersion}\n${tr('r09MetadataPending')}'),
                   const SizedBox(height: 16),
-                  if (isTV)
-                    ...urlsToSelectFrom.asMap().entries.map(
-                      (entry) => ListTile(
-                        autofocus: choice(entry.value).eligible && fileUrl?.key == entry.value.key && fileUrl?.value == entry.value.value,
-                        leading: choice(entry.value).eligible ? Radio<int>(value: entry.key) : const Icon(Icons.block),
-                        title: Text(entry.value.key),
-                        subtitle: Text(details(entry.value)),
-                        enabled: choice(entry.value).eligible,
-                        selected: fileUrl?.key == entry.value.key && fileUrl?.value == entry.value.value,
-                        onTap: choice(entry.value).eligible ? () {
-                          setState(() { fileUrl = entry.value; });
-                        } : null,
-                      ),
-                    )
-                  else
-                    ...urlsToSelectFrom.asMap().entries.map(
-                      (entry) => RadioListTile<int>(
-                        title: Text(entry.value.key),
-                        subtitle: Text(details(entry.value)),
-                        enabled: choice(entry.value).eligible,
-                        value: entry.key,
-                      ),
-                    ),
+                  if (widget.inspectCandidate != null) Text(tr('r09ReviewExplanation')),
+                  if (busy) LinearProgressIndicator(value: progress),
+                  ...urlsToSelectFrom.asMap().entries.map(row),
                   if (widget.archs != null) const SizedBox(height: 16),
                   if (widget.archs != null)
                     Text(
@@ -216,13 +306,13 @@ class _AppFilePickerState extends State<AppFilePicker> {
       actions: [
         TextButton(
           onPressed: () {
-            Navigator.of(context).pop(null);
+            if (busy) { token?.cancel(); } else { Navigator.of(context).pop(null); }
           },
-          child: Text(tr('cancel')),
+          child: Text(tr(busy ? 'r09ReviewCancel' : 'cancel')),
         ),
         FilledButton(
           autofocus: isTV && fileUrl == null,
-          onPressed: fileUrl != null && choice(fileUrl!).eligible
+          onPressed: !busy && fileUrl != null && choice(fileUrl!).eligible
               ? () {
                   final selected = fileUrl;
                   if (selected == null || !choice(selected).eligible) {
@@ -230,7 +320,7 @@ class _AppFilePickerState extends State<AppFilePicker> {
                     return;
                   }
                   context.read<SettingsProvider>().selectionClick();
-                  Navigator.of(context).pop(selected);
+                  Navigator.of(context).pop(R09PickerSelection(selected, reviews[keyOf(selected)]));
                 }
               : null,
           child: Text(tr('continue')),

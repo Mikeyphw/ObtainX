@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -36,6 +37,8 @@ import 'package:obtainium/services/r05_operation_journal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/services/r09_discovery.dart';
+import 'package:obtainium/services/r09_artifact_inspection.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:obtainium/services/install_precommit_gate.dart';
 import 'package:obtainium/services/r02f_p05_device_profile.dart';
 import 'package:obtainium/services/verified_obb_delivery.dart';
@@ -331,6 +334,16 @@ bool installerCanDowngrade({
 }) => installerModeKey == 'external' || downgradeModuleUsable;
 
 /// App download, install, and on-device package operations for [AppsProvider].
+// A review is a transient selection, not a new installed-state authority.
+final _r09Selections = Expando<Map<String, R09ReviewBinding>>('r09-reviewed-selection');
+
+String _r09ReleaseKey(App app) => jsonEncode([
+  app.listingKey, app.id, downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(app)),
+  app.allowIdChange, app.settings.getStringOrNull('zippedApkFilterRegEx'),
+  app.settings.getStringOrNull('tarballedApkFilterRegEx'),
+  app.additionalSettings['r04ActionsArchiveEvidence'],
+]);
+
 extension AppsProviderInstall on AppsProvider {
   /// R05 journal is the single durable state authority; Android/release
   /// reconciliation remains independent and cannot be replaced by a timer.
@@ -827,6 +840,189 @@ extension AppsProviderInstall on AppsProvider {
     await saveApps([listing.app]);
   }
 
+  List<File> _archiveApkCandidates(Directory directory, App app, bool isTarball) {
+    // Nested containers must not be mistaken for installable APKs.
+    final apks = directory
+        .listSync(recursive: true, followLinks: false)
+        .whereType<File>()
+        .where((file) => file.path.toLowerCase().endsWith('.apk'))
+        .toList();
+    final originalSplits = apks
+        .where((file) => isConfigurationSplitApk(file.path))
+        .map((file) => file.path)
+        .toSet();
+
+    String? filterRegEx;
+    if (isTarball &&
+        app.settings
+                .getStringOrNull('tarballedApkFilterRegEx')
+                ?.isNotEmpty ==
+            true) {
+      filterRegEx = app.settings.getStringOrNull('tarballedApkFilterRegEx');
+    } else if (!isTarball &&
+        app.settings.getStringOrNull('zippedApkFilterRegEx')?.isNotEmpty ==
+            true) {
+      filterRegEx = app.settings.getStringOrNull('zippedApkFilterRegEx');
+    }
+    if (filterRegEx != null) {
+      final reg = RegExp(filterRegEx);
+      apks.removeWhere((apk) {
+        final relativePath = apk.path.substring(directory.path.length + 1);
+        return !reg.hasMatch(relativePath);
+      });
+      // Do not allow a regex to silently strip required config splits.
+      final retained = apks.map((file) => file.path).toSet();
+      if (originalSplits.difference(retained).isNotEmpty) {
+        throw const FormatException(
+          'Archive APK filter excludes required split configurations',
+        );
+      }
+    }
+    return apks;
+  }
+
+  /// Inspect only an explicitly requested candidate. Private review staging is
+  /// discarded on success, refusal or cancellation, with no listing mutation,
+  /// installer session, background notification, or persistent download entry.
+  Future<R09ArtifactInspection> _inspectR09Candidate(App app,
+      MapEntry<String, String> asset, CancellationToken token,
+      void Function(double?, int?, int?) progress) async {
+    token.throwIfCancelled();
+    final exactAssets = app.apkUrls.where((item) => item.key == asset.key && item.value == asset.value).toList();
+    if (exactAssets.length != 1 || !r09ActionsEligible(asset, app.additionalSettings, app.url, DateTime.now())) {
+      throw const FormatException('Candidate identity changed');
+    }
+    final releaseKey = _r09ReleaseKey(app.copyWith(preferredApkIndex: app.apkUrls.indexWhere(
+      (item) => item.key == asset.key && item.value == asset.value)));
+    final source = SourceProvider().getSource(app.url, overrideSource: app.overrideSource);
+    final mergedSettings = await source.buildMergedSettings(app.additionalSettings, settingsProvider);
+    final url = await source.assetUrlPrefetchModifier(
+      await source.generalReqPrefetchModifier(asset.value, mergedSettings), app.url, mergedSettings);
+    final uri = Uri.parse(url);
+    // Review does not create an exception to verified HTTPS transport policy.
+    if (uri.scheme != 'https' || uri.host.isEmpty || uri.userInfo.isNotEmpty) {
+      throw const FormatException('Review requires HTTPS');
+    }
+    final headers = await source.getRequestHeaders(app.additionalSettings, url, forAPKDownload: true);
+    final cache = await getTemporaryDirectory();
+    final stage = await cache.createTemp('r09-review-');
+    try {
+      token.throwIfCancelled();
+      final advertised = installArtifactFormat(asset.key);
+      final fileName = advertised == null ? 'candidate' :
+          'candidate.${asset.key.toLowerCase().endsWith('.tar.gz') ? 'tar.gz' : asset.key.split('.').last}';
+      Future<File> fetch(Map<String, String>? requestHeaders) => downloadFile(url, fileName,
+        advertised != null, progress, stage.path, useExisting: false, headers: requestHeaders,
+        allowInsecure: false, cancellationToken: token, maxBytes: r09InspectionMaxBytes,
+        privateJournalDirectory: Directory('${stage.path}/journal'), reviewHttpsOnly: true);
+      File artifact;
+      try {
+        artifact = await fetch(headers);
+      } catch (error) {
+        if (app.additionalSettings[GitHub.r04SourceModeKey] == GitHub.r04ModeActions ||
+            !shouldRetryGitHubDownloadWithoutAuthorization(source: source, headers: headers, error: error)) {
+          rethrow;
+        }
+        artifact = await fetch(Map<String, String>.from(headers!)..remove(HttpHeaders.authorizationHeader));
+      }
+      token.throwIfCancelled();
+      await verifyR04ActionsArchiveBeforeExtraction(archive: artifact,
+        additionalSettings: app.additionalSettings, sourceUrl: app.url,
+        selectedAssetUrl: asset.value, selectedAssetName: asset.key);
+      final artifactDigest = await sha256FileOffIsolate(artifact.path);
+      final bytes = await artifact.length();
+      final format = advertised ?? installArtifactFormat(artifact.path);
+      if (format == null) throw const FormatException('Unsupported APK artifact');
+      final members = <R09ApkFacts>[];
+      var excludedApks = false;
+      final obbs = <String>[];
+      if (format == InstallArtifactFormat.apk) {
+        members.add(await inspectR09Apk(artifact, asset.key));
+      } else {
+        final extracted = Directory('${stage.path}/extracted');
+        if (format == InstallArtifactFormat.tarball) {
+          await extractTarballOffIsolate(artifact.path, extracted.path, limits: r09InspectionLimits);
+        } else {
+          await extractZipOffIsolate(artifact.path, extracted.path, limits: r09InspectionLimits);
+        }
+        token.throwIfCancelled();
+        final allApks = extracted.listSync(recursive: true, followLinks: false).whereType<File>()
+            .where((file) => file.path.toLowerCase().endsWith('.apk')).toList();
+        if (allApks.isEmpty || allApks.length > r09InspectionMaxApks) {
+          throw const FormatException('Review APK inventory limit');
+        }
+        final candidates = _archiveApkCandidates(extracted, app, format == InstallArtifactFormat.tarball);
+        excludedApks = candidates.length != allApks.length;
+        // The installer independently inventories the entire extracted tree.
+        // Do not overstate compatibility where a download filter hides files.
+        allApks.sort((a, b) => a.path.compareTo(b.path));
+        for (final file in allApks) {
+          token.throwIfCancelled();
+          members.add(await inspectR09Apk(file, file.path.substring(extracted.path.length + 1)));
+        }
+        obbs.addAll(extracted.listSync(recursive: true, followLinks: false).whereType<File>()
+            .where((file) => file.path.toLowerCase().endsWith('.obb')).map((file) => file.path));
+      }
+      token.throwIfCancelled();
+      final device = await DeviceInfoPlugin().androidInfo;
+      final dispatcher = WidgetsBinding.instance.platformDispatcher;
+      final locales = dispatcher.locales.map((locale) => locale.toLanguageTag()).toList();
+      final density = dispatcher.views.isEmpty ? null : (dispatcher.views.first.devicePixelRatio * 160).round();
+      validateP05DeviceProfile(sdk: device.version.sdkInt, supportedAbis: device.supportedAbis,
+          locales: locales, densityDpi: density);
+      final bases = members.where((member) => member.split == null).toList();
+      List<String> installedSigners = const [];
+      var installedObserved = false;
+      int? installedVersionCode;
+      String? installedVersionName;
+      if (bases.length == 1) {
+        try {
+          final installed = await getInstalledInfo(bases.single.packageName, light: false, printErr: false, throwOnError: true);
+          installedObserved = installed != null;
+          installedVersionCode = installed?.versionCode;
+          installedVersionName = installed?.versionName;
+          installedSigners = certificateHashesFromSignatures(installed?.signingInfo?.apkContentSigners ?? const <List<int>>[])
+              .map((value) => value.replaceAll(':', '').toLowerCase()).toList();
+        } catch (_) {
+          // Unknown installed state is not the same as a proven absent package.
+          installedObserved = true;
+        }
+      }
+      final review = reviewR09Artifact(artifactSha256: artifactDigest, bytes: bytes,
+        members: members, format: format, supportedAbis: device.supportedAbis,
+        sdk: device.version.sdkInt, locales: locales, density: density,
+        expectedPackage: isTempId(app) || app.allowIdChange ? null : app.id,
+        installedSigners: installedSigners, installedPackageObserved: installedObserved,
+        installedVersionCode: installedVersionCode, installedVersionName: installedVersionName,
+        actionsDigestVerified: app.additionalSettings[GitHub.r04SourceModeKey] == GitHub.r04ModeActions);
+      final extraRefusals = <String>[];
+      if (excludedApks) extraRefusals.add('r09ReviewFilteredInventory');
+      if (obbs.isNotEmpty && bases.length == 1) {
+        try {
+          validateObbFileNames(obbs, bases.single.packageName);
+          validateStagedObbPaths(obbs, bases.single.packageName, extractionRoot: '${stage.path}/extracted');
+          if (!getInstaller().wantsContainerHandoff && device.version.sdkInt >= 30) {
+            extraRefusals.add('r09ReviewObbUnsupported');
+          }
+        } on FormatException {
+          extraRefusals.add('r09ReviewObbUnsupported');
+        }
+      }
+      token.throwIfCancelled();
+      if (!r09ActionsEligible(asset, app.additionalSettings, app.url, DateTime.now())) {
+        throw const FormatException('Actions artifact expired during review');
+      }
+      return R09ArtifactInspection(artifactSha256: review.artifactSha256, bytes: review.bytes,
+        members: review.members, selectedPaths: review.selectedPaths,
+        refusals: [...review.refusals, ...extraRefusals], signerStatus: review.signerStatus,
+        actionsDigestVerified: review.actionsDigestVerified,
+        installedVersionCode: review.installedVersionCode, installedVersionName: review.installedVersionName,
+        releaseKey: releaseKey);
+    } finally {
+      await stage.delete(recursive: true);
+    }
+  }
+
   /// Downloads the preferred APK for [app], returning a [DownloadedApk] or [DownloadedDir].
   Future<Object> downloadApp(
     App app, {
@@ -856,6 +1052,10 @@ extension AppsProviderInstall on AppsProvider {
       }
       if (app.preferredApkIndex < 0) app = app.copyWith(preferredApkIndex: 0);
       final downloadRelease = InstallReleaseSnapshot.fromApp(app);
+      final reviewBinding = _r09Selections[this]?[app.listingKey];
+      if (reviewBinding != null && reviewBinding.releaseKey != _r09ReleaseKey(app)) {
+        throw ObtainiumError(tr('r09ReviewSelectionChanged'));
+      }
       if (apps[app.listingKey] != null) apps[app.listingKey]!.app = app;
       final AppSource source = SourceProvider().getSource(
         app.url,
@@ -1034,6 +1234,13 @@ extension AppsProviderInstall on AppsProvider {
         selectedAssetUrl: app.apkUrls[app.preferredApkIndex].value,
         selectedAssetName: app.apkUrls[app.preferredApkIndex].key,
       );
+      if (reviewBinding != null) {
+        final actualDigest = await sha256FileOffIsolate(downloadedFile.path);
+        if (!reviewBinding.matches(_r09ReleaseKey(app), actualDigest)) {
+          await downloadedFile.delete();
+          throw ObtainiumError(tr('r09ReviewSelectionChanged'));
+        }
+      }
       if (apps[app.listingKey] != null) {
         apps[app.listingKey]!.downloadProgress = _remainingStepsProgress
             .toDouble();
@@ -1087,43 +1294,7 @@ extension AppsProviderInstall on AppsProvider {
             await unzipFile(downloadedFile.path, apkDirPath);
           }
           apkDir = Directory(apkDirPath);
-          // Nested containers must not be mistaken for installable APKs.
-          final apks = apkDir
-              .listSync(recursive: true, followLinks: false)
-              .whereType<File>()
-              .where((file) => file.path.toLowerCase().endsWith('.apk'))
-              .toList();
-          final originalSplits = apks
-              .where((file) => isConfigurationSplitApk(file.path))
-              .map((file) => file.path)
-              .toSet();
-
-          String? filterRegEx;
-          if (isTarball &&
-              app.settings
-                      .getStringOrNull('tarballedApkFilterRegEx')
-                      ?.isNotEmpty ==
-                  true) {
-            filterRegEx = app.settings.getStringOrNull('tarballedApkFilterRegEx');
-          } else if (!isTarball &&
-              app.settings.getStringOrNull('zippedApkFilterRegEx')?.isNotEmpty ==
-                  true) {
-            filterRegEx = app.settings.getStringOrNull('zippedApkFilterRegEx');
-          }
-          if (filterRegEx != null) {
-            final reg = RegExp(filterRegEx);
-            apks.removeWhere((apk) {
-              final relativePath = apk.path.substring(apkDir!.path.length + 1);
-              return !reg.hasMatch(relativePath);
-            });
-            // Do not allow a regex to silently strip required config splits.
-            final retained = apks.map((file) => file.path).toSet();
-            if (originalSplits.difference(retained).isNotEmpty) {
-              throw const FormatException(
-                'Archive APK filter excludes required split configurations',
-              );
-            }
-          }
+          final apks = _archiveApkCandidates(apkDir, app, isTarball);
           final (plan, baseInfo) = await _inspectInstallBundle(
             apks,
             format: artifactFormat,
@@ -1172,6 +1343,9 @@ extension AppsProviderInstall on AppsProvider {
             file.path != downloadedFile.path) {
           unawaited(file.delete(recursive: true));
         }
+      }
+      if (identical(_r09Selections[this]?[app.listingKey], reviewBinding)) {
+        _r09Selections[this]?.remove(app.listingKey);
       }
       if (isAPK) {
         return DownloadedApk(
@@ -1835,6 +2009,7 @@ extension AppsProviderInstall on AppsProvider {
     bool evenIfSingleChoice = false,
     ThemeData? dialogTheme,
   }) async {
+    R09ArtifactInspection? selectedReview;
     var urlsToSelectFrom = app.apkUrls;
     if (pickAnyAsset) {
       urlsToSelectFrom = [...urlsToSelectFrom, ...app.otherAssetUrls];
@@ -1872,10 +2047,11 @@ extension AppsProviderInstall on AppsProvider {
     final NavigatorState? navigator = allowUserInteraction
         ? globalNavigatorKey.currentState
         : null;
-    if ((urlsToSelectFrom.length > 1 || evenIfSingleChoice) &&
+    if ((urlsToSelectFrom.length > 1 || evenIfSingleChoice ||
+        (!pickAnyAsset && urlsToSelectFrom.isNotEmpty)) &&
         navigator != null &&
         navigator.mounted) {
-      appFileUrl = await showDialog(
+      final picked = await showDialog<R09PickerSelection>(
         context: navigator.context,
         builder: (BuildContext ctx) {
           final Widget picker = AppFilePicker(
@@ -1883,17 +2059,21 @@ extension AppsProviderInstall on AppsProvider {
             initVal: appFileUrl,
             archs: archs,
             pickAnyAsset: pickAnyAsset,
+            inspectCandidate: pickAnyAsset ? null : (asset, token, progress) =>
+                _inspectR09Candidate(app, asset, token, progress),
           );
           return dialogTheme == null
               ? picker
               : Theme(data: dialogTheme, child: picker);
         },
       );
+      appFileUrl = picked?.asset;
+      selectedReview = picked?.inspection;
     }
     if (appFileUrl != null &&
         (!allowed(appFileUrl) ||
-            !r09ArtifactChoice(appFileUrl.key, archs,
-                downloadOnly: pickAnyAsset).eligible)) {
+            !(selectedReview?.eligible ?? r09ArtifactChoice(appFileUrl.key, archs,
+                downloadOnly: pickAnyAsset).eligible))) {
       return null;
     }
     String? getHost(String url) {
@@ -1927,6 +2107,23 @@ extension AppsProviderInstall on AppsProvider {
         appFileUrl = null;
       }
     }
+    if (appFileUrl != null && selectedReview != null && !pickAnyAsset) {
+      final index = app.apkUrls.indexWhere((asset) => asset.key == appFileUrl?.key && asset.value == appFileUrl?.value);
+      if (index < 0 || !selectedReview.eligible || !allowed(appFileUrl)) {
+        return null;
+      }
+      final selectedRelease = _r09ReleaseKey(app.copyWith(preferredApkIndex: index));
+      if (selectedReview.releaseKey != selectedRelease) {
+        throw ObtainiumError(tr('r09ReviewSelectionChanged'));
+      }
+      final choices = _r09Selections[this] ?? <String, R09ReviewBinding>{};
+      _r09Selections[this] = choices;
+      choices[app.listingKey] = R09ReviewBinding(releaseKey: selectedRelease,
+        digest: selectedReview.artifactSha256);
+    }
+    if (appFileUrl != null && selectedReview == null && !pickAnyAsset && navigator != null && navigator.mounted) {
+      _r09Selections[this]?.remove(app.listingKey);
+    }
     return appFileUrl;
   }
 
@@ -1958,11 +2155,14 @@ extension AppsProviderInstall on AppsProvider {
         );
       }
       if (apkUrl != null) {
-        final url = apkUrl.value;
+        final selected = apkUrl;
         final int urlInd = apps[id]!.app.apkUrls.indexWhere(
-          (e) => e.value == url,
+          (e) => e.key == selected.key && e.value == selected.value,
         );
-        if (urlInd >= 0 && urlInd != apps[id]!.app.preferredApkIndex) {
+        if (urlInd < 0) {
+          throw ObtainiumError(tr('r09ReviewSelectionChanged'));
+        }
+        if (urlInd != apps[id]!.app.preferredApkIndex) {
           apps[id]!.app = apps[id]!.app.copyWith(preferredApkIndex: urlInd);
           await saveApps([apps[id]!.app]);
         }

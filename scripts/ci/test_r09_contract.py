@@ -18,7 +18,7 @@ class R09Wiring(unittest.TestCase):
         original=Path.read_text
         old_patterns = (
             ('lib/components/generated_form_renderer.dart', "'r09BoundSourceUrl': ?boundUrl", "if (boundUrl != null) 'r09BoundSourceUrl': boundUrl"),
-            ('lib/providers/apps_provider_install.dart', 'downloadOnly: pickAnyAsset).eligible)) {\n      return null;\n    }', 'downloadOnly: pickAnyAsset).eligible)) return null;'),
+            ('lib/providers/apps_provider_install.dart', 'downloadOnly: pickAnyAsset).eligible))) {\n      return null;\n    }', 'downloadOnly: pickAnyAsset).eligible))) return null;'),
             ('lib/widgets/r04_actions_history_dialog.dart', 'if (row.canSelectAt(now())) {', 'if (row.canSelectAt(now()))'),
             ('lib/widgets/r04_actions_history_dialog.dart', 'Navigator.of(context).pop(row);\n                                } else {\n                                  setState(() {});', 'Navigator.of(context).pop(row);\n                                else setState(() {});'),
         )

@@ -2260,8 +2260,11 @@ class HttpService {
     bool followRedirects = true,
     Object? postBody,
     HttpClient? sharedClient,
+    bool reviewHttpsOnly = false,
   }) async {
     var currentUrl = Uri.parse(url);
+    final initialUrl = currentUrl;
+    var reviewCrossOrigin = false;
     // Only the exact GitHub artifact API URL enters this narrower redirect
     // policy. Other app sources retain their existing redirect semantics.
     final r04Protected = r04IsCanonicalArtifactDownload(currentUrl);
@@ -2270,9 +2273,12 @@ class HttpService {
     List<Cookie> cookies = [];
     final httpClient =
         sharedClient ??
-        createHttpClient(additionalSettings['allowInsecure'] == true);
+        createHttpClient(!reviewHttpsOnly && additionalSettings['allowInsecure'] == true);
     try {
       while (redirectCount < maxRedirects) {
+        if (reviewHttpsOnly && (currentUrl.scheme != 'https' || currentUrl.host.isEmpty || currentUrl.userInfo.isNotEmpty)) {
+          throw const FormatException('Review requires HTTPS on every hop');
+        }
         bool openTimedOut = false;
         final pendingRequest = httpClient.openUrl(method, currentUrl).then((
           request,
@@ -2289,7 +2295,7 @@ class HttpService {
         );
         // A private-repository PAT is valid ONLY for api.github.com.
         // Never forward bearer/cookie/custom headers to signed storage.
-        final hopHeaders = r04Protected && r04StorageHop
+        final hopHeaders = (r04Protected && r04StorageHop) || reviewCrossOrigin
             ? r04ArtifactStorageHeaders(requestHeaders)
             : requestHeaders;
         withDefaultObtainXUserAgent(hopHeaders).forEach((
@@ -2298,7 +2304,7 @@ class HttpService {
         ) {
           request.headers.set(headerName, headerValue);
         });
-        if (!r04Protected || !r04StorageHop) {
+        if ((!r04Protected || !r04StorageHop) && !reviewCrossOrigin) {
           request.cookies.addAll(cookies);
         }
         request.followRedirects = false;
@@ -2323,9 +2329,12 @@ class HttpService {
               r04ValidateArtifactRedirect(currentUrl, nextUrl);
               r04StorageHop = true;
             }
+            if (reviewHttpsOnly && (nextUrl.scheme != initialUrl.scheme || nextUrl.host != initialUrl.host || nextUrl.port != initialUrl.port)) {
+              reviewCrossOrigin = true;
+            }
             currentUrl = nextUrl;
             redirectCount++;
-            cookies = r04Protected ? <Cookie>[] : response.cookies;
+            cookies = r04Protected || reviewCrossOrigin ? <Cookie>[] : response.cookies;
             await response.timeout(responseTimeout).drain<void>();
             continue;
           }

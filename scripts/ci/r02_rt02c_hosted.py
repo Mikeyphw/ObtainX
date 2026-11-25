@@ -81,6 +81,52 @@ def native_session_observation(text:str)->dict:
     active,terminal=matches[0]
     return {'active':active,'terminal':terminal}
 
+DIAGNOSTIC_STEPS = frozenset({
+    'SCENARIO_SETUP', 'DOWNLOAD_ARCHIVE', 'EXTRACT_ARCHIVE', 'EXTRACTED_INVENTORY',
+    'SIGNED_MEMBER_DIGESTS', 'BUNDLE_PLAN', 'R09_STAGE', 'R09_BASE_SIGNERS',
+    'R09_INSTALLED_QUERY', 'R09_INSTALLED_VERSION', 'R09_INSTALLED_SIGNERS',
+    'R09_REVIEW_PLAN', 'R09_REVIEW_REFUSALS', 'R09_REVIEW_SIGNER_MATCH',
+    'R09_REVIEW_SELECTION', 'R09_REVIEW_ELIGIBILITY', 'HOST_INSTALL_AUTHORIZATION',
+    'OWNED_INSTALL_SESSION', 'R09_STAGE_CLEANUP', 'SCENARIO_CLEANUP',
+} | {'R09_'+member+'_'+step for member in ('BASE','SPLIT')
+     for step in ('COPY','INSPECT','PACKAGE','VERSION','SDK','DIGEST','ROLE')})
+DIAGNOSTIC_ERRORS = frozenset({
+    'R09_APK_PATH_REFUSED', 'R09_APK_MANIFEST_REFUSED', 'R09_APK_PLATFORM_METADATA_REFUSED',
+    'R09_APK_IDENTITY_MISMATCH', 'R09_APK_SIGNERS_REFUSED', 'R09_APK_INSPECTION_REFUSED',
+    'PACKAGE_QUERY_FAILED', 'PLATFORM_EXCEPTION', 'MISSING_PLUGIN', 'FORMAT_EXCEPTION',
+    'TIMEOUT', 'FILESYSTEM_EXCEPTION', 'STATE_ERROR', 'ASSERTION_FAILED', 'OTHER_ERROR',
+})
+
+REVIEW_REFUSALS = frozenset({
+    'r09ReviewBaseRequired', 'r09ReviewSplitIdentity', 'r09ReviewPackageMismatch',
+    'r09ReviewBundleRefused', 'r09ReviewSdkMismatch', 'r09ReviewAbiMismatch',
+    'r09ReviewMissingSplits', 'r09ReviewSplitSignerMismatch',
+    'r09ReviewSignerUnavailable', 'r09ReviewSignerDiffers', 'UNKNOWN_REFUSAL',
+})
+
+def dart_diagnostic(text:str, case:str)->dict:
+    # Bound observations to the latest scenario marker and exact active case.
+    # Only allowlisted enums survive, even if private output contains secrets.
+    parts = text.rsplit('OX_R02C_DART_STAGE=SCENARIO_STARTED case=', 1)
+    if len(parts) != 2 or not parts[1] or parts[1].splitlines()[0].strip() != case or case not in CASES:
+        return {'checkpoint':'NOT_OBSERVED','error':'NOT_OBSERVED'}
+    checkpoint = 'NOT_OBSERVED'; error = 'NOT_OBSERVED'; refusals = set()
+    for line in parts[1].splitlines()[1:]:
+        match = re.search(r'OX_RT02C_CHECKPOINT case=([a-z.]+) step=([A-Z_0-9]+)\s*$',line)
+        if match and match[1] == case and match[2] in DIAGNOSTIC_STEPS:
+            checkpoint = match[2]; error = 'NOT_OBSERVED'; refusals.clear()
+        match = re.search(r'OX_RT02C_FAILURE case=([a-z.]+) step=([A-Z_0-9]+) error=([A-Z_0-9]+)\s*$',line)
+        if match and match[1] == case and match[2] == checkpoint and match[3] in DIAGNOSTIC_ERRORS:
+            error = match[3]
+        reason = re.search(r'OX_RT02C_REVIEW_REFUSAL case=([a-z.]+) code=([A-Za-z_0-9]+)\s*$',line)
+        if (reason and reason[1] == case and checkpoint == 'R09_REVIEW_REFUSALS'
+                and reason[2] in REVIEW_REFUSALS):
+            refusals.add(reason[2])
+    result = {'checkpoint':checkpoint,'error':error}
+    if refusals:
+        result['review_refusals'] = sorted(refusals)
+    return result
+
 def flutter_failure(text:str, *, phase:str|None=None, approvals:int=0)->str:
     """Classify the failing phase, never a historical successful build line."""
     markers={'SCENARIO_STARTED':'DART_TEST_STARTED',

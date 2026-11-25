@@ -25,6 +25,93 @@ C=load('r02_rt02c_contract','scripts/ci/r02_rt02c_contract.py')
 F=load('r02_rt02c_fixture','scripts/ci/r02_rt02c_fixture.py')
 H=load('r02_rt02c_hosted','scripts/ci/r02_rt02c_hosted.py')
 
+class BoundedDartDiagnostics(unittest.TestCase):
+    def test_current_case_exact_checkpoint_and_error(self):
+        text = ('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+                'OX_RT02C_CHECKPOINT case=apks step=R09_INSTALLED_SIGNERS\n'
+                'OX_RT02C_FAILURE case=apks step=R09_INSTALLED_SIGNERS error=ASSERTION_FAILED\n'
+                'private token ghp_never_export_this\n')
+        self.assertEqual(H.dart_diagnostic(text,'apks'),
+                         {'checkpoint':'R09_INSTALLED_SIGNERS','error':'ASSERTION_FAILED'})
+    def test_unknown_wrong_case_or_trailing_payload_not_exported(self):
+        text = ('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+                'OX_RT02C_CHECKPOINT case=apks step=R09_BASE_INSPECT\n'
+                'OX_RT02C_FAILURE case=apks step=R09_BASE_INSPECT error=R09_APK_MANIFEST_REFUSED secret=do-not-export\n'
+                'OX_RT02C_FAILURE case=apkm step=R09_BASE_INSPECT error=R09_APK_MANIFEST_REFUSED\n'
+                'OX_RT02C_FAILURE case=apks step=R09_BASE_INSPECT error=UNKNOWN_SECRET\n')
+        self.assertEqual(H.dart_diagnostic(text,'apks'),
+                         {'checkpoint':'R09_BASE_INSPECT','error':'NOT_OBSERVED'})
+    def test_stale_case_never_contaminates(self):
+        text = ('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+                'OX_RT02C_CHECKPOINT case=apks step=R09_BASE_INSPECT\n'
+                'OX_RT02C_FAILURE case=apks step=R09_BASE_INSPECT error=R09_APK_MANIFEST_REFUSED\n'
+                'OX_R02C_DART_STAGE=SCENARIO_STARTED case=apkm\n'
+                'OX_RT02C_CHECKPOINT case=apkm step=DOWNLOAD_ARCHIVE\n')
+        self.assertEqual(H.dart_diagnostic(text,'apkm'),
+                         {'checkpoint':'DOWNLOAD_ARCHIVE','error':'NOT_OBSERVED'})
+        self.assertEqual(H.dart_diagnostic(text,'apks'),
+                         {'checkpoint':'NOT_OBSERVED','error':'NOT_OBSERVED'})
+    def test_fixed_native_refusal_code_retained(self):
+        text = ('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+                'OX_RT02C_CHECKPOINT case=apks step=R09_SPLIT_INSPECT\n'
+                'OX_RT02C_FAILURE case=apks step=R09_SPLIT_INSPECT error=R09_APK_MANIFEST_REFUSED\n')
+        self.assertEqual(H.dart_diagnostic(text,'apks')['error'],'R09_APK_MANIFEST_REFUSED')
+
+    def test_empty_scenario_marker_is_not_evidence(self):
+        self.assertEqual(H.dart_diagnostic('OX_R02C_DART_STAGE=SCENARIO_STARTED case=', 'apks'),
+                         {'checkpoint':'NOT_OBSERVED','error':'NOT_OBSERVED'})
+    def test_review_refusals_allowlisted(self):
+        text = ('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+                'OX_RT02C_CHECKPOINT case=apks step=R09_REVIEW_REFUSALS\n'
+                'OX_RT02C_REVIEW_REFUSAL case=apks code=r09ReviewPackageMismatch\n'
+                'OX_RT02C_REVIEW_REFUSAL case=apks code=private_token\n'
+                'OX_RT02C_REVIEW_REFUSAL case=apkm code=r09ReviewAbiMismatch\n'
+                'OX_RT02C_FAILURE case=apks step=R09_REVIEW_REFUSALS error=ASSERTION_FAILED\n')
+        self.assertEqual(H.dart_diagnostic(text,'apks'),
+                         {'checkpoint':'R09_REVIEW_REFUSALS','error':'ASSERTION_FAILED',
+                          'review_refusals':['r09ReviewPackageMismatch']})
+    def test_failure_receipt_survives_failed_package_state_probe(self):
+        import subprocess
+        from types import SimpleNamespace
+        from r02_rt02c_single_session import SingleSession
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory); receipt_path = out/'rt02c-receipt.json'
+            def refused(*args, **kwargs):
+                persisted = json.loads(receipt_path.read_text())
+                self.assertEqual(persisted['failure_details']['dart_diagnostic']['checkpoint'],
+                                 'R09_INSTALLED_SIGNERS')
+                raise subprocess.TimeoutExpired(['adb'], 1)
+            session = SingleSession(out,out,{}, {'status':'NOT_RUN','cases':[]},
+                                    receipt_path,H,SimpleNamespace(installed_state=refused))
+            session.active = 'apks'; session.phase = 'DART_TEST_STARTED'
+            session.flutter_log.write_text(
+                'OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+                'OX_RT02C_CHECKPOINT case=apks step=R09_INSTALLED_SIGNERS\n'
+                'OX_RT02C_FAILURE case=apks step=R09_INSTALLED_SIGNERS error=ASSERTION_FAILED\n'
+                'raw private secret ghp_DO_NOT_EXPORT\n')
+            with patch.object(H,'baseline_v1',side_effect=refused):
+                session.record_failure(1)
+            result = json.loads(receipt_path.read_text())
+            self.assertEqual(result['status'],'FAILED')
+            self.assertEqual(result['failure_details']['package_state_observation'],'UNKNOWN')
+            self.assertEqual(result['failure_details']['flutter_returncode_after_stop'],1)
+            self.assertNotIn('ghp_DO_NOT_EXPORT',receipt_path.read_text())
+    def test_preinstall_failure_attests_intact_v1(self):
+        from types import SimpleNamespace
+        from r02_rt02c_single_session import SingleSession
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory); receipt_path = out/'rt02c-receipt.json'
+            def refused(*args,**kwargs): raise H.Refused('no v2')
+            session = SingleSession(out,out,{}, {'status':'NOT_RUN','cases':[]},
+                                    receipt_path,H,SimpleNamespace(installed_state=refused))
+            session.active = 'apks'; session.phase = 'DART_TEST_STARTED'
+            session.flutter_log.write_text('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n')
+            with patch.object(H,'baseline_v1',return_value={'installed_original_intact':True}) as probe:
+                session.record_failure(1)
+            probe.assert_called_once_with(out)
+            self.assertEqual(json.loads(receipt_path.read_text())['failure_details']['package_state_observation'],
+                             'V1_SIGNED_BASE_VERIFIED')
+
 class SourceMutations(unittest.TestCase):
     def setUp(self):
         self.t=tempfile.TemporaryDirectory(prefix='ox-rt02c-source-')

@@ -808,6 +808,23 @@ String? formatDownloadSize(int? receivedBytes, int? totalBytes) {
   return formatBytes(receivedBytes);
 }
 
+// The pinned android_package_manager native SigningInfo.toMap emits
+// apkContentsSigners (Android's getter name), but SigningInfoImpl consumes
+// apkContentSigners. Normalize at the native device-apps decoding boundary.
+// Never substitute the historical signing lineage for current signers.
+PackageInfo decodeDevicePackageInfo(Map<Object?, Object?> data) {
+  final package = Map<String, dynamic>.from(data);
+  final nativeSigning = package['signingInfo'];
+  if (nativeSigning is Map) {
+    final signing = Map<String, dynamic>.from(nativeSigning);
+    if (signing.containsKey('apkContentsSigners')) {
+      signing['apkContentSigners'] = signing.remove('apkContentsSigners');
+    }
+    package['signingInfo'] = signing;
+  }
+  return PackageInfoImpl(package);
+}
+
 Future<List<PackageInfo>> getAllInstalledInfo({bool light = false}) async {
   try {
     final packages = await NativeFeatures._deviceAppsChannel.invokeListMethod(
@@ -815,7 +832,7 @@ Future<List<PackageInfo>> getAllInstalledInfo({bool light = false}) async {
       {'includeSigningCertificates': !light},
     );
     return packages
-            ?.map((entry) => PackageInfoImpl(Map<String, dynamic>.from(entry)))
+            ?.map((entry) => decodeDevicePackageInfo(Map<Object?, Object?>.from(entry)))
             .toList() ??
         [];
   } on MissingPluginException {
@@ -898,7 +915,7 @@ Future<PackageInfo?> getInstalledInfo(
             {'packageName': name, 'includeSigningCertificates': !light},
           );
           if (data != null) {
-            info = PackageInfoImpl(Map<String, dynamic>.from(data));
+            info = decodeDevicePackageInfo(data);
           }
         } on MissingPluginException {
           // Preserve the headless-engine fallback: this pinned plugin's

@@ -1,3 +1,6 @@
+import 'dart:typed_data' show Uint8List;
+import 'package:flutter/services.dart' show MethodChannel;
+import 'package:obtainium/providers/apps_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/services/r09_artifact_inspection.dart';
@@ -20,6 +23,48 @@ R09ArtifactInspection review(List<R09ApkFacts> members,
     actionsDigestVerified: false, installedVersionCode: 1);
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  test('native current signer wire key survives single and bulk package queries', () async {
+    const channel = MethodChannel('dev.imranr.obtainium/device_apps');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final current = Uint8List.fromList([1, 2, 3]);
+    final historical = Uint8List.fromList([4, 5, 6]);
+    final data = <String, Object?>{
+      'packageName': 'dev.example.app', 'versionCode': 1,
+      'signingInfo': <String, Object?>{
+        'apkContentsSigners': [current],
+        'signingCertificateHistory': [historical],
+        'hasMultipleSigners': false,
+        'hasPastSigningCertificates': true,
+      },
+    };
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getInstalledPackageInfo') return data;
+      if (call.method == 'getInstalledPackageInfos') return [data];
+      throw StateError('Unexpected package query');
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final single = await getInstalledInfo('dev.example.app', light: false, throwOnError: true);
+    final bulk = await getAllInstalledInfo();
+    for (final info in [single!, bulk.single]) {
+      expect(info.signingInfo?.apkContentSigners, [current]);
+      expect(info.signingInfo?.signingCertificateHistory, [historical]);
+      expect(certificateHashesFromSignatures(info.signingInfo!.apkContentSigners!),
+          certificateHashesFromSignatures([current]));
+    }
+    expect((data['signingInfo'] as Map).containsKey('apkContentsSigners'), isTrue);
+    expect((data['signingInfo'] as Map).containsKey('apkContentSigners'), isFalse);
+  });
+  test('missing current signer is not replaced by past certificate history', () {
+    final info = decodeDevicePackageInfo(<String, Object?>{
+      'packageName': 'dev.example.app', 'versionCode': 1,
+      'signingInfo': <String, Object?>{
+        'apkContentsSigners': null,
+        'signingCertificateHistory': [Uint8List.fromList([4, 5, 6])],
+      },
+    });
+    expect(info.signingInfo?.apkContentSigners, isNull);
+  });
   test('actual metadata replaces an inaccurate filename hint', () {
     final result = review([member('x86.apk', abis: ['arm64-v8a'])]);
     expect(result.eligible, isTrue);

@@ -1,6 +1,8 @@
 // RT02C API36 source-bound archive-to-StockInstaller acceptance.
 // This is NOT the complete user-facing download/import/OBB experience.
+import 'dart:async';
 import 'dart:io';
+import 'package:flutter/services.dart' show PlatformException, MissingPluginException;
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -166,12 +168,41 @@ Future<int> installOwnedArchive(String caseName, List<String> paths) async {
   }
 }
 
+// Keep only fixed, source-defined diagnostics. Never print an exception's
+// message, control token, URLs, file paths, or a raw stack trace into receipts.
+String diagnosticCategory(Object error) {
+  if (error is PlatformException) {
+    const allowed = {'R09_APK_PATH_REFUSED', 'R09_APK_MANIFEST_REFUSED',
+      'R09_APK_PLATFORM_METADATA_REFUSED', 'R09_APK_IDENTITY_MISMATCH',
+      'R09_APK_SIGNERS_REFUSED', 'R09_APK_INSPECTION_REFUSED', 'PACKAGE_QUERY_FAILED'};
+    return allowed.contains(error.code) ? error.code : 'PLATFORM_EXCEPTION';
+  }
+  if (error is MissingPluginException) return 'MISSING_PLUGIN';
+  if (error is FormatException) return 'FORMAT_EXCEPTION';
+  if (error is TimeoutException) return 'TIMEOUT';
+  if (error is FileSystemException) return 'FILESYSTEM_EXCEPTION';
+  if (error is StateError) return 'STATE_ERROR';
+  if (error is TestFailure || error is AssertionError) return 'ASSERTION_FAILED';
+  return 'OTHER_ERROR';
+}
+
 Future<int?> runScenario(String caseName, String archiveSha) async {
-    debugPrint('OX_R02C_DART_STAGE=SCENARIO_STARTED case=$caseName');
-    final fileName = fixtureName(caseName);
-    final temp = await Directory.systemTemp.createTemp('ox-rt02c-');
+    debugPrintSynchronously('OX_R02C_DART_STAGE=SCENARIO_STARTED case=$caseName');
+    var diagnosticStep = 'SCENARIO_SETUP';
+    void mark(String step) {
+      diagnosticStep = step;
+      debugPrintSynchronously('OX_RT02C_CHECKPOINT case=$caseName step=$step');
+    }
+    Directory? scratch;
+    var scenarioFailed = false;
     try {
+      mark('SCENARIO_SETUP');
+      final fileName = fixtureName(caseName);
+      final temp = await Directory.systemTemp.createTemp('ox-rt02c-');
+      scratch = temp;
+      mark('DOWNLOAD_ARCHIVE');
       final input = await downloadVerifiedArchive(fileName, temp, archiveSha);
+      mark('EXTRACT_ARCHIVE');
       final destination = '${temp.path}/extracted';
       if (caseName == 'traversal') {
         await expectLater(extractZipOffIsolate(input.path, destination, limits: limits),
@@ -186,12 +217,14 @@ Future<int?> runScenario(String caseName, String archiveSha) async {
       } else {
         await extractZipOffIsolate(input.path, destination, limits: limits);
       }
+      mark('EXTRACTED_INVENTORY');
       final extracted = Directory(destination);
       expect(extracted.existsSync(), isTrue);
       final apkFiles = extracted.listSync(recursive: true, followLinks: false)
           .whereType<File>().where((file) => file.path.toLowerCase().endsWith('.apk')).toList()
         ..sort((a, b) => a.path.compareTo(b.path));
       expect(apkFiles.length, caseName == 'ambiguous' ? 3 : 2);
+      mark('SIGNED_MEMBER_DIGESTS');
       final members = <InstallApkMember>[];
       for (final file in apkFiles) {
         final filename = file.uri.pathSegments.last;
@@ -202,6 +235,7 @@ Future<int?> runScenario(String caseName, String archiveSha) async {
         members.add(InstallApkMember(path: file.path, packageName: packageName,
           versionCode: 2, minSdkVersion: 26, targetSdkVersion: 35));
       }
+      mark('BUNDLE_PLAN');
       if (caseName == 'ambiguous') {
         expect(() => resolveInstallBundlePlan(
           members: members, format: InstallArtifactFormat.apkm,
@@ -220,49 +254,98 @@ Future<int?> runScenario(String caseName, String archiveSha) async {
       expect(plan.sessionPaths.length, 2);
       expect(plan.requiresSplitSession, isTrue);
       if (caseName == 'apks') {
+        mark('R09_STAGE');
         final stage = await (await getTemporaryDirectory()).createTemp('r09-review-');
+        var reviewFailed = false;
         try {
           final inspected = <R09ApkFacts>[];
           for (final file in apkFiles) {
             final name = file.uri.pathSegments.last;
+            final memberKind = name == 'config.x86_64.apk' ? 'SPLIT' : 'BASE';
+            mark('R09_${memberKind}_COPY');
             final copy = await file.copy('${stage.path}/$name');
+            mark('R09_${memberKind}_INSPECT');
             final facts = await inspectR09Apk(copy, name);
+            mark('R09_${memberKind}_PACKAGE');
             expect(facts.packageName, packageName);
+            mark('R09_${memberKind}_VERSION');
             expect(facts.versionCode, 2);
+            mark('R09_${memberKind}_SDK');
             expect(facts.minSdk, 26);
+            mark('R09_${memberKind}_DIGEST');
             expect(facts.sha256, name == 'config.x86_64.apk' ? splitSha : baseSha);
+            mark('R09_${memberKind}_ROLE');
             expect(facts.split, name == 'config.x86_64.apk' ? 'config.x86_64' : null);
             inspected.add(facts);
           }
+          mark('R09_BASE_SIGNERS');
           final baseFacts = inspected.singleWhere((member) => member.split == null);
           expect(baseFacts.signers, isNotEmpty);
-          final installed = await getInstalledInfo(packageName, light: false, throwOnError: true);
+          mark('R09_INSTALLED_QUERY');
+          final installed = await getInstalledInfo(packageName, light: false, printErr: false, throwOnError: true);
+          mark('R09_INSTALLED_VERSION');
           expect(installed?.versionCode, 1);
+          mark('R09_INSTALLED_SIGNERS');
           final installedSigners = certificateHashesFromSignatures(installed?.signingInfo?.apkContentSigners ?? const <List<int>>[])
               .map((value) => value.replaceAll(':', '').toLowerCase()).toList();
           expect(installedSigners, isNotEmpty);
+          mark('R09_REVIEW_PLAN');
           final review = reviewR09Artifact(artifactSha256: archiveSha, bytes: await input.length(),
             members: inspected, format: InstallArtifactFormat.apks,
             supportedAbis: const ['x86_64'], sdk: 36, locales: const ['en-US'],
             density: 420, expectedPackage: packageName, installedSigners: installedSigners,
             installedPackageObserved: true, actionsDigestVerified: false);
+          mark('R09_REVIEW_REFUSALS');
+          const allowedRefusals = {'r09ReviewBaseRequired', 'r09ReviewSplitIdentity',
+            'r09ReviewPackageMismatch', 'r09ReviewBundleRefused', 'r09ReviewSdkMismatch',
+            'r09ReviewAbiMismatch', 'r09ReviewMissingSplits', 'r09ReviewSplitSignerMismatch',
+            'r09ReviewSignerUnavailable', 'r09ReviewSignerDiffers'};
+          for (final refusal in review.refusals) {
+            final code = allowedRefusals.contains(refusal) ? refusal : 'UNKNOWN_REFUSAL';
+            debugPrintSynchronously('OX_RT02C_REVIEW_REFUSAL case=$caseName code=$code');
+          }
           expect(review.refusals, isEmpty);
+          mark('R09_REVIEW_SIGNER_MATCH');
           expect(review.signerStatus, 'r09ReviewSignerMatches');
+          mark('R09_REVIEW_SELECTION');
           expect(review.selectedPaths, hasLength(2));
+          mark('R09_REVIEW_ELIGIBILITY');
           expect(review.eligible, isTrue);
           debugPrint('OX_R09_MANIFEST_REAL_APK_INSPECTION_PASS');
+        } catch (_) {
+          reviewFailed = true;
+          rethrow;
         } finally {
-          await stage.delete(recursive: true);
+          if (!reviewFailed) mark('R09_STAGE_CLEANUP');
+          try {
+            await stage.delete(recursive: true);
+          } catch (_) {
+            if (!reviewFailed) rethrow;
+          }
         }
       }
+      mark('HOST_INSTALL_AUTHORIZATION');
       final authorization = await control('call', caseName);
       expect(authorization['authorized'], isTrue);
       debugPrint('OX_R02C_DART_STAGE=INSTALL_CALL');
+      mark('OWNED_INSTALL_SESSION');
       final sessionId = await installOwnedArchive(caseName, plan.sessionPaths);
       debugPrint('OX_R02C_DART_STAGE=INSTALL_RETURNED');
       return sessionId;
+    } catch (error) {
+      scenarioFailed = true;
+      debugPrintSynchronously('OX_RT02C_FAILURE case=$caseName step=$diagnosticStep error=${diagnosticCategory(error)}');
+      rethrow;
     } finally {
-      if (temp.existsSync()) await temp.delete(recursive: true);
+      try {
+        if (!scenarioFailed) mark('SCENARIO_CLEANUP');
+        if (scratch != null && scratch.existsSync()) await scratch.delete(recursive: true);
+      } catch (error) {
+        if (!scenarioFailed) {
+          debugPrintSynchronously('OX_RT02C_FAILURE case=$caseName step=$diagnosticStep error=${diagnosticCategory(error)}');
+          rethrow;
+        }
+      }
     }
 }
 

@@ -250,31 +250,35 @@ class SingleSession:
         # are not acceptance and never authorize replay or a success receipt.
         text = self.flutter_log.read_text('utf8', 'replace')
         case, phase, taps, category = self.failure_context(text)
-        state = 'NOT_CHECKED'
-        if phase in ('STOCK_INSTALLER_CALL', 'STOCK_INSTALLER_RETURNED',
-                     'ANDROID_V2_SPLIT_VERIFIED'):
-            state = 'UNKNOWN'
-            try:
-                self.base.installed_state(2, True, self.fixtures)
-                state = 'V2_SIGNED_BASE_AND_SPLIT_VERIFIED'
-            except (RuntimeError, OSError, ValueError):
-                try:
-                    self.H.baseline_v1(self.fixtures)
-                    state = 'V1_SIGNED_BASE_VERIFIED'
-                except (RuntimeError, OSError, ValueError):
-                    pass
         details = {'case':case, 'phase':phase, 'flutter_error_category':category,
                    'flutter_returncode_after_stop':returncode,
                    'android_confirmations':taps,
                    'approval_probe_counts':dict(self.approval_probe_counts),
                    'last_approval_probe':self.last_approval_probe,
-                   'package_state_observation':state,
+                   'package_state_observation':'NOT_CHECKED',
                    'private_log_sha256':self.H.sha(self.flutter_log),
                    'raw_device_logs_uploaded':False}
         details['native_session_observation'] = self.H.native_session_observation(text)
+        details['dart_diagnostic'] = self.H.dart_diagnostic(text, case)
         self.receipt['status'] = 'FAILED'
         self.receipt['failure_details'] = details
         self.rp.write_text(json.dumps(self.receipt, sort_keys=True, indent=2) + '\n')
+        # Persist failure evidence before ADB. A failed observation cannot erase
+        # the primary checkpoint/exit or become a successful install receipt.
+        if phase in ('DART_TEST_STARTED', 'STOCK_INSTALLER_CALL', 'STOCK_INSTALLER_RETURNED',
+                     'ANDROID_V2_SPLIT_VERIFIED'):
+            state = 'UNKNOWN'
+            try:
+                self.base.installed_state(2, True, self.fixtures)
+                state = 'V2_SIGNED_BASE_AND_SPLIT_VERIFIED'
+            except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired):
+                try:
+                    self.H.baseline_v1(self.fixtures)
+                    state = 'V1_SIGNED_BASE_VERIFIED'
+                except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired):
+                    pass
+            details['package_state_observation'] = state
+            self.rp.write_text(json.dumps(self.receipt, sort_keys=True, indent=2) + '\n')
         print('OX_R02_RT02C_FAILURE_DETAILS ' + json.dumps(details, sort_keys=True), flush=True)
 
     def run(self):

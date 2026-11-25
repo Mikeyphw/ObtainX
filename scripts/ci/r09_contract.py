@@ -5,6 +5,9 @@ import r07_workflow_contract as workflows
 import obtainx_ci_policy as policy
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED = {
+    'lib/providers/apps_provider.dart': ("signing['apkContentSigners'] = signing.remove('apkContentsSigners')", 'decodeDevicePackageInfo(Map<Object?, Object?>.from(entry))', 'info = decodeDevicePackageInfo(data)'),
+    'scripts/ci/r02_rt02c_single_session.py': ("details['dart_diagnostic'] = self.H.dart_diagnostic(text, case)", "if phase in ('DART_TEST_STARTED', 'STOCK_INSTALLER_CALL'"),
+    'scripts/ci/r02_rt02c_hosted.py': ('def dart_diagnostic(text:str, case:str)', 'match[3] in DIAGNOSTIC_ERRORS'),
     'lib/pages/apps.dart': ('r09MatchesSearch(filter.searchQuery', 'r09PackageGroups(listedApps.map', 'r09ListingState(', 'AppsListGroupBy.package', "tr('r09CheckVisible')", 'getMassObtainFunction(updatesOnly: true)', "tr('r09EverythingCurrent')", "tr('r09ViewPresets')", 'searchQuery: _searchQuery.text.trim()', 'installedInfo?.versionName'),
     'lib/folders/app_folder.dart': ('r09MatchesSearch(searchQuery', "'searchQuery': searchQuery", "searchQuery: json['searchQuery']"),
     'lib/components/bulk_update_sheet.dart': ('r09SafeBulkSelection(selectedIds, packageByListing)', 'r09SelectListing(selectedIds, appId, packageByListing)', 'r09SafeBulkSelection({...selectedIds, ...groupIds}', 'r09ConflictingListings'),
@@ -22,10 +25,10 @@ REQUIRED = {
     'lib/services/r09_artifact_inspection.dart': ('sha256FileOffIsolate(file.path) != digest', 'resolveInstallBundlePlan(', 'normalizedSplit != normalizedStem', 'chosenSplits.containsAll(member.requiredSplits)', '_sameSigners(base.signers, installedSigners)'),
     'android/app/src/main/kotlin/dev/imranr/obtainium/R09ApkInspectionBridge.kt': ('R09ApkManifest.inspect(file)', 'GET_SIGNING_CERTIFICATES', 'Files.isSymbolicLink', 'info.applicationInfo?.minSdkVersion == manifest.minSdk'),
     'android/app/src/main/kotlin/dev/imranr/obtainium/MainActivity.kt': ('R09ApkInspectionBridge(',),
-    'integration_test/r02c_archive_install_test.dart': ('await inspectR09Apk(copy, name)', 'OX_R09_MANIFEST_REAL_APK_INSPECTION_PASS', 'expect(review.eligible, isTrue)', 'installedSigners: installedSigners'),
+    'integration_test/r02c_archive_install_test.dart': ('await inspectR09Apk(copy, name)', 'OX_R09_MANIFEST_REAL_APK_INSPECTION_PASS', 'OX_RT02C_CHECKPOINT case=$caseName step=$step', 'OX_RT02C_FAILURE case=$caseName step=$diagnosticStep', "mark('R09_INSTALLED_SIGNERS')", 'expect(installedSigners, isNotEmpty)', 'expect(review.eligible, isTrue)', 'installedSigners: installedSigners'),
     'lib/services/r03_download_engine.dart': ('_activeMaxBytes[key] != maxBytes', 'responseTotal > maxBytes', 'received + incoming.length > maxBytes'),
     'lib/providers/source_provider.dart': ('Review requires HTTPS on every hop', '|| reviewCrossOrigin', 'r04ArtifactStorageHeaders(requestHeaders)'),
-    'test/r09_artifact_inspection_test.dart': ("const asset = MapEntry('x86.apk', 'https://example.org/apk');", 'evaluatedChoice: (_) => const R09ArtifactChoice'),
+    'test/r09_artifact_inspection_test.dart': ("const asset = MapEntry('x86.apk', 'https://example.org/apk');", 'evaluatedChoice: (_) => const R09ArtifactChoice', 'native current signer wire key survives single and bulk package queries', 'missing current signer is not replaced by past certificate history'),
     'test/r09_discovery_test.dart': ('without URL secrets', 'smart folder search round trips', 'competing installable sources', 'wrong ABI and configuration splits', 'safe default respects eligible', 'exact repository, identity and expiry gate', 'distinguish actual recorded facts'),
 }
 RISK = ('lib/pages/apps.dart','lib/providers/settings_provider.dart','lib/folders/**','lib/components/bulk_update_sheet.dart','lib/components/app_detail_widgets.dart','lib/pages/additional_options_page.dart','lib/widgets/r04_actions_history_dialog.dart','lib/services/r09_*','test/r09_*','scripts/ci/r09_*','scripts/ci/test_r09_*','assets/translations/en.json')

@@ -1,3 +1,9 @@
+# ObtainX — R09-F02-HF02 signer decoding and bounded runtime diagnostics (25 November 2026)
+
+Exact preimage PR #30 `db50bc9d36b1421b7d95a525b53fad63170c320d`, tree `ff349dcc56de9051c2a3bf8072afb8624e1850ad`. Five workflows passed; RT02C run 45607589734 stopped in first APKS scenario before installer authorization. Artifact 15018577512 retained generic DART_TEST_FAILED only. Pinned android_package_manager b5bc0365 native SigningInfo.toMap emits apkContentsSigners, Dart SigningInfoImpl reads apkContentSigners; the app's direct native decoder must normalize the wire key for both targeted and bulk queries. Current signer is never inferred from certificate history. This is a confirmed source defect explaining an empty installed-signer result, not an independently observed failing Android assertion. Preserve exact signer comparison and all seven runtime cases. Emit and retain bounded current-case checkpoint/error enums, native inspection refusal category, and independently observe exact v1 package bytes even on pre-install failures. No raw private log, token, path or stack trace publication; no local Gradle. Hosted Android rerun needed. R02/R07/R08 device/provider acceptance, R09 runtime acceptance and R10–R12 remain.
+
+---
+
 # ObtainX — R09-F02-HF01 strict analyzer repair (25 November 2026)
 
 **Preimage:** PR #30 `f5148be4ff648eced81c0d8a3cd9841ecfb9cb5b`, tree `e0c7a2dd676524cdd8af177f67aac42bc00dc126`. Source integrity and API36 bootstrap passed; Flutter 45545836923, RT02 45545836720, RT02B 45545836850 and RT02C 45545836865 each stopped before their remaining tests at `prefer_const_declarations` in `test/r09_artifact_inspection_test.dart:29`.

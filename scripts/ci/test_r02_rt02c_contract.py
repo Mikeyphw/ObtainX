@@ -61,33 +61,50 @@ class SourceMutations(unittest.TestCase):
         self.mutation(C.SOURCE_WF,'python3 scripts/ci/r02_rt02c_contract.py --check','echo pass')
     def test_no_mock_installer(self):
         self.mutation(C.DART,'StockInstaller(SettingsProvider()).installApk(','fakeInstaller(')
-    def test_hf12_original_environment_constant_set_refused(self):
-        self.mutation(C.DART, 'expect([v1Sha, baseSha, splitSha].toSet().length, 3);',
+    def test_hf13_original_environment_constant_set_refused(self):
+        self.mutation(C.DART, 'expect(v1Sha, isNot(baseSha));',
                       'expect({v1Sha, baseSha, splitSha}.length, 3);')
-    def test_hf12_reordered_constant_set_refused_even_with_good_assertion(self):
-        good = 'expect([v1Sha, baseSha, splitSha].toSet().length, 3);'
+    def test_hf13_reordered_constant_set_refused_even_with_good_assertions(self):
+        good = 'expect(v1Sha, isNot(baseSha));'
         self.mutation(C.DART, good, good + '\n    expect({ splitSha,\n v1Sha, baseSha, }.length, 3);')
-    def test_hf12_missing_distinct_assertion_refused(self):
-        self.mutation(C.DART, 'expect([v1Sha, baseSha, splitSha].toSet().length, 3);', 'expect(true, true);')
-    def test_hf12_weakened_distinct_count_refused(self):
-        self.mutation(C.DART, 'expect([v1Sha, baseSha, splitSha].toSet().length, 3);',
-                      'expect([v1Sha, baseSha, splitSha].toSet().length, 2);')
-    def test_hf12_list_length_without_deduplication_refused(self):
-        self.mutation(C.DART, 'expect([v1Sha, baseSha, splitSha].toSet().length, 3);',
-                      'expect([v1Sha, baseSha, splitSha].length, 3);')
-    def test_hf12_duplicate_digest_argument_refused(self):
-        self.mutation(C.DART, 'expect([v1Sha, baseSha, splitSha].toSet().length, 3);',
-                      'expect([v1Sha, v1Sha, splitSha].toSet().length, 3);')
-    def test_hf12_lint_suppression_refused(self):
-        self.mutation(C.DART, 'void main() {', '// ignore_for_file: equal_elements_in_set\nvoid main() {')
-    def test_hf12_analyzer_warning_downgrade_refused(self):
-        self.mutation(C.WF, 'flutter analyze integration_test lib test',
-                      'flutter analyze integration_test lib test --no-fatal-warnings')
-    def test_hf12_runtime_assertion_whitespace_allowed(self):
+    def test_hf13_list_to_set_refused_even_with_good_assertions(self):
+        good = 'expect(v1Sha, isNot(baseSha));'
+        self.mutation(C.DART, good, good + '\n    expect([splitSha, v1Sha, baseSha].toSet().length, 3);')
+    def test_hf13_each_pair_required(self):
+        for line in ('expect(v1Sha, isNot(baseSha));', 'expect(v1Sha, isNot(splitSha));',
+                     'expect(baseSha, isNot(splitSha));'):
+            with self.subTest(line=line):
+                p=self.root/C.DART;original=p.read_text()
+                try:self.mutation(C.DART,line,'expect(true, true);')
+                finally:p.write_text(original)
+    def test_hf13_duplicate_digest_argument_refused(self):
+        self.mutation(C.DART,'expect(v1Sha, isNot(splitSha));','expect(v1Sha, isNot(v1Sha));')
+    def test_hf13_weakened_matcher_refused(self):
+        self.mutation(C.DART,'expect(baseSha, isNot(splitSha));','expect(baseSha, isNotNull);')
+    def test_hf13_pair_after_loop_refused(self):
+        p=self.root/C.DART;original=p.read_text();line='expect(baseSha, isNot(splitSha));'
+        p.write_text(original.replace(line,'',1).replace('for (final name in scenarios) {','for (final name in scenarios) {\n      '+line,1))
+        self.assertNotEqual(C.inspect(self.root),[])
+    def test_hf13_both_lint_suppressions_refused(self):
+        for lint in ('equal_elements_in_set','prefer_collection_literals'):
+            with self.subTest(lint=lint):
+                p=self.root/C.DART;original=p.read_text()
+                try:self.mutation(C.DART,'void main() {','// ignore_for_file: '+lint+'\nvoid main() {')
+                finally:p.write_text(original)
+    def test_hf13_analyzer_downgrade_refused_all_workflows(self):
+        for wf in (C.WF,C.RT02_WF,C.RT02B_WF,C.FLUTTER_WF):
+            for flag in ('--no-fatal-warnings','--no-fatal-infos'):
+                with self.subTest(wf=wf,flag=flag):
+                    p=self.root/wf;original=p.read_text()
+                    command='flutter analyze lib test integration_test' if wf==C.FLUTTER_WF else 'flutter analyze integration_test lib test'
+                    try:self.mutation(wf,command,command+' '+flag)
+                    finally:p.write_text(original)
+    def test_hf13_main_analyzer_scope_required(self):
+        self.mutation(C.FLUTTER_WF,'run: flutter analyze lib test integration_test','run: flutter analyze lib test')
+    def test_hf13_pairwise_whitespace_allowed(self):
         p=self.root/C.DART
-        text=p.read_text();p.write_text(text.replace(
-            'expect([v1Sha, baseSha, splitSha].toSet().length, 3);',
-            'expect( [ v1Sha, baseSha,\n splitSha ].toSet().length, 3 );'))
+        text=p.read_text();p.write_text(text.replace('expect(v1Sha, isNot(baseSha));',
+            'expect( v1Sha,\n isNot( baseSha ) );'))
         self.assertEqual(C.inspect(self.root), [])
     def test_owned_foreground_gate_required(self):
         self.mutation(C.DART, 'owner.sealForHandoff(nativeCancelable: true)', 'true')

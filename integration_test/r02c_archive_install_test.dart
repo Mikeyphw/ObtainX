@@ -232,9 +232,11 @@ void main() {
   testWidgets('RT02C seven real independently attested archive cases', (tester) async {
     if (!Platform.isAndroid) throw StateError('RT02C Android-only');
     expect(RegExp(r'^[a-f0-9]{64}$').hasMatch(v1Sha), isTrue);
-    // Environment constants default to the same value during static analysis.
-    // Build the set at runtime so duplicate digests still fail the assertion.
-    expect([v1Sha, baseSha, splitSha].toSet().length, 3);
+    // Pairwise checks preserve uniqueness without constructing a set from
+    // environment constants, whose defaults coincide during static analysis.
+    expect(v1Sha, isNot(baseSha));
+    expect(v1Sha, isNot(splitSha));
+    expect(baseSha, isNot(splitSha));
     for (final name in scenarios) {
       final prepared = await control('prepare', name);
       if (prepared['case'] != name || prepared['archive_sha256'] is! String) {

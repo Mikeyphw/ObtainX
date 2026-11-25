@@ -1,3 +1,22 @@
+# ObtainX — R08-F06 / RT02C-HF13 analyzer and integration scope repair (25 November 2026)
+
+**Preimage:** PR #30 `ab089d69760468c1520765de2a6cd92e9dd0e630`.
+Source/contract integrity, hosted Flutter and API36 bootstrap passed. RT02
+`45519856826`, RT02B `45519857002` and RT02C `45519856767` stopped before
+Android execution with `prefer_collection_literals` at HF12's list.toSet().
+
+**Repair:** all three digest pairs must be unequal before any case is prepared;
+no set or collection conversion. Source mutation checks cover both previous
+lint-triggering forms, missing/duplicate/weakened or late comparisons, warning
+and info suppression, and strict analysis scope in the main Flutter and all
+three installer workflows. Full hosted Flutter now analyzes integration_test
+alongside lib and test. Targeted Flutter already includes integration_test.
+The separate workflows still run in parallel; no claim that one gates another.
+Strict actual Dart analysis and all seven RT02C cases remain mandatory. No
+local Gradle. R02/R07/R08 runtime acceptance remains pending; R09–R12 remain.
+
+---
+
 # ObtainX — R08-F05 / RT02C-HF12 analyzer regression (25 November 2026)
 
 **Preimage:** PR #30 `a01e6dd2718880f231869d5a850f12e1222dc897`.

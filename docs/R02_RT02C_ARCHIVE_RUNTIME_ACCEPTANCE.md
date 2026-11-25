@@ -34,3 +34,13 @@ static duplicate-set warning. The source gate and mutation tests reject the
 original literal, missing/relaxed uniqueness, duplicate inputs and analyzer
 warning suppression; actual strict hosted analysis remains required. All
 HF11 owned-session and seven-case receipt requirements remain unchanged.
+
+## HF13 — pairwise uniqueness and complete analysis scope
+
+HF12's runtime list.toSet() still triggered prefer_collection_literals. Check
+all three digest pairs using isNot before the first case; neither collection
+construction nor lint suppression is needed. Main full Flutter analysis now
+includes integration_test, matching the installer and targeted analysis scope.
+The independent workflow jobs run in parallel. Source mutation checks retain
+strict analysis and all HF11 owned-session/seven-case evidence requirements.
+Actual hosted Dart and Android acceptance remain mandatory.

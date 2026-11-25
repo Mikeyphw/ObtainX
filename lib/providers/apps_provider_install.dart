@@ -1890,8 +1890,12 @@ extension AppsProviderInstall on AppsProvider {
         },
       );
     }
-    if (appFileUrl != null && (!allowed(appFileUrl) || !r09ArtifactChoice(appFileUrl.key, archs,
-        downloadOnly: pickAnyAsset).eligible)) return null;
+    if (appFileUrl != null &&
+        (!allowed(appFileUrl) ||
+            !r09ArtifactChoice(appFileUrl.key, archs,
+                downloadOnly: pickAnyAsset).eligible)) {
+      return null;
+    }
     String? getHost(String url) {
       if (url == 'placeholder') {
         return null;

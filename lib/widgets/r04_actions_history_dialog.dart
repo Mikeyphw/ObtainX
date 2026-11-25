@@ -156,8 +156,11 @@ class _R04ActionsHistoryDialogState extends State<R04ActionsHistoryDialog> {
                           ),
                           trailing: row.canSelectAt(now())
                             ? TextButton(onPressed: () {
-                                if (row.canSelectAt(now())) Navigator.of(context).pop(row);
-                                else setState(() {});
+                                if (row.canSelectAt(now())) {
+                                  Navigator.of(context).pop(row);
+                                } else {
+                                  setState(() {});
+                                }
                               },
                                 child: const Text('Select'))
                             : const Icon(Icons.block, semanticLabel: 'Unavailable'),

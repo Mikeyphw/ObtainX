@@ -87,6 +87,18 @@ class Baseline(unittest.TestCase):
         with patch.object(p,'git',return_value=H),patch.object(p,'policy_migration',return_value=False),patch.object(p,'discover_baseline',side_effect=ValueError('unverified')):
             v=p.plan(H,'pull_request',{'pull_request':{'draft':True,'head':{'sha':H,'repo':{'id':p.REPO_ID}},'base':{'sha':B,'repo':{'id':p.REPO_ID},'ref':'main'}}})
         self.assertTrue(all(v['lanes'].values()));self.assertEqual(v['mode'],'scoped');self.assertFalse(v['full_acceptance_possible'])
+    def test_verified_full_impact_can_qualify_without_repeated_full_run(self):
+        for labels, expected in [([], 'full'), ([{'name':'ci:development-only'}], 'scoped')]:
+            with self.subTest(labels=labels), patch.object(p,'git',return_value=H), patch.object(p,'policy_migration',return_value=False), patch.object(p,'discover_baseline',return_value=self.pin), patch.object(p,'changes',return_value=['scripts/ci/obtainx_ci_policy.py']):
+                v=p.plan(H,'pull_request',{'pull_request':{'draft':True,'labels':labels,'head':{'sha':H,'repo':{'id':p.REPO_ID}},'base':{'sha':B,'repo':{'id':p.REPO_ID},'ref':'main'}}})
+            self.assertEqual(v['mode'],expected)
+            self.assertTrue(v['full_flutter'] and all(v['lanes'].values()))
+            self.assertEqual(v['full_acceptance_possible'],expected=='full')
+            self.assertEqual(v['baseline'],B)
+    def test_verified_narrow_impact_still_scoped(self):
+        with patch.object(p,'git',return_value=H), patch.object(p,'policy_migration',return_value=False), patch.object(p,'discover_baseline',return_value=self.pin), patch.object(p,'changes',return_value=['lib/pages/apps.dart']):
+            v=p.plan(H,'pull_request',{'pull_request':{'draft':True,'head':{'sha':H,'repo':{'id':p.REPO_ID}},'base':{'sha':B,'repo':{'id':p.REPO_ID},'ref':'main'}}})
+        self.assertEqual(v['mode'],'scoped');self.assertTrue(v['targeted_flutter']);self.assertFalse(any(v['lanes'].values()))
     def test_policy_migration_full_independent_of_api(self):
         with patch.object(p,'git',return_value=H),patch.object(p,'policy_migration',return_value=True),patch.object(p,'discover_baseline',side_effect=AssertionError('must not query')):
             v=p.plan(H,'pull_request',{'pull_request':{'draft':True,'head':{'sha':H,'repo':{'id':p.REPO_ID}},'base':{'sha':B,'repo':{'id':p.REPO_ID},'ref':'main'}}})

@@ -1,3 +1,24 @@
+# R09-F01-F01 — strict Dart analyzer correction (25 November 2026)
+
+Exact preimage `b9214fc3a1475cbcc5231dae381b94a67b1b9dfd` (PR #30).
+Source integrity and API36 bootstrap passed. Flutter run 45535792958 and
+installer runs 45535792769, 45535792671, 45535792819 failed before their
+runtime tests on the same four analyzer infos. Use a null-aware map value
+for the optional bound source URL and explicit blocks for the artifact
+refusal and history selection branches. Preserve repository binding,
+compatibility rejection and expiry recheck semantics; no lint suppression.
+Named mutation regressions reject all four previous patterns. Strict hosted
+analysis and current R09/OPT07 CI acceptance still required. No local Gradle.
+CI-OPT07 retry: when a verified baseline selects full Flutter and all four
+Android lanes, allow the actual full decisive proofs to establish the new
+baseline without a duplicate full run. Explicit development-only and
+unverified-baseline fallback still refuse full acceptance. Narrow impact
+remains scoped. This policy edit requires a fresh full migration run.
+R09-F02 verified metadata inspection, R10–R12 and prior device/provider
+acceptance debt remain. No release authorization.
+
+---
+
 # CI-OPT07 — incremental development qualification (consolidated with R09-F01)
 
 Draft PRs default to scoped qualification. The planner looks for a recent full

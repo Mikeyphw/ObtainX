@@ -6,6 +6,7 @@ import 'package:bcrypt/bcrypt.dart';
 import 'package:crypto/crypto.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:obtainium/custom_errors.dart';
+import 'package:obtainium/http/origin_redirect_policy.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 
@@ -155,6 +156,11 @@ class CoolApk extends AppSource {
     String url, {
     bool forAPKDownload = false,
   }) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.userInfo.isNotEmpty ||
+        !sameRequestOrigin(uri, Uri.parse('https://api2.coolapk.com'))) {
+      return null;
+    }
     final tokenPair = _getToken();
     return {
       'User-Agent':

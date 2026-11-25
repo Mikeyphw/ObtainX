@@ -130,8 +130,7 @@ bool appHasBlockingAttention(App app) {
     case needsAttentionNoAttestation:
       return _blockedReleaseIsCurrent(app) &&
           GitHub.configuredBuildVerificationMode(app.additionalSettings) ==
-              GitHub.buildVerificationEnforce &&
-          app.latestAttestationStatus == githubAttestationStatusUnsupported;
+              GitHub.buildVerificationEnforce;
     default:
       return false;
   }

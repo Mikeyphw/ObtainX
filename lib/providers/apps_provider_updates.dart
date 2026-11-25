@@ -666,8 +666,9 @@ extension AppsProviderUpdates on AppsProvider {
         currentApp.additionalSettings,
       );
       if (resolvedUrl.isEmpty) return fetchedApp;
-      final Map<String, String>? headers = await source.getRequestHeaders(
+      final Map<String, String>? headers = await source.getAssetRequestHeaders(
         currentApp.additionalSettings,
+        currentApp.url,
         resolvedUrl,
         forAPKDownload: true,
       );

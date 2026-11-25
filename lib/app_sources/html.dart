@@ -5,6 +5,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:http/http.dart';
 import 'package:obtainium/components/generated_form_model.dart';
 import 'package:obtainium/custom_errors.dart';
+import 'package:obtainium/http/origin_redirect_policy.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -481,6 +482,14 @@ class HTML extends AppSource {
   ) async {
     try {
       var currentUrl = standardUrl;
+      var crossedOrigin = false;
+      Map<String, dynamic> scopedSettings() {
+        final target = Uri.parse(currentUrl);
+        validateHttpRedirect(Uri.parse(standardUrl), target, 'GET',
+          insecureTls: additionalSettings['allowInsecure'] == true);
+        crossedOrigin = crossedOrigin || !sameRequestOrigin(Uri.parse(standardUrl), target);
+        return crossedOrigin ? {...additionalSettings, 'requestHeader': []} : additionalSettings;
+      }
       final intermediateLinks =
           ((additionalSettings['intermediateLink'] as List?) ?? <dynamic>[])
               .where(
@@ -495,7 +504,7 @@ class HTML extends AppSource {
       );
       for (int i = 0; i < linkCount; i++) {
         var intLinks = await grabLinksCommonFromRes(
-          await sourceRequest(currentUrl, additionalSettings),
+          await sourceRequest(currentUrl, scopedSettings()),
           intermediateLinks[i],
         );
         if (intLinks.isEmpty) {
@@ -513,7 +522,7 @@ class HTML extends AppSource {
       if (additionalSettings['directAPKLink'] != true) {
         final Response res = await sourceRequest(
           currentUrl,
-          additionalSettings,
+          scopedSettings(),
         );
         versionExtractionWholePageString = res.body
             .split('\r\n')
@@ -553,10 +562,10 @@ class HTML extends AppSource {
             ? versionExtractionWholePageString
             : relDecoded,
       );
-      final apkReqHeaders = await getRequestHeaders(
-        additionalSettings,
-        rel,
-        forAPKDownload: true,
+      validateHttpRedirect(Uri.parse(standardUrl), Uri.parse(rel), 'GET',
+        insecureTls: additionalSettings['allowInsecure'] == true);
+      final apkReqHeaders = await getAssetRequestHeaders(
+        scopedSettings(), standardUrl, rel,
       );
       DownloadResponseMetadata? downloadMetadata;
       void captureDownloadMetadata(DownloadResponseMetadata metadata) {

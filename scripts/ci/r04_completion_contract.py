@@ -78,7 +78,7 @@ def verify(root: Path = ROOT) -> int:
       'r04ArtifactStorageHeaders', 'uri.scheme == \'https\'',
       ".endsWith('.blob.core.windows.net')", '.actions.githubusercontent.com',
       'HttpHeaders.acceptHeader: \'application/octet-stream\'',
-      'key == HttpHeaders.rangeHeader',
+      'crossOriginDownloadHeaders(original)',
     ))
     require(FILES[4], (
       'verifyR04ActionsArchiveBeforeExtraction(', 'sha256.bind(archive.openRead())',

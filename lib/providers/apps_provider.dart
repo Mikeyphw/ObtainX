@@ -19,7 +19,6 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/io_client.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/http/obtainx_user_agent.dart';
 import 'package:obtainium/http/response_bytes.dart';
@@ -385,13 +384,6 @@ class DownloadResponseMetadata {
       );
 }
 
-Uri _finalResponseUri(StreamedResponse response, Uri originalUri) {
-  if (response case BaseResponseWithUrl(:final Uri url)) {
-    return url;
-  }
-  return response.request?.url ?? originalUri;
-}
-
 String? sanitizeDownloadFileName(String? rawFileName) {
   if (rawFileName == null) {
     return null;
@@ -448,12 +440,13 @@ String? extractDownloadFileNameFromContentDisposition(
 }
 
 DownloadResponseMetadata _downloadResponseMetadata(
-  StreamedResponse response,
-  Uri originalUri,
-) => DownloadResponseMetadata(
-  finalUri: _finalResponseUri(response, originalUri),
-  headers: response.headers,
-);
+  Uri finalUri,
+  HttpClientResponse response,
+) {
+  final headers = <String, String>{};
+  response.headers.forEach((name, values) => headers[name] = values.join(', '));
+  return DownloadResponseMetadata(finalUri: finalUri, headers: headers);
+}
 
 /// Fetches only enough of a download response to inspect headers and redirects.
 Future<DownloadResponseMetadata?> probeDownloadResponseMetadata(
@@ -461,21 +454,18 @@ Future<DownloadResponseMetadata?> probeDownloadResponseMetadata(
   Map<String, String>? headers,
   bool allowInsecure = false,
 }) async {
-  final Uri originalUri = Uri.parse(url);
-  final Request request = Request('GET', originalUri);
-  request.headers.addAll(withDefaultObtainXUserAgent(headers));
-  request.headers[HttpHeaders.rangeHeader] = 'bytes=0-0';
-  final IOClient client = IOClient(createHttpClient(allowInsecure));
+  final requestHeaders = {...?headers, HttpHeaders.rangeHeader: 'bytes=0-0'};
+  final streamed = await HttpService().sourceRequestStreamResponse(
+    'GET', url, requestHeaders, {'allowInsecure': allowInsecure},
+  );
   try {
-    final StreamedResponse response = await client
-        .send(request)
-        .timeout(sourceResponseTimeout);
+    final response = streamed.value.value;
     if (response.statusCode < 200 || response.statusCode >= 300) {
       return null;
     }
-    return _downloadResponseMetadata(response, originalUri);
+    return _downloadResponseMetadata(streamed.key, response);
   } finally {
-    client.close();
+    streamed.value.key.close(force: true);
   }
 }
 
@@ -529,24 +519,27 @@ Future<String> checkPartialDownloadHash(
   bool allowInsecure = false,
   void Function(DownloadResponseMetadata metadata)? onResponseMetadata,
 }) async {
-  final Uri originalUri = Uri.parse(url);
-  final req = Request('GET', originalUri);
-  req.headers.addAll(withDefaultObtainXUserAgent(headers));
-  if (bytesToGrab <= 0) throw ArgumentError.value(bytesToGrab, 'bytesToGrab');
-  req.headers[HttpHeaders.rangeHeader] = 'bytes=0-${bytesToGrab - 1}';
-  final client = IOClient(createHttpClient(allowInsecure));
+  if (bytesToGrab <= 0) {
+    throw ArgumentError.value(bytesToGrab, 'bytesToGrab');
+  }
+  final requestHeaders = {
+    ...?headers,
+    HttpHeaders.rangeHeader: 'bytes=0-${bytesToGrab - 1}',
+  };
+  final streamed = await HttpService().sourceRequestStreamResponse(
+    'GET', url, requestHeaders, {'allowInsecure': allowInsecure},
+  );
   try {
-    final response = await client.send(req).timeout(sourceResponseTimeout);
+    final response = streamed.value.value;
     if (response.statusCode < 200 || response.statusCode > 299) {
-      throw ObtainiumError(response.reasonPhrase ?? tr('unexpectedError'))
-        ..url = url;
+      throw ObtainiumError(response.reasonPhrase);
     }
-    onResponseMetadata?.call(_downloadResponseMetadata(response, originalUri));
-    final bytes = await readBytePrefix(response.stream, bytesToGrab);
+    onResponseMetadata?.call(_downloadResponseMetadata(streamed.key, response));
+    final bytes = await readBytePrefix(response, bytesToGrab);
     if (bytes.isEmpty) throw NoVersionError();
     return 'sha256:$bytesToGrab:${sha256.convert(bytes)}';
   } finally {
-    client.close();
+    streamed.value.key.close(force: true);
   }
 }
 
@@ -556,25 +549,21 @@ Future<String?> checkETagHeader(
   bool allowInsecure = false,
   void Function(DownloadResponseMetadata metadata)? onResponseMetadata,
 }) async {
-  final reqHeaders = withDefaultObtainXUserAgent(headers);
-  final Uri originalUri = Uri.parse(url);
-  final req = Request('GET', originalUri);
-  req.headers.addAll(reqHeaders);
-  final client = IOClient(createHttpClient(allowInsecure));
+  final streamed = await HttpService().sourceRequestStreamResponse(
+    'GET', url, headers, {'allowInsecure': allowInsecure},
+  );
   try {
-    final StreamedResponse response = await client
-        .send(req)
-        .timeout(sourceResponseTimeout);
+    final response = streamed.value.value;
     if (response.statusCode < 200 || response.statusCode >= 300) {
       return null;
     }
-    onResponseMetadata?.call(_downloadResponseMetadata(response, originalUri));
-    final etag = response.headers[HttpHeaders.etagHeader]?.replaceAll('"', '');
+    onResponseMetadata?.call(_downloadResponseMetadata(streamed.key, response));
+    final etag = response.headers.value(HttpHeaders.etagHeader)?.replaceAll('"', '');
     return etag != null
         ? sha256.convert(utf8.encode(etag)).toString().substring(0, 12)
         : null;
   } finally {
-    client.close();
+    streamed.value.key.close(force: true);
   }
 }
 
@@ -743,35 +732,23 @@ Future<int?> getDownloadSize(
   Map<String, String>? headers,
   bool allowInsecure = false,
 }) async {
-  final reqHeaders = withDefaultObtainXUserAgent(headers);
-  final client = IOClient(createHttpClient(allowInsecure));
   try {
-    final getReq = Request('GET', Uri.parse(url));
-    getReq.headers.addAll(reqHeaders);
-    final response = await client.send(getReq).timeout(sourceResponseTimeout);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      return null;
-    }
-    final length = response.contentLength;
-    return (length != null && length > 0) ? length : null;
-  } on SocketException {
-    return null;
-  } on TimeoutException {
-    return null;
-  } on ClientException {
-    return null;
-  } on HandshakeException {
-    return null;
-  } catch (e) {
-    unawaited(
-      LogsProvider().add(
-        'Unexpected error in getDownloadSize: $e',
-        level: LogLevel.error,
-      ),
+    final streamed = await HttpService().sourceRequestStreamResponse(
+      'GET', url, headers, {'allowInsecure': allowInsecure},
     );
+    try {
+      final response = streamed.value.value;
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return null;
+      }
+      final length = response.contentLength;
+      return length > 0 ? length : null;
+    } finally {
+      streamed.value.key.close(force: true);
+    }
+  } catch (_) {
+    // A refused or failed probe is unknown; never log credential-bearing URLs.
     return null;
-  } finally {
-    client.close();
   }
 }
 

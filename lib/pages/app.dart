@@ -4470,7 +4470,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
             settingsProvider,
           );
       final String? githubAttestationStatus =
-          securityApp?.latestAttestationStatus;
+          githubAttestationStatusFromJsonValue(securityApp?.latestAttestationStatus);
       final bool githubAttestationBlocked =
           securityApp != null &&
           securitySource != null &&
@@ -4479,9 +4479,9 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
             securitySource,
             settingsProvider,
           );
-      final bool githubAttestationVerified =
+      final bool githubAttestationPresent =
           githubAttestationExpected &&
-          githubAttestationStatus == githubAttestationStatusVerified;
+          githubAttestationStatus == githubAttestationStatusPresent;
       final bool githubAttestationUnsupported =
           githubAttestationExpected &&
           githubAttestationStatus == githubAttestationStatusUnsupported;
@@ -4490,7 +4490,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
           (githubAttestationStatus == githubAttestationStatusError ||
               githubAttestationStatus == null);
       final bool githubAttestationHasStatus =
-          githubAttestationVerified ||
+          githubAttestationPresent ||
           githubAttestationUnsupported ||
           githubAttestationCantCheck;
       final String? malwareScanStatus = securityApp?.latestMalwareScanStatus;
@@ -4585,13 +4585,13 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
                   icon: Icons.verified_outlined,
                   label: tr('reproducibleBuild'),
                 ),
-              if (githubAttestationVerified)
+              if (githubAttestationPresent)
                 statusBadge(
-                  backgroundColor: Colors.blue.withValues(alpha: 0.15),
-                  borderColor: Colors.blue.withValues(alpha: 0.5),
-                  contentColor: Colors.blue,
-                  icon: Icons.shield_outlined,
-                  label: tr('verifiedBuild'),
+                  backgroundColor: Colors.orange.withValues(alpha: 0.16),
+                  borderColor: Colors.orange.withValues(alpha: 0.55),
+                  contentColor: Colors.orange.shade800,
+                  icon: Icons.warning_amber_rounded,
+                  label: tr('gap01AttestationPresent'),
                 ),
               if (reproducibleBuildNotReproducible ||
                   reproducibleBuildNoData ||

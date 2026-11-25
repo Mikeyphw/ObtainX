@@ -71,13 +71,8 @@ Future<bool> persistAdditionalOptionsForm({
     );
   }
   if (source is GitHub) {
-    if (!source.canVerifyAttestations(
-      app.additionalSettings,
-      settingsProvider,
-    )) {
-      app.additionalSettings[GitHub.buildVerificationModeKey] =
-          GitHub.buildVerificationOff;
-    }
+    app.additionalSettings[GitHub.buildVerificationModeKey] =
+        GitHub.configuredBuildVerificationMode(app.additionalSettings);
     app.additionalSettings[GitHub.enforceAttestationsKey] = false;
   }
 
@@ -230,17 +225,12 @@ class _AdditionalOptionsPageState extends State<AdditionalOptionsPage> {
             element.value = stored;
           }
         }
-        // Same shape as the build-verification gating below: the switch stays
+        // The switch stays
         // visible but inert when VirusTotal scanning isn't usable, so people can
         // see the option exists (and, via its tooltip, what it needs) instead of
         // hunting for a control that silently vanished.
         //
-        // Unlike buildVerificationMode, a disabled value here is NOT clamped. The
-        // attestation clamp exists because a stale 'enforce' is a security claim
-        // that must not outlive the PAT backing it; this switch is the opposite -
-        // clamping it would silently re-enable scanning for an app the user
-        // deliberately excluded (e.g. a 700MB APK) the moment they toggled global
-        // scanning off and back on.
+        // Preserve user policy even when the current credential is unavailable.
         if (element is GeneratedFormSwitch &&
             element.key == enableVirusTotalScanKey &&
             !virusTotalScanningAvailable(settingsProvider)) {
@@ -249,21 +239,7 @@ class _AdditionalOptionsPageState extends State<AdditionalOptionsPage> {
         if (source is GitHub &&
             element is GeneratedFormDropdown &&
             element.key == GitHub.buildVerificationModeKey) {
-          final bool canVerifyGitHubBuild = source.canVerifyAttestations(
-            appAdditionalSettings,
-            settingsProvider,
-          );
-          if (!canVerifyGitHubBuild) {
-            element.disabledOptKeys = [
-              GitHub.buildVerificationAudit,
-              GitHub.buildVerificationEnforce,
-            ];
-            element.value = GitHub.buildVerificationOff;
-          } else if (appAdditionalSettings[GitHub.buildVerificationModeKey] ==
-                  null &&
-              appAdditionalSettings[GitHub.enforceAttestationsKey] == true) {
-            element.value = GitHub.buildVerificationEnforce;
-          }
+          element.value = GitHub.configuredBuildVerificationMode(appAdditionalSettings);
         }
       }
     }

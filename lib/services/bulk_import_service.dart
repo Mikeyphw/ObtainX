@@ -12,6 +12,7 @@ import 'package:http/io_client.dart';
 import 'package:obtainium/app_sources/apkmirror.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/providers/settings_provider.dart';
+import 'package:obtainium/providers/source_provider.dart' show HttpService;
 import 'package:obtainium/services/html_parse_isolate.dart';
 import 'package:obtainium/services/store_lookup_queue.dart';
 
@@ -320,22 +321,22 @@ class BulkImportService {
         min(i + batchSize, queryCandidates.length),
       );
       try {
-        final response = await http
-            .post(
-              Uri.parse(
+        final response = await HttpService().request(
+              'POST', Uri.parse(
                 'https://www.apkmirror.com/wp-json/apkm/v1/app_exists/',
               ),
-              headers: {
+              {
                 'Authorization': auth,
                 'Content-Type': 'application/json',
                 // Same Cloudflare allowlist as the HTML pages — see
                 // [apkMirrorAllowlistedUserAgentToken].
                 'User-Agent': apkMirrorUserAgent(),
               },
-              body: jsonEncode({
+              postBody: {
                 'pnames': batch,
                 'exclude': ['alpha', 'beta'],
-              }),
+              },
+              followRedirects: false,
             )
             .timeout(const Duration(seconds: 30));
 
@@ -430,7 +431,7 @@ class BulkImportService {
 
     final queue = await StoreLookupQueue.forDevice();
     final chunkSize = queue.concurrency;
-    final client = IOClient(HttpClient()..maxConnectionsPerHost = chunkSize);
+    final client = HttpClient()..maxConnectionsPerHost = chunkSize;
     const headers = {
       'Ual-Access-Businessid': 'projecta',
       'Ual-Access-ProjectA': '{"device_info":{"os_ver":"30"}}',
@@ -455,13 +456,12 @@ class BulkImportService {
               for (final candidate in candidates) {
                 if (shouldAbort?.call() == true) return;
                 try {
-                  final response = await client
-                      .get(
-                        Uri.parse(
+                  final response = await HttpService().request(
+                        'GET', Uri.parse(
                           'https://tapi.pureapk.com/v3/get_app_his_version'
                           '?package_name=$candidate&hl=en',
                         ),
-                        headers: headers,
+                        headers, sharedClient: client,
                       )
                       .timeout(const Duration(seconds: 15));
 
@@ -1001,8 +1001,7 @@ class BulkImportService {
             'per_page': '15',
           },
         );
-        http.Response response = await http
-            .get(uri, headers: headers)
+        http.Response response = await HttpService().request('GET', uri, headers, followRedirects: false)
             .timeout(const Duration(seconds: 25));
         // On a throttle (403/429), honour Retry-After / X-RateLimit-Reset and
         // retry the SAME package instead of aborting the scan on the first hit.
@@ -1024,8 +1023,7 @@ class BulkImportService {
           if (shouldAbort?.call() == true) {
             return result;
           }
-          response = await http
-              .get(uri, headers: headers)
+          response = await HttpService().request('GET', uri, headers, followRedirects: false)
               .timeout(const Duration(seconds: 25));
         }
         if (aborted) break;

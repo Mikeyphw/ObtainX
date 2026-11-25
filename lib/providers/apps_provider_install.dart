@@ -212,15 +212,14 @@ bool githubAttestationEnforcementBlocksInstall(
       source.shouldEnforceAttestations(
         app.additionalSettings,
         settingsProvider,
-      ) &&
-      app.latestAttestationStatus != githubAttestationStatusVerified;
+      );
 }
 
 String githubAttestationEnforcedBlockedMessage(String? attestationStatus) {
   return tr(
     attestationStatus == githubAttestationStatusUnsupported
-        ? 'githubAttestationEnforcedButUnsupported'
-        : 'githubAttestationEnforcedButFailed',
+        ? 'gap01AttestationAbsent'
+        : 'gap01AttestationBlocked',
   );
 }
 
@@ -906,7 +905,7 @@ extension AppsProviderInstall on AppsProvider {
     if (uri.scheme != 'https' || uri.host.isEmpty || uri.userInfo.isNotEmpty) {
       throw const FormatException('Review requires HTTPS');
     }
-    final headers = await source.getRequestHeaders(app.additionalSettings, url, forAPKDownload: true);
+    final headers = await source.getAssetRequestHeaders(app.additionalSettings, app.url, url);
     final cache = await getTemporaryDirectory();
     final stage = await cache.createTemp('r09-review-');
     try {
@@ -1147,8 +1146,9 @@ extension AppsProviderInstall on AppsProvider {
         fileNameNoExt =
             '$fileNameNoExt.${app.apkUrls[app.preferredApkIndex].key.split('.').last}';
       }
-      final headers = await source.getRequestHeaders(
+      final headers = await source.getAssetRequestHeaders(
         app.additionalSettings,
+        app.url,
         downloadUrl,
         forAPKDownload: true,
       );
@@ -1517,6 +1517,15 @@ extension AppsProviderInstall on AppsProvider {
     await extractTarballOffIsolate(filePath, destinationPath);
   }
 
+  void _ensureGitHubAttestationPolicy(String appId) {
+    final app = apps[appId]?.app;
+    if (app == null) return;
+    final source = SourceProvider().getSource(app.url, overrideSource: app.overrideSource);
+    if (githubAttestationEnforcementBlocksInstall(app, source, settingsProvider)) {
+      throw ObtainiumError(githubAttestationEnforcedBlockedMessage(app.latestAttestationStatus));
+    }
+  }
+
   Future<bool> installApkDir(
     DownloadedDir dir,
     NotificationsProvider? firstInstallNotificationsProvider, {
@@ -1532,6 +1541,9 @@ extension AppsProviderInstall on AppsProvider {
   }) async {
     // Verify + scan the container once up front; the split-APK installApk calls
     // below pass skipMalwareScan so it is not repeated per part.
+    if (skipPreInstallVerification) {
+      _ensureGitHubAttestationPolicy(dir.appId);
+    }
     if (!skipPreInstallVerification) {
       final bool proceedAfterVerification = await _runPreInstallVerification(
         appId: dir.appId,
@@ -1626,6 +1638,7 @@ extension AppsProviderInstall on AppsProvider {
           }
           // No await after this synchronous barrier: a route-level Cancel
           // cannot claim to undo a third-party handoff already dispatched.
+          _ensureGitHubAttestationPolicy(dir.appId);
           if (!sealInstallHandoff(preparationGate)) {
             throw const CancellationException();
           }
@@ -1762,6 +1775,9 @@ extension AppsProviderInstall on AppsProvider {
     final Uri? apkSaveTreeUri = (Platform.isAndroid && saveApkCopiesRequested)
         ? await settingsProvider.getApkSaveDir(warnIfInaccessible: true)
         : null;
+    if (skipMalwareScan) {
+      _ensureGitHubAttestationPolicy(file.appId);
+    }
     if (!skipMalwareScan) {
       final bool proceed = await _runPreInstallVerification(
         appId: file.appId,
@@ -1857,6 +1873,7 @@ extension AppsProviderInstall on AppsProvider {
             r05.id, R05InstallStage.awaitingApproval,
             reason: 'Android session may require approval');
       }
+      _ensureGitHubAttestationPolicy(file.appId);
       if (!sealInstallHandoff(preparationGate,
           nativeCancelable: activeInstaller.modeKey == 'system')) {
         throw const CancellationException();
@@ -2872,8 +2889,9 @@ extension AppsProviderInstall on AppsProvider {
         downloadPath,
         headers: await SourceProvider()
             .getSource(app.url, overrideSource: app.overrideSource)
-            .getRequestHeaders(
+            .getAssetRequestHeaders(
               app.additionalSettings,
+              app.url,
               fileUrl.value,
               forAPKDownload: AppSource.isApkOrContainerFile(fileUrl.key),
             ),
@@ -2928,8 +2946,8 @@ extension AppsProviderInstall on AppsProvider {
     await viewInstallableFile(filePath);
   }
 
-  /// Verifies a downloaded GitHub artifact's SHA-256 against its build
-  /// attestation. Returns a [githubAttestationStatus*] value, or null when the
+  /// Discovers attestation metadata for the downloaded artifact's SHA-256.
+  /// This does not cryptographically verify the bundle. Returns a [githubAttestationStatus*] value, or null when the
   /// app's source is not GitHub.
   Future<String?> verifyGitHubAttestation(
     App app,
@@ -2952,9 +2970,9 @@ extension AppsProviderInstall on AppsProvider {
         sha256Digest,
         app.additionalSettings,
       );
-    } catch (e) {
+    } catch (_) {
       unawaited(
-        logs.add('Error verifying GitHub attestation: ${e.toString()}'),
+        logs.add('GitHub attestation lookup failed'),
       );
     }
     return githubAttestationStatusError;
@@ -3417,18 +3435,13 @@ extension AppsProviderInstall on AppsProvider {
       if (source.shouldEnforceAttestations(
             app.additionalSettings,
             settingsProvider,
-          ) &&
-          attestationStatus != githubAttestationStatusVerified) {
+          )) {
         cleanupOnSkip();
-        // No attestation for this file stays that way; a lookup that failed
-        // can succeed next time.
-        if (attestationStatus == githubAttestationStatusUnsupported) {
-          await _rememberBlockingAttention(
-            appId,
-            needsAttentionNoAttestation,
-            detail: app.latestVersion,
-          );
-        }
+        await _rememberBlockingAttention(
+          appId,
+          needsAttentionNoAttestation,
+          detail: app.latestVersion,
+        );
         throw ObtainiumError(
           githubAttestationEnforcedBlockedMessage(attestationStatus),
         );

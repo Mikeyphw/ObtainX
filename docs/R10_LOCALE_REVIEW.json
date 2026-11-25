@@ -1,7 +1,7 @@
 {
   "schema": "obtainx.r10.locale-review.v1",
   "fallback": "en",
-  "english_leaf_keys": 990,
+  "english_leaf_keys": 996,
   "new_labels": [
     "swipeAction_openSource",
     "r10SourceOpenFailed",
@@ -11,7 +11,7 @@
   ],
   "locales": {
     "fr": {
-      "leaf_keys": 870,
+      "leaf_keys": 903,
       "missing": [
         "appURLListAccepts",
         "appURLListAcceptsJson",
@@ -28,6 +28,12 @@
         "enterAppsToImportFirst",
         "filtered",
         "folderAccessLostPickAgain",
+        "gap01AttestationAbsent",
+        "gap01AttestationAudit",
+        "gap01AttestationBlocked",
+        "gap01AttestationEnforce",
+        "gap01AttestationPresent",
+        "gap01AttestationTooltip",
         "markDowngraded",
         "needsAttention",
         "needsAttentionIdChanged",
@@ -113,7 +119,7 @@
       "blank": []
     },
     "tr": {
-      "leaf_keys": 859,
+      "leaf_keys": 892,
       "missing": [
         "appURLListAccepts",
         "appURLListAcceptsJson",
@@ -133,6 +139,12 @@
         "enterAppsToImportFirst",
         "filtered",
         "folderAccessLostPickAgain",
+        "gap01AttestationAbsent",
+        "gap01AttestationAudit",
+        "gap01AttestationBlocked",
+        "gap01AttestationEnforce",
+        "gap01AttestationPresent",
+        "gap01AttestationTooltip",
         "groupByUpdateStatus",
         "markDowngraded",
         "needsAttention",
@@ -226,7 +238,7 @@
       "blank": []
     },
     "ja": {
-      "leaf_keys": 859,
+      "leaf_keys": 892,
       "missing": [
         "appURLListAccepts",
         "appURLListAcceptsJson",
@@ -246,6 +258,12 @@
         "enterAppsToImportFirst",
         "filtered",
         "folderAccessLostPickAgain",
+        "gap01AttestationAbsent",
+        "gap01AttestationAudit",
+        "gap01AttestationBlocked",
+        "gap01AttestationEnforce",
+        "gap01AttestationPresent",
+        "gap01AttestationTooltip",
         "groupByUpdateStatus",
         "markDowngraded",
         "needsAttention",

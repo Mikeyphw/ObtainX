@@ -63,7 +63,7 @@ const String virusTotalValidatedApiKeyFingerprintKey =
 /// Whether VirusTotal scanning is usable at all right now: the global feature
 /// toggle is on AND a saved API key has passed validation. Per-app exclusions are
 /// NOT considered here - see AppsProvider.willScanApkWithVirusTotal for the
-/// per-install verdict. Mirrors GitHub.canVerifyAttestations: the form pages call
+/// per-install verdict. The form pages call
 /// this to decide whether the per-app switch is actionable, so page-level gating
 /// and the install-time gate can't drift apart.
 bool virusTotalScanningAvailable(SettingsProvider settingsProvider) {
@@ -133,17 +133,29 @@ String _reportUrlForHash(String sha256Hex) =>
 /// this in a try/catch, but MUST treat an error result as something to act on
 /// (see the install-flow rules in apps_provider.dart), not something to ignore.
 class VirusTotalScanner {
+  Future<http.Response> _authenticatedGet(
+    http.Client client, Uri uri, String apiKey,
+  ) async {
+    if (!isTrustedUploadUrl(uri)) {
+      throw const FormatException('Untrusted VirusTotal API destination');
+    }
+    final request = http.Request('GET', uri)
+      ..followRedirects = false
+      ..headers['x-apikey'] = apiKey;
+    return http.Response.fromStream(await client.send(request));
+  }
+
+  static bool isTrustedUploadUrl(Uri uri) => uri.scheme == 'https' &&
+      uri.host == 'www.virustotal.com' && uri.port == 443 &&
+      uri.userInfo.isEmpty && !uri.hasFragment;
+
   Future<Map<String, dynamic>?> _lookupByHash(
     String sha256Hex,
     String apiKey,
   ) async {
     final http.Client client = http.Client();
     try {
-      final response = await client
-          .get(
-            Uri.parse('$_apiBase/files/$sha256Hex'),
-            headers: {'x-apikey': apiKey},
-          )
+      final response = await _authenticatedGet(client, Uri.parse('$_apiBase/files/$sha256Hex'), apiKey)
           .timeout(
             _requestTimeout,
             onTimeout: () => throw _VirusTotalRequestTimeoutError(),
@@ -163,11 +175,7 @@ class VirusTotalScanner {
   Future<String> _requestUploadUrl(String apiKey) async {
     final http.Client client = http.Client();
     try {
-      final response = await client
-          .get(
-            Uri.parse('$_apiBase/files/upload_url'),
-            headers: {'x-apikey': apiKey},
-          )
+      final response = await _authenticatedGet(client, Uri.parse('$_apiBase/files/upload_url'), apiKey)
           .timeout(
             _requestTimeout,
             onTimeout: () => throw _VirusTotalRequestTimeoutError(),
@@ -190,10 +198,11 @@ class VirusTotalScanner {
     String apiKey, {
     String? uploadUrl,
   }) async {
-    final request = http.MultipartRequest(
-      'POST',
-      Uri.parse(uploadUrl ?? '$_apiBase/files'),
-    );
+    final uri = Uri.parse(uploadUrl ?? '$_apiBase/files');
+    if (!isTrustedUploadUrl(uri)) {
+      throw const FormatException('Untrusted VirusTotal upload destination');
+    }
+    final request = http.MultipartRequest('POST', uri)..followRedirects = false;
     // VT's docs say to POST to the upload_url the same way as the regular
     // /files endpoint, so the api key header is sent either way.
     request.headers['x-apikey'] = apiKey;
@@ -232,11 +241,7 @@ class VirusTotalScanner {
               ? _pollDelays[attempt]
               : _pollDelayAfterInitialAttempts,
         );
-        final response = await client
-            .get(
-              Uri.parse('$_apiBase/analyses/$analysisId'),
-              headers: {'x-apikey': apiKey},
-            )
+        final response = await _authenticatedGet(client, Uri.parse('$_apiBase/analyses/$analysisId'), apiKey)
             .timeout(
               _requestTimeout,
               onTimeout: () => throw _VirusTotalRequestTimeoutError(),
@@ -332,10 +337,10 @@ class VirusTotalScanner {
         status: malwareScanStatusError,
         detail: tr('virusTotalErrorRequestTimedOut'),
       );
-    } catch (e) {
+    } catch (_) {
       return VirusTotalScanResult(
         status: malwareScanStatusError,
-        detail: tr('virusTotalErrorGeneric', args: [e.toString()]),
+        detail: tr('virusTotalErrorGeneric', args: ['Request failed']),
       );
     }
   }
@@ -345,11 +350,7 @@ class VirusTotalScanner {
   Future<String?> validateApiKey(String apiKey) async {
     final http.Client client = http.Client();
     try {
-      final response = await client
-          .get(
-            Uri.parse('$_apiBase/users/$apiKey'),
-            headers: {'x-apikey': apiKey},
-          )
+      final response = await _authenticatedGet(client, Uri.parse('$_apiBase/users/$apiKey'), apiKey)
           .timeout(
             _requestTimeout,
             onTimeout: () => throw _VirusTotalRequestTimeoutError(),
@@ -363,8 +364,8 @@ class VirusTotalScanner {
       return _detailForApiError(response.statusCode);
     } on _VirusTotalRequestTimeoutError {
       return tr('virusTotalErrorRequestTimedOut');
-    } catch (e) {
-      return tr('virusTotalErrorGeneric', args: [e.toString()]);
+    } catch (_) {
+      return tr('virusTotalErrorGeneric', args: ['Request failed']);
     } finally {
       client.close();
     }

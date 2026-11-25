@@ -1441,13 +1441,8 @@ class AddAppPageState extends State<AddAppPage> {
               userPickedTrackOnly,
             ))) {
           if (pickedSource is GitHub) {
-            if (!(pickedSource as GitHub).canVerifyAttestations(
-              additionalSettings,
-              settingsProvider,
-            )) {
-              additionalSettings[GitHub.buildVerificationModeKey] =
-                  GitHub.buildVerificationOff;
-            }
+            additionalSettings[GitHub.buildVerificationModeKey] =
+                GitHub.configuredBuildVerificationMode(additionalSettings);
             additionalSettings[GitHub.enforceAttestationsKey] = false;
           }
           final trackOnly =
@@ -1591,25 +1586,10 @@ class AddAppPageState extends State<AddAppPage> {
         }
       }
       if (pickedSource is GitHub) {
-        final bool canVerifyGitHubBuild = (pickedSource as GitHub)
-            .canVerifyAttestations(additionalSettings, settingsProvider);
         for (final GeneratedFormItem item in items.expand((row) => row)) {
           if (item is GeneratedFormDropdown &&
               item.key == GitHub.buildVerificationModeKey) {
-            if (!canVerifyGitHubBuild) {
-              item.disabledOptKeys = [
-                GitHub.buildVerificationAudit,
-                GitHub.buildVerificationEnforce,
-              ];
-              item.value = GitHub.buildVerificationOff;
-            }
-            final String? legacyMode =
-                additionalSettings[GitHub.buildVerificationModeKey]?.toString();
-            if (legacyMode == null &&
-                additionalSettings[GitHub.enforceAttestationsKey] == true &&
-                canVerifyGitHubBuild) {
-              item.value = GitHub.buildVerificationEnforce;
-            }
+            item.value = GitHub.configuredBuildVerificationMode(additionalSettings);
           }
         }
       }

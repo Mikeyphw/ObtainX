@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:obtainium/http/origin_redirect_policy.dart';
 import 'package:crypto/crypto.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -376,15 +377,15 @@ class GitHub extends AppSource {
         buildVerificationModeKey,
         [
           MapEntry(buildVerificationOff, tr('githubBuildVerificationOff')),
-          MapEntry(buildVerificationAudit, tr('githubBuildVerificationAudit')),
+          MapEntry(buildVerificationAudit, tr('gap01AttestationAudit')),
           MapEntry(
             buildVerificationEnforce,
-            tr('githubBuildVerificationEnforce'),
+            tr('gap01AttestationEnforce'),
           ),
         ],
         label: tr('githubBuildVerificationMode'),
         value: buildVerificationOff,
-        labelTooltip: tr('githubBuildVerificationTooltip'),
+        labelTooltip: tr('gap01AttestationTooltip'),
       ),
     ],
     [
@@ -489,10 +490,11 @@ class GitHub extends AppSource {
   }) async {
     final token = await getTokenIfAny(additionalSettings);
     final headers = <String, String>{};
-    if (token != null && token.isNotEmpty) {
+    final requestUri = Uri.tryParse(url);
+    if (token != null && token.isNotEmpty && requestUri != null &&
+        await _canSendSourceToken(requestUri, additionalSettings)) {
       headers[HttpHeaders.authorizationHeader] = 'Bearer $token';
     }
-    final requestUri = Uri.tryParse(url);
     if (requestUri != null && r04IsActionsMetadataApi(requestUri)) {
       // GitHub's Actions ZIP endpoint returns a 302 to a one-minute signed
       // storage URL. GitHub API v2026 uses the JSON media type for this hop.
@@ -506,6 +508,28 @@ class GitHub extends AppSource {
     } else {
       return null;
     }
+  }
+
+  Future<bool> _canSendSourceToken(
+    Uri uri, Map<String, dynamic> additionalSettings,
+  ) async {
+    if (uri.scheme != 'https' || uri.userInfo.isNotEmpty) return false;
+    final api = Uri.parse(await getAPIHost(additionalSettings));
+    if (sameRequestOrigin(uri, api)) return true;
+    final settings = SettingsProvider();
+    await settings.initializeSettings();
+    final config = await getSourceConfigValues(additionalSettings, settings);
+    if (config[githubReqPrefixUseTokenKey] != 'true') return false;
+    final proxy = config[githubReqPrefixKey] ?? '';
+    if (proxy.isEmpty) return false;
+    final prefix = 'https://$proxy/';
+    // Exact configured prefix and canonical API origin, not arbitrary paths
+    // on a provider-selected download server.
+    final text = uri.toString();
+    if (!text.startsWith(prefix)) return false;
+    final proxied = Uri.tryParse('https://${text.substring(prefix.length)}');
+    return proxied != null && proxied.userInfo.isEmpty &&
+        sameRequestOrigin(proxied, api);
   }
 
   @override
@@ -575,9 +599,8 @@ class GitHub extends AppSource {
   }
 
   // ── GitHub build-attestation verification + PAT validation (fork feature) ──
-  // The attestation API requires an authenticated request, so verification is
-  // only offered once the user has validated a Personal Access Token. Statuses
-  // are the githubAttestationStatus* constants from source_provider.
+  // This client discovers API attestations; it does not verify Sigstore bundles.
+  // A validated PAT does not establish provenance or authorize installation.
 
   static String? tokenFromCreds(String? creds) {
     String? token = creds?.trim();
@@ -633,13 +656,14 @@ class GitHub extends AppSource {
       return tr('githubPATRequiredForDefaultVerification');
     }
     try {
-      final Response response = await get(
-        Uri.parse('https://api.github.com/user'),
-        headers: <String, String>{
+      final Response response = await HttpService().request(
+        'GET', Uri.parse('https://api.github.com/user'),
+        <String, String>{
           HttpHeaders.authorizationHeader: 'Bearer $token',
           HttpHeaders.acceptHeader: 'application/vnd.github+json',
           HttpHeaders.userAgentHeader: 'ObtainX',
         },
+        followRedirects: false,
       );
       if (response.statusCode == 200) {
         return null;
@@ -684,18 +708,7 @@ class GitHub extends AppSource {
     }
   }
 
-  bool canVerifyAttestations(
-    Map<String, dynamic> additionalSettings,
-    SettingsProvider settingsProvider,
-  ) {
-    final String? creds =
-        additionalSettings[githubCredsKey]?.toString() ??
-        settingsProvider.getSettingString(githubCredsKey);
-    return hasValidatedPAT(creds, settingsProvider);
-  }
-
-  /// The mode the app's own settings ask for, before [buildVerificationMode]
-  /// checks there is a validated token to verify with.
+  /// The configured policy is independent of credentials or discovery results.
   static String configuredBuildVerificationMode(
     Map<String, dynamic> additionalSettings,
   ) {
@@ -714,12 +727,7 @@ class GitHub extends AppSource {
     Map<String, dynamic> additionalSettings,
     SettingsProvider settingsProvider,
   ) {
-    final String mode = configuredBuildVerificationMode(additionalSettings);
-    if (mode == buildVerificationOff ||
-        !canVerifyAttestations(additionalSettings, settingsProvider)) {
-      return buildVerificationOff;
-    }
-    return mode;
+    return configuredBuildVerificationMode(additionalSettings);
   }
 
   bool shouldVerifyAttestations(
@@ -746,7 +754,7 @@ class GitHub extends AppSource {
     final String digest = sha256Digest.startsWith('sha256:')
         ? sha256Digest.substring('sha256:'.length)
         : sha256Digest;
-    if (digest.isEmpty) {
+    if (!RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(digest)) {
       return githubAttestationStatusError;
     }
     try {
@@ -764,32 +772,26 @@ class GitHub extends AppSource {
         response.body,
       );
       final Object? attestations = body?['attestations'];
-      if (attestations is List && attestations.isNotEmpty) {
-        return githubAttestationStatusVerified;
+      if (attestations is! List) {
+        return githubAttestationStatusError;
       }
-      return githubAttestationStatusUnsupported;
+      if (attestations.isEmpty) {
+        return githubAttestationStatusUnsupported;
+      }
+      if (attestations.any((entry) => entry is! Map ||
+          entry['bundle'] is! Map ||
+          (entry['bundle'] as Map)['mediaType'] is! String ||
+          (entry['bundle'] as Map)['verificationMaterial'] is! Map ||
+          ((entry['bundle'] as Map)['dsseEnvelope'] is! Map &&
+            (entry['bundle'] as Map)['messageSignature'] is! Map))) {
+        return githubAttestationStatusError;
+      }
+      // API metadata is only discovery evidence. No supported cryptographic
+      // verifier is available here, so even a valid-looking bundle is untrusted.
+      return githubAttestationStatusPresent;
     } catch (_) {
       return githubAttestationStatusError;
     }
-  }
-
-  Future<bool?> hasAttestationForSha256Digest(
-    String standardUrl,
-    String sha256Digest,
-    Map<String, dynamic> additionalSettings,
-  ) async {
-    final String status = await getAttestationStatusForSha256Digest(
-      standardUrl,
-      sha256Digest,
-      additionalSettings,
-    );
-    if (status == githubAttestationStatusVerified) {
-      return true;
-    }
-    if (status == githubAttestationStatusUnsupported) {
-      return false;
-    }
-    return null;
   }
 
   @override
@@ -1377,7 +1379,7 @@ class GitHub extends AppSource {
       // ── GitHub build-attestation status (fork feature) ──────────────────
       // Compute the attestation verdict at CHECK time from the preferred
       // asset's API-provided sha256 `digest`, so the app page can show
-      // Verified / Unsupported / Can't-Check immediately — without waiting for
+      // Present (unverified) / Unsupported / Can't-Check immediately — without waiting for
       // the APK to be downloaded (the /attestations lookup only needs the
       // digest, not the bytes). This is what drives the "Security" badge on the
       // update card; dropping it leaves latestAttestationStatus null, which the
@@ -1405,23 +1407,8 @@ class GitHub extends AppSource {
         }
         final String? preferredAssetDigest =
             preferredAsset?['digest'] as String?;
-        // Skip the attestation API round-trip when the upstream release is
-        // unchanged and we hold a CONCLUSIVE cached verdict. A GitHub
-        // attestation is produced inside the release workflow run that builds
-        // the asset and bound to its digest, so for an unchanged release both
-        // 'verified' and 'unsupported' (no attestation for this digest) are
-        // stable. Only a cached 'error' is re-checked, since that is a
-        // transient lookup failure, not a real verdict.
-        final App? prevApp = previouslyCheckedApp;
-        final bool canReuseCachedAttestation =
-            prevApp != null &&
-            prevApp.rawLatestVersionFromSource != null &&
-            prevApp.rawLatestVersionFromSource == version &&
-            prevApp.latestAttestationStatus != null &&
-            prevApp.latestAttestationStatus != githubAttestationStatusError;
-        attestationStatus = canReuseCachedAttestation
-            ? prevApp.latestAttestationStatus
-            : preferredAssetDigest != null
+        // A reused version label is not a digest identity. Discover afresh.
+        attestationStatus = preferredAssetDigest != null
             ? await getAttestationStatusForSha256Digest(
                 standardUrl,
                 preferredAssetDigest,

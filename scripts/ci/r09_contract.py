@@ -27,7 +27,7 @@ REQUIRED = {
     'android/app/src/main/kotlin/dev/imranr/obtainium/MainActivity.kt': ('R09ApkInspectionBridge(',),
     'integration_test/r02c_archive_install_test.dart': ('await inspectR09Apk(copy, name)', 'OX_R09_MANIFEST_REAL_APK_INSPECTION_PASS', 'OX_RT02C_CHECKPOINT case=$caseName step=$step', 'OX_RT02C_FAILURE case=$caseName step=$diagnosticStep', "mark('R09_INSTALLED_SIGNERS')", 'expect(installedSigners, isNotEmpty)', 'expect(review.eligible, isTrue)', 'installedSigners: installedSigners'),
     'lib/services/r03_download_engine.dart': ('_activeMaxBytes[key] != maxBytes', 'responseTotal > maxBytes', 'received + incoming.length > maxBytes'),
-    'lib/providers/source_provider.dart': ('Review requires HTTPS on every hop', '|| reviewCrossOrigin', 'r04ArtifactStorageHeaders(requestHeaders)'),
+    'lib/providers/source_provider.dart': ('Review requires HTTPS on every hop', 'validateHttpRedirect(currentUrl, nextUrl, method,', 'crossOriginDownloadHeaders(requestHeaders)', 'r04ArtifactStorageHeaders(requestHeaders)'),
     'test/r09_artifact_inspection_test.dart': ("const asset = MapEntry('x86.apk', 'https://example.org/apk');", 'evaluatedChoice: (_) => const R09ArtifactChoice', 'native current signer wire key survives single and bulk package queries', 'missing current signer is not replaced by past certificate history'),
     'test/r09_discovery_test.dart': ('without URL secrets', 'smart folder search round trips', 'competing installable sources', 'wrong ABI and configuration splits', 'safe default respects eligible', 'exact repository, identity and expiry gate', 'distinguish actual recorded facts'),
 }

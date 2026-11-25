@@ -168,7 +168,7 @@ SETTINGS_TESTS = (
     'test/settings_provider_theme_accent_test.dart', 'test/bg_check_scheduling_test.dart',
     'test/performance_recorder_test.dart',
     'test/r10_settings_context_test.dart', 'test/r10_regex_preview_test.dart',
-    'test/version_regex_assist_sheet_layout_test.dart',
+    'test/version_regex_assist_sheet_layout_test.dart', 'test/r10_accessibility_test.dart', 'test/app_dropdown_field_test.dart',
 )
 RULES = (
     (('lib/pages/settings.dart', 'lib/widgets/r10_settings_navigation.dart',

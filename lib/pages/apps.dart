@@ -26,6 +26,7 @@ import 'package:obtainium/app_sources/apkmirror.dart';
 import 'package:obtainium/app_sources/codeberg.dart';
 import 'package:obtainium/app_sources/gitlab.dart';
 import 'package:obtainium/components/app_bottom_sheet.dart';
+import 'package:obtainium/components/r10_accessibility.dart';
 import 'package:obtainium/components/app_details_container.dart';
 import 'package:obtainium/components/app_dropdown_field.dart';
 import 'package:obtainium/components/bulk_category_editor.dart';
@@ -941,7 +942,7 @@ class _AppListItem extends StatelessWidget {
       return IconButton(
         visualDensity: VisualDensity.compact,
         padding: EdgeInsets.zero,
-        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+        constraints: const BoxConstraints.tightFor(width: 48, height: 48),
         color: colorScheme.primary,
         tooltip: buildVerificationBlocked
             ? buildVerificationBlockedMessage
@@ -959,7 +960,7 @@ class _AppListItem extends StatelessWidget {
       return IconButton(
         visualDensity: VisualDensity.compact,
         padding: EdgeInsets.zero,
-        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+        constraints: const BoxConstraints.tightFor(width: 48, height: 48),
         color: colorScheme.primary,
         tooltip: buildVerificationBlocked
             ? buildVerificationBlockedMessage
@@ -996,7 +997,8 @@ class _AppListItem extends StatelessWidget {
         (!skipActive && hasUpdate) ||
         (!skipActive && !hasUpdate && hasUncertainUpdate);
 
-    final bool showVersionColumn = !packageGrouped && !hideVersionAndChangelog && showVersionBadge;
+    final bool wrapRowText = screenWidth < 360 || MediaQuery.textScalerOf(context).scale(16) > 19.2;
+    final bool showVersionColumn = !packageGrouped && !hideVersionAndChangelog && showVersionBadge && !wrapRowText;
 
     final Widget? trailingRow = (!showVersionColumn && !hasTrailingWidgets)
         ? null
@@ -1004,7 +1006,7 @@ class _AppListItem extends StatelessWidget {
             // ListTile measures trailing before title/subtitle. Bound the
             // secondary version/date column so app and developer names keep
             // the larger share of the row and truncate last.
-            constraints: BoxConstraints(maxWidth: screenWidth * 0.32),
+            constraints: BoxConstraints(maxWidth: math.max(48.0, screenWidth * 0.32)),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.center,
@@ -1364,9 +1366,9 @@ class _AppListItem extends StatelessWidget {
                       Expanded(
                         child: Text(
                           app.name,
-                          maxLines: 1,
+                          maxLines: wrapRowText ? null : 1,
                           style: TextStyle(
-                            overflow: TextOverflow.ellipsis,
+                            overflow: wrapRowText ? TextOverflow.visible : TextOverflow.ellipsis,
                             fontWeight: pinned
                                 ? FontWeight.w700
                                 : FontWeight.normal,
@@ -1375,15 +1377,17 @@ class _AppListItem extends StatelessWidget {
                       ),
                     ],
                   ),
-                  subtitle: packageGrouped
+                  subtitle: wrapRowText && !packageGrouped && showVersionBadge
+                      ? Text([if (showAuthorBadge) tr('byX', args: [app.author]), versionText, changesButtonString].where((value) => value.isNotEmpty).join(' · '))
+                      : packageGrouped
                       ? Text([app.sourceIdentifier, r09ChannelLabel(app.app.additionalSettings),
                           app.app.latestVersion, tr('r09SourceListing')].where((s) => s.isNotEmpty).join(' · '), maxLines: 2)
                       : showAuthorBadge
                       ? Text(
                           tr('byX', args: [app.author]),
-                          maxLines: 1,
+                          maxLines: wrapRowText ? null : 1,
                           style: TextStyle(
-                            overflow: TextOverflow.ellipsis,
+                            overflow: wrapRowText ? TextOverflow.visible : TextOverflow.ellipsis,
                             fontWeight: pinned
                                 ? FontWeight.w600
                                 : FontWeight.normal,
@@ -1511,6 +1515,7 @@ class _SwipeableListItem extends StatefulWidget {
 class _SwipeableListItemState extends State<_SwipeableListItem>
     with AutomaticKeepAliveClientMixin, SingleTickerProviderStateMixin {
   double _dragOffset = 0;
+  final R10SwipeThreshold _swipeThreshold = R10SwipeThreshold();
 
   // Eases [_dragOffset] back to 0 on release so the revealed action (icon +
   // label) slides and fades out smoothly instead of snapping — mirroring
@@ -1546,7 +1551,12 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
 
   void _settleToZero() {
     _settleController.stop();
+    _swipeThreshold.reset();
     if (_dragOffset == 0) return;
+    if (r10ReduceMotion(context, context.read<SettingsProvider>().reduceVisualEffects)) {
+      setState(() => _dragOffset = 0);
+      return;
+    }
     // One controller listener for the lifetime of the row. Repeated swipes
     // must not retain a new listener and CurvedAnimation after every release.
     _settleAnimation = Tween<double>(
@@ -1575,6 +1585,8 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
             !isAwaitingThirdPartyInstall;
       case SwipeAction.open:
         return widget.isInstalled;
+      case SwipeAction.openSource:
+        return r10SourceHomepage(context.read<AppsProvider>().apps[widget.appId]?.app.url ?? '') != null;
       case SwipeAction.none:
         return false;
       default:
@@ -1617,6 +1629,8 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
         return (Icons.open_in_new, Colors.orange);
       case SwipeAction.appInfo:
         return (Icons.info_outline, Colors.teal);
+      case SwipeAction.openSource:
+        return (Icons.language_rounded, cs.primary);
       case SwipeAction.none:
         return (Icons.circle, Colors.transparent);
     }
@@ -1720,6 +1734,10 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
         if (packageId != null) {
           unawaited(packageManager.openApp(packageId));
         }
+      case SwipeAction.openSource:
+        if (app != null && !await r10OpenSourceHomepage(app.url) && context.mounted) {
+          showError(ObtainiumError(tr('r10SourceOpenFailed')));
+        }
       case SwipeAction.appInfo:
         final String? packageId = app?.id;
         if (packageId != null) {
@@ -1733,7 +1751,7 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
   @override
   Widget build(BuildContext context) {
     super.build(context); // required by AutomaticKeepAliveClientMixin
-    const swipeThreshold = 80.0;
+    const swipeThreshold = R10SwipeThreshold.distance;
     const maxDrag = 120.0;
 
     // Watched per row rather than passed down: the awaiting-third-party
@@ -1793,8 +1811,25 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
     final TextStyle? labelStyle = Theme.of(context).textTheme.labelLarge
         ?.copyWith(color: iconColor, fontWeight: FontWeight.w600);
 
-    return GestureDetector(
-      onHorizontalDragStart: (_) => _settleController.stop(),
+    final bool reduceMotion = r10ReduceMotion(context, context.read<SettingsProvider>().reduceVisualEffects);
+    final Set<SwipeAction> availableActions = {
+      if (canSwipeLeft) widget.leftAction,
+      if (canSwipeRight) widget.rightAction,
+    };
+    void runAction(SwipeAction action) {
+      if (mounted &&
+          (action == widget.leftAction || action == widget.rightAction) &&
+          context.read<AppsProvider>().apps[widget.appId] != null &&
+          _canExecute(action, context.read<AppsProvider>().isAwaitingThirdPartyInstall(widget.appId))) {
+        unawaited(_executeAction(action, context));
+      }
+    }
+    final Widget swipeChild = GestureDetector(
+      onHorizontalDragStart: (_) {
+        _settleController.stop();
+        _swipeThreshold.reset();
+        setState(() => _dragOffset = 0);
+      },
       onHorizontalDragUpdate: (details) {
         _settleController.stop();
         setState(() {
@@ -1804,14 +1839,17 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
             canSwipeRight ? maxDrag : 0.0,
           );
         });
+        if (_swipeThreshold.update(_dragOffset, left: canSwipeLeft, right: canSwipeRight)) {
+          context.read<SettingsProvider>().selectionClick();
+        }
       },
       onHorizontalDragEnd: (_) {
-        if (_dragOffset > swipeThreshold && canSwipeRight) {
-          _executeAction(widget.rightAction, context);
+        final int direction = R10SwipeThreshold.direction(_dragOffset,
+          left: canSwipeLeft, right: canSwipeRight);
+        _swipeThreshold.reset();
+        if (direction != 0) {
           setState(() => _dragOffset = 0);
-        } else if (_dragOffset < -swipeThreshold && canSwipeLeft) {
-          _executeAction(widget.leftAction, context);
-          setState(() => _dragOffset = 0);
+          runAction(direction > 0 ? widget.rightAction : widget.leftAction);
         } else {
           _settleToZero();
         }
@@ -1829,17 +1867,17 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
                   child: Opacity(
                     opacity: revealProgress,
                     child: Transform.scale(
-                      scale: 0.88 + 0.12 * revealProgress,
+                      scale: reduceMotion ? 1 : 0.88 + 0.12 * revealProgress,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: bgIconLeading
                             ? [
                                 Icon(bgIcon, color: iconColor),
                                 const SizedBox(width: 8),
-                                Text(bgLabel, style: labelStyle),
+                                Flexible(child: Text(bgLabel, style: labelStyle)),
                               ]
                             : [
-                                Text(bgLabel, style: labelStyle),
+                                Flexible(child: Text(bgLabel, style: labelStyle)),
                                 const SizedBox(width: 8),
                                 Icon(bgIcon, color: iconColor),
                               ],
@@ -1855,6 +1893,30 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
           ],
         ),
       ),
+    );
+    // The configured actions are reachable without a horizontal gesture.
+    // Only show the extra control for remote/directional input to retain the
+    // existing phone row density; TalkBack gets equivalent custom actions.
+    final bool directional = context.read<SettingsProvider>().isTV ||
+        MediaQuery.of(context).navigationMode == NavigationMode.directional;
+    return Semantics(
+      customSemanticsActions: {
+        for (final action in availableActions)
+          CustomSemanticsAction(label: _actionLabel(action)): () => runAction(action),
+      },
+      child: directional && availableActions.isNotEmpty
+          ? Row(children: [
+              Expanded(child: swipeChild),
+              PopupMenuButton<SwipeAction>(
+                tooltip: tr('r10RowActions'),
+                onSelected: runAction,
+                itemBuilder: (_) => [
+                  for (final action in availableActions)
+                    PopupMenuItem<SwipeAction>(value: action, child: Text(_actionLabel(action))),
+                ],
+              ),
+            ])
+          : swipeChild,
     );
   }
 }
@@ -5045,7 +5107,7 @@ class AppsPageState extends State<AppsPage> {
       // path and doesn't benefit from container transform.
       final Widget swipeItem = isLargeScreen
           ? buildRowWith(() => setState(() => selectedAppId = listingKey))
-          : settingsProvider.reduceVisualEffects
+          : r10ReduceMotion(context, settingsProvider.reduceVisualEffects)
           ? buildRowWith(
               () => Navigator.push(
                 context,
@@ -6489,6 +6551,7 @@ class AppsPageState extends State<AppsPage> {
                                 if (!_searchExpanded)
                                   IconButton(
                                     icon: const Icon(Icons.search),
+                                    tooltip: tr('search'),
                                     onPressed: () {
                                       setState(() => _searchExpanded = true);
                                       _searchFocusNode.requestFocus();

@@ -71,7 +71,8 @@ enum SortOrderSettings { ascending, descending }
 
 enum AppsListGroupBy { none, category, source, appType, updateStatus, package }
 
-enum SwipeAction { update, pin, appOptions, delete, open, appInfo, edit, none }
+// Append new actions: persisted historical integer indices must never move.
+enum SwipeAction { update, pin, appOptions, delete, open, appInfo, edit, none, openSource }
 
 // Installer selection, converged with upstream Obtainium: same pref key
 // (`installMethod`) and same values (these names). ObtainX drives it through the
@@ -345,7 +346,7 @@ class SettingsProvider with ChangeNotifier {
       if (prefs!.containsKey(nameKey)) return;
       final int raw = prefs!.getInt(intKey) ?? defaultIndex;
       final SwipeAction action =
-          SwipeAction.values[raw.clamp(0, SwipeAction.values.length - 1)];
+          SwipeAction.values[raw.clamp(0, SwipeAction.none.index)];
       prefs!.setString(nameKey, action.name);
     }
 
@@ -365,7 +366,9 @@ class SettingsProvider with ChangeNotifier {
       }
     }
     final int index = prefs?.getInt(intKey) ?? defaultIndex;
-    return SwipeAction.values[index.clamp(0, SwipeAction.values.length - 1)];
+    // The name is authoritative for new actions; old numeric preferences
+    // can only select the historical range.
+    return SwipeAction.values[index.clamp(0, SwipeAction.none.index)];
   }
 
   /// Converges the installer setting onto upstream Obtainium's representation:

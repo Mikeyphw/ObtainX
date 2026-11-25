@@ -884,5 +884,10 @@
     "r10ProxyTokenHint": "Etkinleştirildiğinde GitHub belirteci yapılandırılan vekil sunucuya gönderilir. Yalnızca güvendiğiniz sunucular için etkinleştirin.",
     "r10VirusTotalHint": "Doğrulanmış VirusTotal anahtarı taramayı sağlar. Karma raporu yoksa APK yüklenebilir; temiz sonuç güvenliği kanıtlamaz.",
     "r10SourceOverrideHint": "Geçersiz kılma, bu URL için başka bir kaynak ayrıştırıcısı seçer. Yayıncıyı doğrulamaz veya URL’yi değiştirmez.",
-    "r10CertificateHint": "Sertifikalar APK imzalayanlarını tanımlar, kod güvenliğini değil. Farklı imzalayan güncellemeyi engelleyebilir; bilinmiyor doğrulanmadı demektir."
+    "r10CertificateHint": "Sertifikalar APK imzalayanlarını tanımlar, kod güvenliğini değil. Farklı imzalayan güncellemeyi engelleyebilir; bilinmiyor doğrulanmadı demektir.",
+    "swipeAction_openSource": "Uygulama kaynağını aç",
+    "r10SourceOpenFailed": "Uygulama kaynağı açılamadı",
+    "r10RowActions": "Uygulama işlemleri",
+    "r10ActivityHistory": "Etkinlik geçmişi",
+    "r10CopyCertificate": "Sertifika parmak izini kopyala"
 }

@@ -895,5 +895,10 @@
     "r10ProxyTokenHint": "L’activation envoie le jeton GitHub au proxy configuré. N’activez que pour un proxy de confiance.",
     "r10VirusTotalHint": "Une clé VirusTotal validée permet l’analyse. L’APK peut être envoyé si aucun rapport de hachage n’existe ; un résultat propre ne prouve pas la sécurité.",
     "r10SourceOverrideHint": "Le remplacement choisit un autre analyseur de source pour cette URL. Il ne vérifie pas l’éditeur et ne change pas l’URL.",
-    "r10CertificateHint": "Les certificats identifient les signataires de l’APK, pas la sécurité du code. Un signataire différent peut empêcher la mise à jour ; inconnu signifie non vérifié."
+    "r10CertificateHint": "Les certificats identifient les signataires de l’APK, pas la sécurité du code. Un signataire différent peut empêcher la mise à jour ; inconnu signifie non vérifié.",
+    "swipeAction_openSource": "Ouvrir la source de l’application",
+    "r10SourceOpenFailed": "Impossible d’ouvrir la source de l’application",
+    "r10RowActions": "Actions de l’application",
+    "r10ActivityHistory": "Historique des activités",
+    "r10CopyCertificate": "Copier l’empreinte du certificat"
 }

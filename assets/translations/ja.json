@@ -884,5 +884,10 @@
     "r10ProxyTokenHint": "有効にすると GitHub トークンを設定済みプロキシへ送信します。信頼できるプロキシに限って有効にしてください。",
     "r10VirusTotalHint": "検証済み VirusTotal キーでスキャンできます。ハッシュの報告がなければ APK が送信される場合があります。問題なしでも安全の証明ではありません。",
     "r10SourceOverrideHint": "この URL に別のソース解析方法を選択します。発行者の検証や URL の変更は行いません。",
-    "r10CertificateHint": "証明書は APK の署名者を示しますが、コードの安全性は示しません。署名者が異なると更新できない場合があります。不明は未検証です。"
+    "r10CertificateHint": "証明書は APK の署名者を示しますが、コードの安全性は示しません。署名者が異なると更新できない場合があります。不明は未検証です。",
+    "swipeAction_openSource": "アプリの配布元を開く",
+    "r10SourceOpenFailed": "アプリの配布元を開けませんでした",
+    "r10RowActions": "アプリの操作",
+    "r10ActivityHistory": "アクティビティ履歴",
+    "r10CopyCertificate": "証明書のフィンガープリントをコピー"
 }

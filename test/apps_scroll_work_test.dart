@@ -146,6 +146,35 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('real swipe thresholds honor tactile feedback in both directions', (tester) async {
+    final haptics = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform, (call) async {
+        if (call.method == 'HapticFeedback.vibrate') haptics.add(call);
+        return null;
+      });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform, null));
+    await openApps(tester);
+    final row = find.ancestor(of: find.text('App 00'), matching: find.byWidgetPredicate(
+      (widget) => widget.runtimeType.toString() == '_SwipeableListItem'));
+    for (final enabled in [true, false]) {
+      settings.tactileFeedbackEnabled = enabled;
+      haptics.clear();
+      for (final sign in [1.0, -1.0]) {
+        final gesture = await tester.startGesture(tester.getCenter(row));
+        await gesture.moveBy(Offset(sign * 30, 0));
+        await tester.pump();
+        await gesture.moveBy(Offset(sign * 100, 0));
+        await tester.pump();
+        await gesture.cancel();
+        await tester.pumpAndSettle();
+      }
+      expect(haptics.length, enabled ? 2 : 0);
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final reduceEffects in [false, true]) {
     testWidgets(
       'row appearance is preserved with reduced effects $reduceEffects',

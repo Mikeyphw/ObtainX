@@ -882,5 +882,10 @@
     "r10ProxyTokenHint": "Ativar envia o token GitHub ao proxy configurado. Ative apenas para um proxy confiável.",
     "r10VirusTotalHint": "Uma chave VirusTotal validada permite a análise. O APK pode ser enviado se não houver relatório do hash; um resultado limpo não prova segurança.",
     "r10SourceOverrideHint": "A substituição escolhe outro analisador de fonte para esta URL. Não verifica o desenvolvedor nem altera a URL.",
-    "r10CertificateHint": "Os certificados identificam quem assinou o APK, não a segurança do código. Um assinante diferente pode impedir a atualização; desconhecido significa não verificado."
+    "r10CertificateHint": "Os certificados identificam quem assinou o APK, não a segurança do código. Um assinante diferente pode impedir a atualização; desconhecido significa não verificado.",
+    "swipeAction_openSource": "Abrir a fonte do aplicativo",
+    "r10SourceOpenFailed": "Não foi possível abrir a fonte do aplicativo",
+    "r10RowActions": "Ações do aplicativo",
+    "r10ActivityHistory": "Histórico de atividades",
+    "r10CopyCertificate": "Copiar a impressão digital do certificado"
 }

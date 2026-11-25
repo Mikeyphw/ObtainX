@@ -982,5 +982,10 @@
     "r10ProxyTokenHint": "Enabling this sends the GitHub token to the configured proxy. Only enable for a proxy you trust.",
     "r10VirusTotalHint": "A validated VirusTotal key enables scanning. An APK may be uploaded if no hash report exists; a clean result does not prove safety.",
     "r10SourceOverrideHint": "Override chooses a different source parser for this URL. It does not verify the publisher or change the URL itself.",
-    "r10CertificateHint": "Certificates identify APK signers, not whether code is safe. A different signer may prevent an update; unknown means not verified."
+    "r10CertificateHint": "Certificates identify APK signers, not whether code is safe. A different signer may prevent an update; unknown means not verified.",
+    "swipeAction_openSource": "Open app source",
+    "r10SourceOpenFailed": "Could not open the app source",
+    "r10RowActions": "App actions",
+    "r10ActivityHistory": "Activity history",
+    "r10CopyCertificate": "Copy certificate fingerprint"
 }

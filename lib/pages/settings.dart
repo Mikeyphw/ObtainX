@@ -62,6 +62,7 @@ IconData _swipeActionIcon(SwipeAction action) => switch (action) {
   SwipeAction.appInfo => Icons.info_rounded,
   SwipeAction.edit => Icons.edit_rounded,
   SwipeAction.none => Icons.block_rounded,
+  SwipeAction.openSource => Icons.language_rounded,
 };
 
 String get _aboutObtainXWebsiteUrl => tr('aboutObtainXWebsiteUrl');
@@ -134,7 +135,7 @@ class SettingsPageState extends State<SettingsPage> {
       'accentSource_presetSlate'],
     'appearance': ['language', 'settingsCustomFontTitle', 'uiScale', 'cardCorners',
       'updateButtonsAtTopOfAppPage', 'alwaysUsePhoneLayout', 'showWebInAppView', 'highlightTouchTargets'],
-    'interaction': ['leftSwipeAction', 'rightSwipeAction', 'tactileFeedbackEnabled'],
+    'interaction': ['leftSwipeAction', 'rightSwipeAction', 'tactileFeedbackEnabled', 'swipeAction_openSource'],
     'warnings': ['showAPKOriginWarnings', 'showAppDowngradeError', 'showBatteryOptimizationPrompt', 'showTrackOnlyWarnings'],
     'integrations': ['openAppInfoInAppManager', 'beforeNewInstallsShareToAppVerifier',
       'enableDowngradeModules', 'enableVirusTotalScanning', 'virusTotalApiKeyLabel',
@@ -2411,7 +2412,7 @@ class _InteractionSection extends StatelessWidget {
             children: [
               Icon(_swipeActionIcon(action), size: 18, color: cs.primary),
               const SizedBox(width: 12),
-              Text(tr('swipeAction_${action.name}')),
+              Flexible(child: Text(tr('swipeAction_${action.name}'))),
             ],
           ),
         );

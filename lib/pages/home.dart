@@ -7,6 +7,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:obtainium/layout_breakpoints.dart';
+import 'package:obtainium/components/r10_accessibility.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/pages/add_app.dart';
 import 'package:obtainium/pages/app.dart' show loadIconsAndScanStoresFor;
@@ -119,7 +120,7 @@ class NavigationPageItem {
 
   NavigationPageItem(this.titleKey, this.icon, this.widget);
 
-  String get title => titleKey == 'activityCenter' ? 'Activity center' : tr(titleKey);
+  String get title => tr(titleKey == 'activityCenter' ? 'r10SettingsActivityCenter' : titleKey);
 }
 
 /// Keeps the system navigation-bar padding stable while Android animates the
@@ -151,11 +152,13 @@ class _DirectionalIndexedStack extends StatefulWidget {
     super.key,
     required this.index,
     required this.axis,
+    required this.reduceMotion,
     required this.children,
   });
 
   final int index;
   final Axis axis;
+  final bool reduceMotion;
   final List<Widget> children;
 
   @override
@@ -203,6 +206,13 @@ class _DirectionalIndexedStackState extends State<_DirectionalIndexedStack>
           _previousIndex = null;
         });
       }
+      return;
+    }
+    if (widget.reduceMotion) {
+      _controller.stop();
+      _previousIndex = null;
+      _currentIndex = widget.index;
+      _controller.value = 1;
       return;
     }
     _direction = widget.index > _currentIndex ? 1 : -1;
@@ -282,7 +292,13 @@ class _DirectionalIndexedStackState extends State<_DirectionalIndexedStack>
                         ignoring: _pageIgnoresPointer(index),
                         child: FractionalTranslation(
                           translation: _offsetFor(index, _animation.value),
-                          child: widget.children[index],
+                          child: ExcludeFocus(
+                            excluding: index != _currentIndex,
+                            child: ExcludeSemantics(
+                              excluding: index != _currentIndex,
+                              child: widget.children[index],
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -607,6 +623,8 @@ class HomePageState extends State<HomePage> {
       return const SizedBox.shrink();
     }
     final double bottomInset = MediaQuery.paddingOf(context).bottom;
+    final bool reduceMotion = r10ReduceMotion(context, context.read<SettingsProvider>().reduceVisualEffects);
+    final Duration motionDuration = reduceMotion ? Duration.zero : const Duration(milliseconds: 300);
 
     bool isAddAppSubFlowActive = false;
     if (selectedIndex == 1) {
@@ -638,7 +656,7 @@ class HomePageState extends State<HomePage> {
                 hapticSelection();
                 state.runMassObtain();
               },
-              tooltip: null,
+              tooltip: tr('r09UpdateAll'),
               child: const Icon(Icons.file_download_outlined, size: 20),
             );
 
@@ -670,7 +688,7 @@ class HomePageState extends State<HomePage> {
                 hapticSelection();
                 state.openSelectionActionsSheet();
               },
-              tooltip: null,
+              tooltip: tr('r10RowActions'),
               child: const Icon(Icons.checklist, size: 20),
             );
           } else {
@@ -682,7 +700,7 @@ class HomePageState extends State<HomePage> {
                 hapticSelection();
                 state.openViewOptionsSheet();
               },
-              tooltip: null,
+              tooltip: tr('appsViewOptions'),
               child: const Icon(Icons.tune, size: 20),
             );
           }
@@ -712,21 +730,22 @@ class HomePageState extends State<HomePage> {
               : scheme.onSurfaceVariant,
         );
 
-        return InkWell(
-          borderRadius: BorderRadius.circular(22),
-          onTap: () async {
+        return R10NavigationTarget(
+          label: page.title,
+          selected: isSelected,
+          onTap: () {
             hapticSelection();
             unawaited(switchToPage(index));
           },
           child: AnimatedContainer(
             // M3 expressive (emphasized) motion, matched to the page transition
             // above so the selection indicator settles in sync with the page.
-            duration: const Duration(milliseconds: 300),
+            duration: motionDuration,
             curve: Curves.easeInOutCubicEmphasized,
             margin: const EdgeInsets.symmetric(horizontal: 2.0),
             padding: EdgeInsets.symmetric(
               horizontal: isSelected ? 15.0 : 11.0,
-              vertical: 10.0,
+              vertical: 12.0,
             ),
             decoration: BoxDecoration(
               color: isSelected ? scheme.primaryContainer : Colors.transparent,
@@ -738,15 +757,15 @@ class HomePageState extends State<HomePage> {
                 iconWidget,
                 ClipRect(
                   child: AnimatedSize(
-                    duration: const Duration(milliseconds: 300),
+                    duration: motionDuration,
                     curve: Curves.easeInOutCubicEmphasized,
-                    child: isSelected
+                    child: isSelected && MediaQuery.sizeOf(context).width >= 440 &&
+                            MediaQuery.textScalerOf(context).scale(16) <= 19.2
                         ? Padding(
                             padding: const EdgeInsets.only(left: 7.0),
                             child: Text(
                               page.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.clip,
+                              softWrap: false,
                               style: TextStyle(
                                 fontSize: 13.5,
                                 fontWeight: FontWeight.w600,
@@ -792,9 +811,7 @@ class HomePageState extends State<HomePage> {
       ),
     );
 
-    final Widget compositeRow = Row(
-      mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment: MainAxisAlignment.center,
+    final Widget compositeRow = R10NavigationStrip(
       children: [
         SizedBox(
           width: 48,
@@ -814,8 +831,9 @@ class HomePageState extends State<HomePage> {
       ],
     );
 
+    if (isAddAppSubFlowActive) return const SizedBox.shrink();
     return AnimatedSlide(
-      duration: const Duration(milliseconds: 300),
+      duration: motionDuration,
       curve: Curves.easeInOutCubicEmphasized,
       offset: isAddAppSubFlowActive ? const Offset(0, 1.5) : Offset.zero,
       child: Padding(
@@ -826,7 +844,7 @@ class HomePageState extends State<HomePage> {
         ),
         child: Align(
           alignment: Alignment.bottomCenter,
-          child: FittedBox(fit: BoxFit.scaleDown, child: compositeRow),
+          child: compositeRow,
         ),
       ),
     );
@@ -899,7 +917,7 @@ class HomePageState extends State<HomePage> {
     // Only shell layout settings are watched here; page switching is handled
     // locally by the mounted tab stack.
     context.select<SettingsProvider, int>(
-      (s) => Object.hash(s.progressiveBlurEnabled, s.alwaysUsePhoneLayout),
+      (s) => Object.hash(s.progressiveBlurEnabled, s.alwaysUsePhoneLayout, s.reduceVisualEffects, s.isTV),
     );
     final SettingsProvider settingsProvider = context.read<SettingsProvider>();
 
@@ -986,15 +1004,17 @@ class HomePageState extends State<HomePage> {
       child: Builder(
         builder: (BuildContext context) {
           final ColorScheme scheme = Theme.of(context).colorScheme;
-          final bool blurBottomNav = settingsProvider.progressiveBlurEnabled;
+          final bool reduceMotion = r10ReduceMotion(context, settingsProvider.reduceVisualEffects);
+          final bool blurBottomNav = settingsProvider.progressiveBlurEnabled && !reduceMotion;
           final double screenWidth = MediaQuery.sizeOf(context).width;
           final Orientation orientation = MediaQuery.orientationOf(context);
           final Axis pageTransitionAxis = orientation == Orientation.landscape
               ? Axis.vertical
               : Axis.horizontal;
           final bool isLargeScreen =
-              screenWidth >= kLargeScreenWidthBreakpoint &&
-              !settingsProvider.alwaysUsePhoneLayout;
+              !settingsProvider.alwaysUsePhoneLayout &&
+              (screenWidth >= kLargeScreenWidthBreakpoint ||
+                  (settingsProvider.isTV && screenWidth >= 600));
 
           // Shared icon builder (adds the update-count badge to the first tab),
           // and build only the destination list the current layout actually
@@ -1017,7 +1037,7 @@ class HomePageState extends State<HomePage> {
                     .map(
                       (entry) => NavigationRailDestination(
                         icon: navIcon(entry),
-                        label: Text(entry.value.title),
+                        label: SizedBox(width: 112, child: Text(entry.value.title, textAlign: TextAlign.center)),
                       ),
                     )
                     .toList()
@@ -1065,6 +1085,7 @@ class HomePageState extends State<HomePage> {
                                 unawaited(switchToPage(index));
                               },
                               labelType: NavigationRailLabelType.all,
+                              scrollable: true,
                               destinations: homeNavRailDestinations,
                               backgroundColor: scheme.surface,
                             ),
@@ -1084,6 +1105,7 @@ class HomePageState extends State<HomePage> {
                                   key: _pageStackKey,
                                   index: homeNavSelectedIndex,
                                   axis: pageTransitionAxis,
+                          reduceMotion: reduceMotion,
                                   children: pages.map((p) => p.widget).toList(),
                                 ),
                               ),
@@ -1103,6 +1125,7 @@ class HomePageState extends State<HomePage> {
                           key: _pageStackKey,
                           index: homeNavSelectedIndex,
                           axis: pageTransitionAxis,
+                          reduceMotion: reduceMotion,
                           children: pages.map((p) => p.widget).toList(),
                         ),
                       ),

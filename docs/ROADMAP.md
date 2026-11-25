@@ -1,3 +1,7 @@
+## R10-F03 — responsive interaction, homepage and accessibility
+
+Base: PR #30 `748aca044aa698648e66e7cf0feb637cee545b79`; all six full hosted workflows passed (45632972344, 45632972643, 45632972567, 45632972463, 45632972492, 45632972446). Preserve historical receipt and native acceptance-state debt. Implement swipe homepage and tactile feedback, gesture alternatives, adaptive shell/detail actions, growing dropdowns, keyboard/remote focus and reduced motion. Audit French, Turkish and Japanese keys/placeholders with explicit fallback inventory. F03 hosted analysis/runtime and physical acceptance pending. Remaining R11 (integrations, policy and history) and R12 (qualification, packaging and release).
+
 ## R10-F02 — contextual settings and regex preview
 
 Base: PR #30 `108072be51feed1a16580a7307d35dc303cbe785`; all six hosted workflows passed, including the source-bound API36 cache retry. Reset source-specific tuning drafts; preserve identity, security, tracking and credentials; use the existing explicit save/discard path. Bounded regex sample preview uses production filter/extraction semantics. Explain installer modes, tokens/proxy, scanning, certificates, source override and version detection in context. No installer-policy changes. F02 hosted and physical-device acceptance pending. Remaining R10-F03 (broader accessibility/responsive UI, homepage, haptics, TV and locale audit), R11 and R12.

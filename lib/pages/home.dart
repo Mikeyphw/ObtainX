@@ -536,7 +536,9 @@ class HomePageState extends State<HomePage> {
       }
       final selected = await chooseExternalListing(request.package);
       if (selected == null || !mounted || !navigator.mounted ||
-          !settings.r11AutomationEnabled || !appsProvider.isForeground) return;
+          !settings.r11AutomationEnabled || !appsProvider.isForeground) {
+        return;
+      }
       final approved = await showDialog<bool>(context: navigator.context,
         builder: (dialog) => AlertDialog(
           title: Text(tr('r11AutomationConfirm')),
@@ -551,7 +553,9 @@ class HomePageState extends State<HomePage> {
         ),
       );
       if (approved != true || !mounted || !navigator.mounted ||
-          !settings.r11AutomationEnabled || !appsProvider.isForeground) return;
+          !settings.r11AutomationEnabled || !appsProvider.isForeground) {
+        return;
+      }
       try {
         if (await getInstalledInfo(r11TaskerPackage, printErr: false) == null) {
           showMessage(tr('r11TaskerMissing'), isError: true);

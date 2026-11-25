@@ -198,7 +198,9 @@ class R05OperationJournal {
           if (listingKey != null && item.listingKey != listingKey) continue;
           if (!const {R05InstallStage.confirmed, R05InstallStage.failed,
               R05InstallStage.cancelled}.contains(item.stage) ||
-              !item.updatedUtc.isBefore(cutoff.toUtc())) continue;
+              !item.updatedUtc.isBefore(cutoff.toUtc())) {
+            continue;
+          }
           final file = _file(root, item.id);
           final current = await _read(file);
           if (current.encode() != item.encode()) continue;

@@ -23,3 +23,6 @@ Existing background worker honors Wi-Fi and charging constraints for automatic w
 - Installed and absent App Manager; exact package and tracker/signature UI; approved external APK handoff and negative installer paths.
 - R03/R05 journal migration and channel separation, historical export redaction, terminal-only retention, interrupted recovery.
 - Quiet-hour boundaries, clock rollback, persistent rate claim, Wi-Fi/charging and Android background restrictions; existing six workflows plus physical-device verification.
+
+## R11-HF01
+Eight strict analyzer block-style violations repaired without changing external consent, exact-listing guards, retention rules or parser rejection. Full hosted qualification of the repaired source remains pending.

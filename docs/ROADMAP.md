@@ -1,3 +1,7 @@
+## R11-HF01 — strict Dart analyzer repair
+
+Exact failed PR #30 source `2d7fbfd16c8b5a52c8bbd530e02c88d518b68675` (tree `05c400c670f0c6400fb55c97419e62f6e24e56f1`). Source integrity 45680600644 and API36 install/launch 45680600618 passed. Flutter 45680600604, RT02 45680600615, RT02B 45680600608 and RT02C 45680600659 failed strict analysis on eight `curly_braces_in_flow_control_structures` findings across home, update provider, operation journal, automation and external request parser. Add blocks without changing guard conditions, return/continue behavior, permissions or acceptance gates; guard the eight production branches with regression tests. Full hosted qualification and historical physical-device acceptance pending. Remaining R12 — final qualification, packaging and release.
+
 ## R11 — Integrations, policy and history (consolidated)
 
 Exact preimage PR #30 `120a6c708814f6bb35003ca20a8730cc891747fb`, tree `2aa0ea8490c5dc917e08e1bfb465a57a426da058`: R10-F03-HF02 passed all six hosted workflows (45672205209, 45672205128, 45672205119, 45672205143, 45672205449, 45672205129). Historical physical-device, release and native acceptance-state debt remain visible.

@@ -34,7 +34,9 @@ Future<Map<String, Object?>> r11RunAutomation(
     case R11AutomationAction.download:
       if (provider.areDownloadsRunning() || provider.updateCheckCompleter != null ||
           app.settings.getBool('trackOnly') || app.allowIdChange || isTempId(app) ||
-          app.apkUrls.isEmpty) return {'status': 'refused'};
+          app.apkUrls.isEmpty) {
+        return {'status': 'refused'};
+      }
       final confirmed = InstallReleaseSnapshot.fromApp(selection);
       final actual = InstallReleaseSnapshot.fromApp(app);
       if (!confirmed.belongsTo(app) || confirmed.version != actual.version ||

@@ -60,7 +60,9 @@ class R11AutomationRequest {
   static R11AutomationRequest? parse(Uri uri) {
     if (uri.scheme != 'obtainium' || uri.host != 'automation' ||
         uri.userInfo.isNotEmpty || uri.hasPort || uri.hasFragment ||
-        (uri.path.isNotEmpty && uri.path != '/')) return null;
+        (uri.path.isNotEmpty && uri.path != '/')) {
+      return null;
+    }
     final fields = uri.queryParametersAll;
     if (fields.length != 3 || fields.values.any((v) => v.length != 1)) {
       return null;
@@ -69,7 +71,9 @@ class R11AutomationRequest {
     final action = fields['action']?.single;
     final request = fields['request']?.single;
     if (package == null || !r11ValidPackage(package) || request == null ||
-        !RegExp(r'^[A-Za-z0-9_-]{1,64}$').hasMatch(request)) return null;
+        !RegExp(r'^[A-Za-z0-9_-]{1,64}$').hasMatch(request)) {
+      return null;
+    }
     for (final value in R11AutomationAction.values) {
       if (value.name == action) return R11AutomationRequest(package, value, request);
     }

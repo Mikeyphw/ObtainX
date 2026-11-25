@@ -687,7 +687,9 @@ extension AppsProviderUpdates on AppsProvider {
 
   Future<App?> fetchUpdate(String appId, {App? exactListing}) async {
     if (exactListing != null && (exactListing.listingKey != appId ||
-        r11ExactLiveListing(apps, exactListing) == null)) return null;
+        r11ExactLiveListing(apps, exactListing) == null)) {
+      return null;
+    }
     return SourceRequestSession.run(() => _fetchUpdateInSession(appId,
       exactListing: exactListing));
   }
@@ -696,7 +698,9 @@ extension AppsProviderUpdates on AppsProvider {
     if (exactListing != null && r11ExactLiveListing(apps, exactListing) == null) return null;
     final _FetchedAppUpdate? update = await _fetchUpdateSnapshot(appId);
     if (update == null || (exactListing != null &&
-        r11ExactLiveListing(apps, exactListing) == null)) return null;
+        r11ExactLiveListing(apps, exactListing) == null)) {
+      return null;
+    }
     return mergeFetchedUpdateWithLiveState(
       requestedApp: update.requestedApp,
       liveApp: apps[appId]?.app,

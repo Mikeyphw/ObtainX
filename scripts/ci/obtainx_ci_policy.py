@@ -162,7 +162,15 @@ ACTIONS_TESTS = (
 )
 # Closed-world narrowly understood impact groups. Shared production surfaces
 # use broader gates. Paths not covered here are deliberately FULL.
+SETTINGS_TESTS = (
+    'test/r10_settings_navigation_test.dart', 'test/about_headline_fit_test.dart',
+    'test/locale_resolution_test.dart', 'test/app_ui_scaling_test.dart',
+    'test/settings_provider_theme_accent_test.dart', 'test/bg_check_scheduling_test.dart',
+    'test/performance_recorder_test.dart',
+)
 RULES = (
+    (('lib/pages/settings.dart', 'lib/widgets/r10_settings_navigation.dart',
+      'scripts/ci/test_r10_settings_contract.py'), SETTINGS_TESTS, ()),
     (('lib/pages/apps.dart', 'lib/folders/**', 'lib/components/bulk_update_sheet.dart', 'lib/services/r09_discovery.dart'), DISCOVERY_TESTS, ()),
     (('lib/widgets/r04_actions_history_dialog.dart', 'lib/services/r04_actions_history_catalog.dart', 'lib/components/generated_form_renderer.dart', 'lib/pages/add_app.dart', 'lib/pages/additional_options_page.dart'), ACTIONS_TESTS + DISCOVERY_TESTS, ()),
     (('lib/services/r04_actions_archive_integrity.dart', 'lib/app_sources/github.dart'), ACTIONS_TESTS + DISCOVERY_TESTS, ('rt02c',)),

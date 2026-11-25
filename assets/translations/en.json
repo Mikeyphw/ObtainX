@@ -946,5 +946,11 @@
   "r09ReviewSignerDiffers": "Observed installed certificate differs (review refused)",
   "r09ReviewFilteredInventory": "APK filter excludes archive members; review refused",
   "r09ReviewObbUnsupported": "OBB delivery is not supported for this plan",
-  "r09ReviewSelectionChanged": "Reviewed selection or downloaded bytes changed; inspect again"
+  "r09ReviewSelectionChanged": "Reviewed selection or downloaded bytes changed; inspect again",
+    "r10SettingsSearch": "Search settings",
+    "r10SettingsRoutine": "Everyday settings",
+    "r10SettingsExpert": "Advanced settings",
+    "r10SettingsNoMatch": "No matching settings",
+    "r10SettingsSearchHint": "Open a settings section to make changes. Some controls depend on your device or configuration.",
+    "r10SettingsActivityCenter": "Activity Center"
 }

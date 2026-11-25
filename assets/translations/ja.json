@@ -848,5 +848,11 @@
     "action": {
         "one": "操作",
         "other": "操作"
-    }
+    },
+    "r10SettingsSearch": "設定を検索",
+    "r10SettingsRoutine": "基本設定",
+    "r10SettingsExpert": "詳細設定",
+    "r10SettingsNoMatch": "一致する設定がありません",
+    "r10SettingsSearchHint": "設定を変更するにはセクションを開いてください。一部の項目は端末や構成によって異なります。",
+    "r10SettingsActivityCenter": "アクティビティセンター"
 }

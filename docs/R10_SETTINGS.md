@@ -1,0 +1,8 @@
+# R10-F01 — Settings navigation
+
+- The SettingsPage builds the same existing `_SettingsCategory` widgets for compact and wide layouts, separating everyday and advanced groups. No preference values or source credentials are copied into search.
+- A localized search entry opens its owning section. Phone navigation expands and scrolls to the header; wide navigation uses the existing credential discard confirmation before selecting another detail pane. Conditional controls remain in their original owning section and keep their platform/installer availability rules.
+- The navigation tile shares wrap-capable text, focus feedback, expanded/selected semantics and a minimum 56 logical-pixel height across both layouts. Collapsing preserves the subtree but excludes hidden focus, taps and semantics. Animation duration is zero with platform disabled animations or the existing reduce-visual-effects preference. Large text increases the master/detail breakpoint, and unsaved compact forms cannot be dropped by widening the viewport.
+- New navigation strings have en/fr/tr/ja/pt/pt-BR parity; other supported languages use the existing fallback. Full existing translation parity is not asserted.
+- `test/r10_settings_navigation_test.dart` drives the actual search and navigation widgets. `scripts/ci/test_r10_settings_contract.py` checks production wiring, retained controls, labels, translations, and safe scoped CI impact. Physical TV/screen-reader/IME qualification remains separate.
+- R10-F02 (per-app reset, live regex preview and inline explanations) and R10-F03 (other layout clipping, swipe haptics, homepage, wider keyboard/remote coverage and locale audit) are not claimed by F01.

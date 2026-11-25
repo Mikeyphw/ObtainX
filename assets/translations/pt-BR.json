@@ -846,5 +846,11 @@
     "action": {
         "one": "Action",
         "other": "Actions"
-    }
+    },
+    "r10SettingsSearch": "Pesquisar configurações",
+    "r10SettingsRoutine": "Configurações do dia a dia",
+    "r10SettingsExpert": "Configurações avançadas",
+    "r10SettingsNoMatch": "Nenhuma configuração encontrada",
+    "r10SettingsSearchHint": "Abra uma seção para alterar as configurações. Algumas opções dependem do dispositivo ou da configuração.",
+    "r10SettingsActivityCenter": "Central de atividades"
 }

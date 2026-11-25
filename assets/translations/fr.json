@@ -859,5 +859,11 @@
     "action": {
         "one": "Action",
         "other": "Actions"
-    }
+    },
+    "r10SettingsSearch": "Rechercher dans les paramètres",
+    "r10SettingsRoutine": "Paramètres courants",
+    "r10SettingsExpert": "Paramètres avancés",
+    "r10SettingsNoMatch": "Aucun paramètre correspondant",
+    "r10SettingsSearchHint": "Ouvrez une section pour modifier ses paramètres. Certaines options dépendent de votre appareil ou de sa configuration.",
+    "r10SettingsActivityCenter": "Centre d’activité"
 }

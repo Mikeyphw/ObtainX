@@ -848,5 +848,11 @@
     "action": {
         "one": "Eylem",
         "other": "Eylemler"
-    }
+    },
+    "r10SettingsSearch": "Ayarlarda ara",
+    "r10SettingsRoutine": "Temel ayarlar",
+    "r10SettingsExpert": "Gelişmiş ayarlar",
+    "r10SettingsNoMatch": "Eşleşen ayar bulunamadı",
+    "r10SettingsSearchHint": "Değişiklik yapmak için ilgili ayar bölümünü açın. Bazı seçenekler cihazınıza veya yapılandırmanıza bağlıdır.",
+    "r10SettingsActivityCenter": "Etkinlik merkezi"
 }

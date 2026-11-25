@@ -213,6 +213,28 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('R09 groups two sources by package and retains separate rows', (tester) async {
+    final primary = provider.apps['org.example.steady']!;
+    provider.apps['secondary'] = AppInMemory(
+      primary.app.copyWith(listingId: 'org.example.steady@second',
+        name: 'Steady Beta', url: 'https://github.com/example/steady-beta'),
+      null, null, primary.icon);
+    provider.apps.remove('org.example.moved');
+    provider.apps.remove('org.example.blocked');
+    settings.appsListGroupBy = AppsListGroupBy.package;
+    await openApps(tester);
+    final groups = tester.widgetList<M3eCollapsibleGroupHeader>(
+      find.byType(M3eCollapsibleGroupHeader));
+    final group = groups.singleWhere((header) => header.title.startsWith('org.example.steady ·'));
+    expect(group.count, 2);
+    expect(find.text('Steady'), findsOneWidget);
+    expect(find.text('Steady Beta'), findsOneWidget);
+    expect(find.text(tr('r09CheckVisible')), findsOneWidget);
+    expect(find.text(tr('r09UpdateAll')), findsOneWidget);
+    expect(provider.apps.listingsForPackage('org.example.steady'), hasLength(2));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   test('a stored filter miss explains itself', () {
     final App blocked = provider.apps['org.example.blocked']!.app;
     final notice = needsAttentionPageNotice(blocked);

@@ -717,6 +717,7 @@ class _AdditionalOptionsPageState extends State<AdditionalOptionsPage> {
                     sliver: SliverToBoxAdapter(
                       child: GeneratedForm(
                         items: _items,
+                        assistSourceUrl: appInMem?.app.url,
                         outlinedInputFields: true,
                         prominentSectionHeaders: true,
                         wrapFormSectionsInCards: true,

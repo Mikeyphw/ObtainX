@@ -1,3 +1,13 @@
+# ObtainX — R09-F01 discovery candidate (25 November 2026)
+
+**Exact preimage:** PR #30 `e3960a6779f9139c72810748c1001198d82e8f94`, tree `b502f623e796eaf747aebff2ee4024fff2c3399e`. All six prior-head required workflows passed (45528116294, 45528116304, 45528116492, 45528116325, 45528116334, 45528116315). RT02C real five archives, two refusals and independent receipts passed. R09 does not inherit this hosted qualification.
+
+**R09 scope:** existing view options with presets; distinct check/update review; combined app search and smart-folder persistence; opt-in package grouping and conflict-safe listing selection; bound Actions history and APK compatibility/trust preview; accurate scope state labels. See `docs/R09_DISCOVERY.md`. R09 source gates and hosted tests remain mandatory; no local Gradle. Unknown metadata remains explicitly unknown; optional grid deferred.
+
+**Remaining:** R02 physical/backend acceptance; R07 Activity Center acceptance; R08 provider acceptance; R09-F01 hosted/device acceptance and R09-F02 verified artifact metadata/inspection; R10 settings/accessibility; R11 integrations/policy/history; R12 qualification/packaging/release. No direct main write.
+
+---
+
 # ObtainX — R08-F06 / RT02C-HF13 analyzer and integration scope repair (25 November 2026)
 
 **Preimage:** PR #30 `ab089d69760468c1520765de2a6cd92e9dd0e630`.

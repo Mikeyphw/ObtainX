@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:obtainium/providers/source_provider.dart';
+import 'package:obtainium/services/r09_discovery.dart';
 
 enum FolderRuleField { name, author, category, source }
 
@@ -71,6 +72,7 @@ class FolderTextCriterion {
 }
 
 class FolderCriteria {
+  final String searchQuery;
   final FolderTextCriterion? name;
   final FolderTextCriterion? author;
   final Set<String> includedCategories;
@@ -84,6 +86,7 @@ class FolderCriteria {
   final FolderConditionIntent trackOnlyIntent;
 
   FolderCriteria({
+    this.searchQuery = '',
     this.name,
     this.author,
     Set<String> includedCategories = const {},
@@ -99,6 +102,7 @@ class FolderCriteria {
        excludedCategories = Set<String>.from(excludedCategories);
 
   bool get isEmpty =>
+      searchQuery.trim().isEmpty &&
       (name == null || name!.isEmpty) &&
       (author == null || author!.isEmpty) &&
       includedCategories.isEmpty &&
@@ -109,7 +113,7 @@ class FolderCriteria {
       trackOnlyIntent == FolderConditionIntent.neutral;
 
   int get activeConditionCount {
-    var count = 0;
+    var count = searchQuery.trim().isEmpty ? 0 : 1;
     if (name != null && !name!.isEmpty) count++;
     if (author != null && !author!.isEmpty) count++;
     if (includedCategories.isNotEmpty || excludedCategories.isNotEmpty) count++;
@@ -126,6 +130,10 @@ class FolderCriteria {
     required bool isUpToDate,
   }) {
     if (isEmpty) return false;
+    if (!r09MatchesSearch(searchQuery, name: app.finalName, packageId: app.id,
+        source: sourceIdentifier, sourceUrl: app.url, categories: app.categories)) {
+      return false;
+    }
     if (name != null && !name!.matches(app.finalName)) return false;
     if (author != null && !author!.matches(app.finalAuthor)) return false;
     if (source != null && !source!.matches(sourceIdentifier)) return false;
@@ -182,6 +190,7 @@ class FolderCriteria {
   }
 
   Map<String, dynamic> toJson() => {
+    if (searchQuery.trim().isNotEmpty) 'searchQuery': searchQuery,
     if (name != null && !name!.isEmpty) 'name': name!.toJson(),
     if (author != null && !author!.isEmpty) 'author': author!.toJson(),
     if (includedCategories.isNotEmpty)
@@ -220,6 +229,7 @@ class FolderCriteria {
     }
 
     return FolderCriteria(
+      searchQuery: json['searchQuery'] as String? ?? '',
       name: textCriterion('name'),
       author: textCriterion('author'),
       includedCategories: Set<String>.from(

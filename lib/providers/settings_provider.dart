@@ -69,7 +69,7 @@ enum SortColumnSettings {
 
 enum SortOrderSettings { ascending, descending }
 
-enum AppsListGroupBy { none, category, source, appType, updateStatus }
+enum AppsListGroupBy { none, category, source, appType, updateStatus, package }
 
 enum SwipeAction { update, pin, appOptions, delete, open, appInfo, edit, none }
 

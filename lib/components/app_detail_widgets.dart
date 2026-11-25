@@ -5,6 +5,7 @@ import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
+import 'package:obtainium/services/r09_discovery.dart';
 import 'package:obtainium/theme/app_dialog_theme.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher_string.dart';
@@ -116,9 +117,32 @@ class _AppFilePickerState extends State<AppFilePicker> {
     if (widget.pickAnyAsset) {
       urlsToSelectFrom = [...urlsToSelectFrom, ...widget.app.otherAssetUrls];
     }
-    fileUrl ??=
-        widget.initVal ??
-        (urlsToSelectFrom.isNotEmpty ? urlsToSelectFrom.first : null);
+    final archs = widget.archs ?? const <String>[];
+    bool allowed(MapEntry<String, String> asset) => widget.pickAnyAsset ||
+        r09ActionsEligible(asset, widget.app.additionalSettings, widget.app.url, DateTime.now());
+    R09ArtifactChoice choice(MapEntry<String, String> asset) {
+      final result = r09ArtifactChoice(asset.key, archs, downloadOnly: widget.pickAnyAsset);
+      return allowed(asset) ? result : R09ArtifactChoice(false, result.abiHints,
+          result.role, 'r09ExpiredOrUnbound');
+    }
+    fileUrl = r09ChooseArtifact(urlsToSelectFrom, archs, fileUrl ?? widget.initVal,
+        downloadOnly: widget.pickAnyAsset, allowed: allowed);
+    String details(MapEntry<String, String> asset) {
+      final info = choice(asset);
+      final preferred = widget.app.preferredApkIndex;
+      final knownSize = preferred >= 0 && preferred < widget.app.apkUrls.length &&
+          widget.app.apkUrls[preferred].key == asset.key &&
+          widget.app.apkUrls[preferred].value == asset.value ? widget.app.apkSizeBytes : null;
+      final evidence = widget.app.additionalSettings['r04ActionsArchiveEvidence'];
+      final trust = evidence is Map && evidence['sourceUrl'] == widget.app.url &&
+          evidence['archiveUrl'] == asset.value && evidence['archiveName'] == asset.key
+          ? '\n${tr('r09ZipDigest')}: ${evidence['archiveSha256'] ?? tr('unknown')}\n'
+            '${tr('r09Expires')}: ${evidence['expiresAt'] ?? tr('unknown')}'
+          : '';
+      return '${tr(info.role)} · ${tr(info.reason)}\n'
+          '${tr('r09AbiHint')}: ${info.abiHints.isEmpty ? tr('unknown') : info.abiHints.join(', ')}\n'
+          '${tr('r09ArtifactSize')}: ${knownSize == null ? tr('unknown') : '$knownSize B'}$trust';
+    }
     return AlertDialog(
       scrollable: true,
       title: Text(
@@ -126,17 +150,16 @@ class _AppFilePickerState extends State<AppFilePicker> {
             ? tr('selectX', args: [lowerCaseIfEnglish(tr('releaseAsset'))])
             : tr('pickAnAPK'),
       ),
-      content: fileUrl == null
-          ? const SizedBox.shrink()
-          : RadioGroup<String>(
-              groupValue: fileUrl!.value,
-              onChanged: (String? val) {
-                setState(() {
-                  fileUrl = urlsToSelectFrom.firstWhere(
-                    (e) => e.value == val,
-                    orElse: () => urlsToSelectFrom.first,
-                  );
-                });
+      content: urlsToSelectFrom.isEmpty
+          ? Text(tr('r09NoSource'))
+          : RadioGroup<int>(
+              groupValue: fileUrl == null ? null : urlsToSelectFrom.indexWhere(
+                (asset) => asset.key == fileUrl?.key && asset.value == fileUrl?.value),
+              onChanged: (int? val) {
+                if (val != null && val >= 0 && val < urlsToSelectFrom.length &&
+                    choice(urlsToSelectFrom[val]).eligible) {
+                  setState(() { fileUrl = urlsToSelectFrom[val]; });
+                }
               },
               child: Column(
                 children: [
@@ -148,26 +171,29 @@ class _AppFilePickerState extends State<AppFilePicker> {
                           ),
                         )
                       : const SizedBox.shrink(),
+                  Text('${tr('r09TrackedPackage')}: ${widget.app.id} · ${widget.app.latestVersion}\n${tr('r09MetadataPending')}'),
                   const SizedBox(height: 16),
                   if (isTV)
                     ...urlsToSelectFrom.asMap().entries.map(
                       (entry) => ListTile(
-                        autofocus: entry.key == 0,
-                        leading: Radio<String>(value: entry.value.value),
+                        autofocus: choice(entry.value).eligible && fileUrl?.key == entry.value.key && fileUrl?.value == entry.value.value,
+                        leading: choice(entry.value).eligible ? Radio<int>(value: entry.key) : const Icon(Icons.block),
                         title: Text(entry.value.key),
-                        selected: fileUrl?.value == entry.value.value,
-                        onTap: () {
-                          setState(() {
-                            fileUrl = entry.value;
-                          });
-                        },
+                        subtitle: Text(details(entry.value)),
+                        enabled: choice(entry.value).eligible,
+                        selected: fileUrl?.key == entry.value.key && fileUrl?.value == entry.value.value,
+                        onTap: choice(entry.value).eligible ? () {
+                          setState(() { fileUrl = entry.value; });
+                        } : null,
                       ),
                     )
                   else
-                    ...urlsToSelectFrom.map(
-                      (u) => RadioListTile<String>(
-                        title: Text(u.key),
-                        value: u.value,
+                    ...urlsToSelectFrom.asMap().entries.map(
+                      (entry) => RadioListTile<int>(
+                        title: Text(entry.value.key),
+                        subtitle: Text(details(entry.value)),
+                        enabled: choice(entry.value).eligible,
+                        value: entry.key,
                       ),
                     ),
                   if (widget.archs != null) const SizedBox(height: 16),
@@ -195,11 +221,16 @@ class _AppFilePickerState extends State<AppFilePicker> {
           child: Text(tr('cancel')),
         ),
         FilledButton(
-          autofocus: isTV && urlsToSelectFrom.isEmpty,
-          onPressed: fileUrl != null
+          autofocus: isTV && fileUrl == null,
+          onPressed: fileUrl != null && choice(fileUrl!).eligible
               ? () {
+                  final selected = fileUrl;
+                  if (selected == null || !choice(selected).eligible) {
+                    setState(() {});
+                    return;
+                  }
                   context.read<SettingsProvider>().selectionClick();
-                  Navigator.of(context).pop(fileUrl);
+                  Navigator.of(context).pop(selected);
                 }
               : null,
           child: Text(tr('continue')),

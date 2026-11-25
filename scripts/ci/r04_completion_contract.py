@@ -85,7 +85,7 @@ def verify(root: Path = ROOT) -> int:
       'if (actual != expected)', 'await archive.delete()',
       'runAttempt is! int', 'artifactId is! int',
       "rawEvidence['expiresAt']",
-      'expiresAt == null || !expiresAt.isAfter(DateTime.now().toUtc())',
+      'expiresAt == null || !expiresAt.isAfter(now.toUtc())',
     ))
     require(FILES[5], (
       'r04ArtifactIdKey', 'r04RunAttemptKey', 'r04CommitShaKey',

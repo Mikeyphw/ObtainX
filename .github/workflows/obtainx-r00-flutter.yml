@@ -132,6 +132,8 @@ jobs:
         run: flutter test --no-pub test/r07_activity_center_test.dart
       - name: R08 source reliability named regressions
         run: flutter test --no-pub test/r08_source_regressions_test.dart
+      - name: R09 discovery and artifact selection regressions
+        run: flutter test --no-pub test/r09_discovery_test.dart test/needs_attention_group_test.dart
       - name: Execute R01 adversarial archive fixtures first
         run: flutter test --no-pub test/archive_extraction_security_test.dart
       - name: Execute R02 bundle and split-session contract tests

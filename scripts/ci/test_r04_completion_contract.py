@@ -70,7 +70,7 @@ class R04FinalMutationTests(unittest.TestCase):
           'await disableR04Verification(')
     def test_remove_expired_receipt_gate(self):
         self.mutated('lib/services/r04_actions_archive_integrity.dart',
-          'expiresAt == null || !expiresAt.isAfter(DateTime.now().toUtc())',
+          'expiresAt == null || !expiresAt.isAfter(now.toUtc())',
           'false')
     def test_remove_persisted_expiry_receipt(self):
         self.mutated('lib/app_sources/github.dart',

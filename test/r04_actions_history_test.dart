@@ -135,6 +135,7 @@ void main() {
         chosen = await showDialog<R04ActionsHistoryItem>(context: context,
           builder: (_) => R04ActionsHistoryDialog(
             initialRepositoryUrl: 'https://github.com/o/r',
+            now: () => utc,
             loadHistory: (repo, branch, workflow) => mock.catalog().history(
               branch: branch, workflow: workflow),
           ));
@@ -150,4 +151,43 @@ void main() {
     await tester.pumpAndSettle();
     expect(chosen?.artifactId, 41);
   });
+
+  testWidgets('R09 history cannot select an expired artifact or stale branch', (tester) async {
+    final mock = MockActions();
+    var clock = utc;
+    R04ActionsHistoryItem? chosen;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(
+      builder: (context) => FilledButton(onPressed: () async {
+        chosen = await showDialog<R04ActionsHistoryItem>(context: context,
+          builder: (_) => R04ActionsHistoryDialog(
+            initialRepositoryUrl: 'https://github.com/o/r',
+            now: () => clock,
+            loadHistory: (repo, branch, workflow) => mock.catalog().history(
+              branch: branch, workflow: workflow),
+          ));
+      }, child: const Text('Open browser')),
+    ))));
+    await tester.tap(find.text('Open browser'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byType(TextField).first).readOnly, isTrue);
+    await tester.tap(find.text('Browse runs'));
+    await tester.pumpAndSettle();
+    expect(find.text('Select'), findsOneWidget);
+    clock = DateTime.utc(2026, 11, 19);
+    await tester.tap(find.text('Select'));
+    await tester.pumpAndSettle();
+    expect(chosen, isNull);
+    expect(find.text('Select'), findsNothing);
+    clock = utc;
+    await tester.tap(find.text('Browse runs'));
+    await tester.pumpAndSettle();
+    expect(find.text('Select'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).at(1), 'different');
+    await tester.pumpAndSettle();
+    expect(find.text('Select'), findsNothing);
+    expect(chosen, isNull);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+  });
+
 }

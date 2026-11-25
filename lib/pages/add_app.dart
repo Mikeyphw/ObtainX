@@ -1914,6 +1914,7 @@ class AddAppPageState extends State<AddAppPage> {
             prominentSectionHeaders: true,
             wrapFormSectionsInCards: true,
             items: buildAdditionalSettingsItems(),
+            assistSourceUrl: userInput.trim(),
             onValueChanges: (values, valid, isBuilding) {
               if (!isBuilding) {
                 setState(() {

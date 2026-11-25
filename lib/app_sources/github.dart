@@ -1498,14 +1498,23 @@ class GitHub extends AppSource {
     Map<String, dynamic> values,
   ) async {
     final source = GitHub();
+    final String boundRepository;
+    try {
+      boundRepository = source.standardizeUrl((values['r09BoundSourceUrl'] ?? '').toString());
+    } catch (_) {
+      showMessage('Enter a valid GitHub repository before browsing runs.');
+      return;
+    }
     final chosen = await showDialog<R04ActionsHistoryItem>(
       context: context,
       builder: (dialogContext) => R04ActionsHistoryDialog(
-        initialRepositoryUrl: (values['url'] ?? values['sourceUrl'] ??
-          values['appUrl'] ?? '').toString(),
+        initialRepositoryUrl: boundRepository,
         initialBranch: (values[r04BranchKey] ?? '').toString(),
         initialWorkflow: (values[r04WorkflowKey] ?? '').toString(),
         loadHistory: (repositoryUrl, branch, workflow) async {
+          if (repositoryUrl != boundRepository) {
+            throw const R04ActionsFailure('history repository changed');
+          }
           final uri = Uri.tryParse(repositoryUrl);
           if (uri == null || uri.scheme != 'https' ||
               uri.host != 'github.com' || uri.userInfo.isNotEmpty ||
@@ -1534,7 +1543,7 @@ class GitHub extends AppSource {
         },
       ),
     );
-    if (!context.mounted || chosen == null || !chosen.canSelect) {
+    if (!context.mounted || chosen == null || !chosen.canSelectAt(DateTime.now())) {
       return;
     }
     patch({

@@ -35,6 +35,7 @@ import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/r05_operation_journal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
+import 'package:obtainium/services/r09_discovery.dart';
 import 'package:obtainium/services/install_precommit_gate.dart';
 import 'package:obtainium/services/r02f_p05_device_profile.dart';
 import 'package:obtainium/services/verified_obb_delivery.dart';
@@ -1863,6 +1864,10 @@ extension AppsProviderInstall on AppsProvider {
     }
     final List<String> archs =
         (await DeviceInfoPlugin().androidInfo).supportedAbis;
+    bool allowed(MapEntry<String, String> asset) => pickAnyAsset ||
+        r09ActionsEligible(asset, app.additionalSettings, app.url, DateTime.now());
+    appFileUrl = r09ChooseArtifact(urlsToSelectFrom, archs, appFileUrl,
+        downloadOnly: pickAnyAsset, allowed: allowed);
 
     final NavigatorState? navigator = allowUserInteraction
         ? globalNavigatorKey.currentState
@@ -1885,6 +1890,8 @@ extension AppsProviderInstall on AppsProvider {
         },
       );
     }
+    if (appFileUrl != null && (!allowed(appFileUrl) || !r09ArtifactChoice(appFileUrl.key, archs,
+        downloadOnly: pickAnyAsset).eligible)) return null;
     String? getHost(String url) {
       if (url == 'placeholder') {
         return null;
@@ -1994,6 +2001,14 @@ extension AppsProviderInstall on AppsProvider {
       }
     }
 
+    final packages = <String, String>{
+      for (final id in appIds)
+        if (apps[id] != null && apps[id]!.app.additionalSettings['trackOnly'] != true)
+          id: apps[id]!.app.id,
+    };
+    if (r09SafeBulkSelection(appIds, packages).length != appIds.toSet().length) {
+      throw ObtainiumError(tr('r09ConflictingListings'));
+    }
     var (appsToInstall, trackOnlyAppsToUpdate) = await _resolveAppsToInstall(
       appIds,
       allowUserInteraction,

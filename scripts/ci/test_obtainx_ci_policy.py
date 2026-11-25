@@ -10,7 +10,8 @@ class CISelection(unittest.TestCase):
     def test_docs_only_uses_source(self):
         x=classify(['docs/README.md']); self.assertFalse(x['full_flutter']); self.assertFalse(x['targeted_flutter']); self.assertTrue(x['source_contracts'])
     def test_regular_flutter_is_targeted(self):
-        x=classify(['lib/components/app_detail_widgets.dart']); self.assertTrue(x['targeted_flutter']); self.assertFalse(x['full_flutter'])
+        x=classify(['lib/components/app_card.dart']); self.assertTrue(x['targeted_flutter']); self.assertFalse(x['full_flutter'])
+        self.assertTrue(classify(['lib/components/app_detail_widgets.dart'])['full_flutter'])
     def test_test_only_is_targeted(self):
         x=classify(['test/example_test.dart']); self.assertTrue(x['targeted_flutter'])
     def test_installer_source_requires_full(self):

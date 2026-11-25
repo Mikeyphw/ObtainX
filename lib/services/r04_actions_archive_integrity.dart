@@ -27,6 +27,37 @@ Future<void> verifyR04ActionsArchiveBeforeExtraction({
   if (additionalSettings['r04GitHubSourceMode'] != 'actions') {
     return; // Normal GitHub releases are governed by their existing gates.
   }
+  final expected = r04ValidateArchiveIdentity(
+    additionalSettings: additionalSettings, sourceUrl: sourceUrl,
+    selectedAssetUrl: selectedAssetUrl, selectedAssetName: selectedAssetName,
+    now: DateTime.now(),
+  );
+  final entityType = await FileSystemEntity.type(archive.path, followLinks: false);
+  if (entityType != FileSystemEntityType.file) {
+    throw const R04ArchiveIntegrityFailure('archive is not a regular file');
+  }
+  // Stream the actual stored bytes. Never trust Content-Length, ETag, a cached
+  // "download complete" status, or a directory/archive name as ZIP integrity.
+  final actual = (await sha256.bind(archive.openRead()).first).toString();
+  if (actual != expected) {
+    // The caller owns this downloaded APK-cache file, not the original source.
+    // Discard mismatching bytes so a later retry cannot reuse a poisoned cache.
+    if (await FileSystemEntity.type(archive.path, followLinks: false) ==
+        FileSystemEntityType.file) {
+      await archive.delete();
+    }
+    throw const R04ArchiveIntegrityFailure('archive SHA-256 mismatch; discarded');
+  }
+}
+
+/// Shared receipt gate for selection and the actual bytes verifier.
+String r04ValidateArchiveIdentity({
+  required Map<String, dynamic> additionalSettings,
+  required String sourceUrl,
+  required String selectedAssetUrl,
+  required String selectedAssetName,
+  required DateTime now,
+}) {
   final rawEvidence = additionalSettings[r04ActionsArchiveEvidenceKey];
   if (rawEvidence is! Map) {
     throw const R04ArchiveIntegrityFailure('missing source-bound archive receipt');
@@ -56,7 +87,7 @@ Future<void> verifyR04ActionsArchiveBeforeExtraction({
       !RegExp(r'^[a-f0-9]{40}$').hasMatch(commitSha)) {
     throw const R04ArchiveIntegrityFailure('stale or invalid archive receipt');
   }
-  if (expiresAt == null || !expiresAt.isAfter(DateTime.now().toUtc())) {
+  if (expiresAt == null || !expiresAt.isAfter(now.toUtc())) {
     throw const R04ArchiveIntegrityFailure('Actions artifact expired before extraction');
   }
   final canonical = Uri.tryParse(selectedAssetUrl);
@@ -80,20 +111,5 @@ Future<void> verifyR04ActionsArchiveBeforeExtraction({
           '/repos/${repoParts[0]}/${repoParts[1]}/actions/artifacts/$artifactId/zip') {
     throw const R04ArchiveIntegrityFailure('noncanonical Actions artifact URL');
   }
-  final entityType = await FileSystemEntity.type(archive.path, followLinks: false);
-  if (entityType != FileSystemEntityType.file) {
-    throw const R04ArchiveIntegrityFailure('archive is not a regular file');
-  }
-  // Stream the actual stored bytes. Never trust Content-Length, ETag, a cached
-  // "download complete" status, or a directory/archive name as ZIP integrity.
-  final actual = (await sha256.bind(archive.openRead()).first).toString();
-  if (actual != expected) {
-    // The caller owns this downloaded APK-cache file, not the original source.
-    // Discard mismatching bytes so a later retry cannot reuse a poisoned cache.
-    if (await FileSystemEntity.type(archive.path, followLinks: false) ==
-        FileSystemEntityType.file) {
-      await archive.delete();
-    }
-    throw const R04ArchiveIntegrityFailure('archive SHA-256 mismatch; discarded');
-  }
+  return expected;
 }

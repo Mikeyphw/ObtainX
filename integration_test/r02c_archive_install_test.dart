@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:obtainium/installers/stock_installer.dart';
+import 'package:obtainium/installers/r02f_p03_cancellable_stock.dart';
+import 'package:obtainium/services/install_precommit_gate.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
@@ -16,6 +18,7 @@ const controlToken = String.fromEnvironment('OX_R02C_CONTROL_TOKEN');
 const scenarios = ['apks', 'apkm', 'xapk', 'zip', 'tar.gz', 'traversal', 'ambiguous'];
 const baseSha = String.fromEnvironment('OX_R02C_BASE_SHA');
 const splitSha = String.fromEnvironment('OX_R02C_SPLIT_SHA');
+const v1Sha = String.fromEnvironment('OX_R02C_V1_SHA');
 const fixturePort = 18782;
 
 const limits = ArchiveExtractionLimits(
@@ -64,7 +67,7 @@ Future<File> downloadVerifiedArchive(String fileName, Directory folder, String a
   }
 }
 
-Future<Map<String, dynamic>> control(String route, String name, {String? result}) async {
+Future<Map<String, dynamic>> control(String route, String name, {String? result, int? sessionId}) async {
   if (!scenarios.contains(name) || controlToken.length != 48) {
     throw StateError('Unauthenticated RT02C boundary request');
   }
@@ -73,7 +76,8 @@ Future<Map<String, dynamic>> control(String route, String name, {String? result}
     final request = await client.postUrl(Uri.parse('http://127.0.0.1:$fixturePort/rt02c/$route'));
     request.headers.contentType = ContentType.json;
     request.headers.set('X-RT02C-Token', controlToken);
-    final body = <String, String>{'case': name};
+    final body = <String, Object>{'case': name};
+    if (sessionId != null) body['owned_session_id'] = sessionId;
     if (result != null) {
       body['result'] = result;
     }
@@ -95,7 +99,71 @@ Future<Map<String, dynamic>> control(String route, String name, {String? result}
   }
 }
 
-Future<void> runScenario(String caseName, String archiveSha) async {
+// Use the same sealed, app-owned foreground StockInstaller handoff that
+// AppsProvider uses for an explicitly initiated install. The legacy plugin
+// requests silent install and delivers pending-action status via an Activity
+// intent; this is not the foreground session contract used by the app.
+Future<int> installOwnedArchive(String caseName, List<String> paths) async {
+  final bridge = R02fP03CancellableStock.instance;
+  final before = await bridge.snapshot().timeout(const Duration(seconds: 10));
+  expect(before['active'], isNull, reason: 'No unresolved native session before install');
+  final listing = 'rt02c:${sha256.convert(utf8.encode(controlToken))}:$caseName';
+  final owner = InstallPrecommitGate(listing, scenarios.indexOf(caseName) + 1);
+  expect(owner.sealForHandoff(nativeCancelable: true), isTrue);
+  try {
+    final result = await StockInstaller(SettingsProvider()).installApk(
+        paths, appId: packageName,
+        installOptions: {'r02fP03Gate': owner}).timeout(const Duration(seconds: 195));
+    expect(result.isSuccess, isTrue,
+        reason: 'Owned Android session must commit both signed members');
+    final state = await bridge.snapshot().timeout(const Duration(seconds: 10));
+    expect(state['active'], isNull, reason: 'Native session must have settled');
+    final terminal = state['terminal'] as Map<String, dynamic>?;
+    if (terminal == null) throw StateError('Native terminal receipt missing');
+    expect(terminal['listingKey'], listing);
+    expect(terminal['packageName'], packageName);
+    expect(terminal['outcome'], 'success');
+    expect(terminal['detail'], 'ANDROID_STATUS_0');
+    expect(terminal['cancelRequested'], isFalse);
+    final sessionId = terminal['sessionId'];
+    if (sessionId is! int || sessionId <= 0) {
+      throw StateError('Invalid native session identity');
+    }
+    expect(owner.isFinished, isTrue);
+    final baseline = jsonDecode(terminal['baseline'] as String) as Map<String, dynamic>;
+    final after = jsonDecode(terminal['after'] as String) as Map<String, dynamic>;
+    expect(baseline['present'], isTrue);
+    expect(baseline['versionCode'], 1);
+    expect(baseline['baseSha256'], v1Sha);
+    expect(baseline['splitSha256'], isEmpty);
+    expect(after['present'], isTrue);
+    expect(after['versionCode'], 2);
+    expect(after['baseSha256'], baseSha);
+    expect(after['splitSha256'], [splitSha]);
+    return sessionId;
+  } finally {
+    // Keep diagnostics bounded: never expose the operation token, paths,
+    // raw native journal or platform exception text to the hosted artifact.
+    try {
+      final state = await bridge.snapshot().timeout(const Duration(seconds: 5));
+      final active = state['active'] as Map<String, dynamic>?;
+      final terminal = state['terminal'] as Map<String, dynamic>?;
+      const allowed = {'staged', 'committing', 'approval', 'cancel_uncertain'};
+      final phase = active == null ? 'NO_ACTIVE_SESSION' :
+          active['listingKey'] == listing && allowed.contains(active['state'])
+          ? (active['state'] as String).toUpperCase() : 'UNVERIFIED_ACTIVE';
+      const outcomes = {'success', 'cancelled', 'unknown', 'error'};
+      final outcome = terminal != null && terminal['listingKey'] == listing &&
+          outcomes.contains(terminal['outcome'])
+          ? (terminal['outcome'] as String).toUpperCase() : 'NO_MATCHING_TERMINAL';
+      debugPrint('OX_R02C_NATIVE_STATE=$phase TERMINAL=$outcome');
+    } catch (_) {
+      debugPrint('OX_R02C_NATIVE_STATE=UNAVAILABLE TERMINAL=UNAVAILABLE');
+    }
+  }
+}
+
+Future<int?> runScenario(String caseName, String archiveSha) async {
     debugPrint('OX_R02C_DART_STAGE=SCENARIO_STARTED case=$caseName');
     final fileName = fixtureName(caseName);
     final temp = await Directory.systemTemp.createTemp('ox-rt02c-');
@@ -108,7 +176,7 @@ Future<void> runScenario(String caseName, String archiveSha) async {
         expect(Directory(destination).existsSync(), isFalse,
             reason: 'Unsafe archive must never publish extraction');
         debugPrint('OX_R02C_DART_STAGE=PREINSTALL_REFUSED');
-        return;
+        return null;
       }
       if (caseName == 'tar.gz') {
         await extractTarballOffIsolate(input.path, destination, limits: limits);
@@ -137,7 +205,7 @@ Future<void> runScenario(String caseName, String archiveSha) async {
           supportedAbis: const ['x86_64'], deviceSdkVersion: 36,
           expectedPackageName: packageName), throwsA(isA<FormatException>()));
         debugPrint('OX_R02C_DART_STAGE=PREINSTALL_REFUSED');
-        return;
+        return null;
       }
       final format = installArtifactFormat(fileName);
       expect(format, isNotNull);
@@ -148,13 +216,12 @@ Future<void> runScenario(String caseName, String archiveSha) async {
       expect(plan.versionCode, 2);
       expect(plan.sessionPaths.length, 2);
       expect(plan.requiresSplitSession, isTrue);
-      await control('call', caseName); // Authorize real installer only for positive cases.
+      final authorization = await control('call', caseName);
+      expect(authorization['authorized'], isTrue);
       debugPrint('OX_R02C_DART_STAGE=INSTALL_CALL');
-      final result = await StockInstaller(SettingsProvider()).installApk(
-          plan.sessionPaths, appId: packageName).timeout(const Duration(minutes: 3));
+      final sessionId = await installOwnedArchive(caseName, plan.sessionPaths);
       debugPrint('OX_R02C_DART_STAGE=INSTALL_RETURNED');
-      expect(result.isSuccess, isTrue,
-          reason: 'Android must commit both signed members as one session');
+      return sessionId;
     } finally {
       if (temp.existsSync()) await temp.delete(recursive: true);
     }
@@ -164,14 +231,18 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('RT02C seven real independently attested archive cases', (tester) async {
     if (!Platform.isAndroid) throw StateError('RT02C Android-only');
+    expect(RegExp(r'^[a-f0-9]{64}$').hasMatch(v1Sha), isTrue);
+    expect({v1Sha, baseSha, splitSha}.length, 3);
     for (final name in scenarios) {
       final prepared = await control('prepare', name);
       if (prepared['case'] != name || prepared['archive_sha256'] is! String) {
         throw StateError('Host preparation receipt missing');
       }
-      await runScenario(name, prepared['archive_sha256'] as String);
+      final sessionId = await runScenario(name, prepared['archive_sha256'] as String);
+      final negative = name == 'traversal' || name == 'ambiguous';
+      expect(sessionId == null, negative);
       final result = await control('finish', name,
-          result: name == 'traversal' || name == 'ambiguous' ? 'refused' : 'installed');
+          result: negative ? 'refused' : 'installed', sessionId: sessionId);
       if (result['verified'] != true) throw StateError('Android attestation missing');
     }
   }, timeout: const Timeout(Duration(minutes: 100)));

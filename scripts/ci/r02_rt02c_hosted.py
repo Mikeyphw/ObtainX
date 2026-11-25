@@ -72,6 +72,15 @@ def baseline_v1(fixtures:Path)->dict:
     return {'version_code':1,'installed_path_count':1,'base_sha256':expected,
             'installed_original_intact':True}
 
+def native_session_observation(text:str)->dict:
+    # Never export raw logs or previous-case native state. Only fixed enums.
+    current=text.rsplit('OX_R02C_DART_STAGE=SCENARIO_STARTED',1)[-1]
+    matches=re.findall(r'(?m)^.*?OX_R02C_NATIVE_STATE=(STAGED|COMMITTING|APPROVAL|CANCEL_UNCERTAIN|NO_ACTIVE_SESSION|UNVERIFIED_ACTIVE|UNAVAILABLE) TERMINAL=(SUCCESS|CANCELLED|UNKNOWN|ERROR|NO_MATCHING_TERMINAL|UNAVAILABLE)\s*$',current)
+    if len(matches)!=1:
+        return {'active':'NOT_OBSERVED','terminal':'NOT_OBSERVED'}
+    active,terminal=matches[0]
+    return {'active':active,'terminal':terminal}
+
 def flutter_failure(text:str, *, phase:str|None=None, approvals:int=0)->str:
     """Classify the failing phase, never a historical successful build line."""
     markers={'SCENARIO_STARTED':'DART_TEST_STARTED',
@@ -192,7 +201,7 @@ def execute(out:Path)->int:
              'hosted_emulator_only':True,'physical_device_qualified':False,
              'full_r02_matrix_qualified':False,'user_facing_import_qualified':False,
              'release_qualified':False,'publication_allowed':False,
-             'backend':'production StockInstaller','cases':[]}
+             'backend':'production StockInstaller','installer_route':'owned_foreground_session','cases':[]}
     rp=out/RECEIPT;rp.write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
     fixtures=out/'fixtures'
     inv=json.loads((fixtures/'rt02c_inventory.json').read_text())
@@ -232,7 +241,8 @@ def verify(out:Path)->int:
         'source_sha':source,'run_id':run,'hosted_emulator_only':True,
         'physical_device_qualified':False,'full_r02_matrix_qualified':False,
         'user_facing_import_qualified':False,'release_qualified':False,
-        'publication_allowed':False,'backend':'production StockInstaller'}
+        'publication_allowed':False,'backend':'production StockInstaller',
+        'installer_route':'owned_foreground_session'}
     for key,value in expected.items():need(obj.get(key)==value,'source-bound receipt invalid: '+key)
     need(obj.get('flutter_launches')==1,'exactly one Flutter test launch required')
     for key,count in (('runner_probe_count',obj.get('runner_probe_count')),
@@ -243,6 +253,7 @@ def verify(out:Path)->int:
          'missing single-session log digest')
     cases=obj.get('cases')
     need(isinstance(cases,list) and len(cases)==7,'seven distinct archive scenarios required')
+    session_ids=set()
     for index,(actual,case) in enumerate(zip(cases,CASES)):
         need(isinstance(actual,dict) and actual.get('case')==case,'missing or reordered scenario')
         need(actual.get('process_launch')==1 and actual.get('boundary_index')==index,
@@ -255,13 +266,17 @@ def verify(out:Path)->int:
                  actual.get('version_code')==2 and actual.get('installed_path_count')==2 and
                  actual.get('config_x86_64_present') is True and
                  type(actual.get('android_confirmations')) is int and
-                 actual['android_confirmations'] in (0,1),
-                 'Android committed base+split evidence missing')
+                 actual['android_confirmations']==1,
+                 'Android committed base+split and explicit approval evidence missing')
+            session_id=actual.get('owned_session_id')
+            need(type(session_id) is int and 0<session_id<=2147483647 and session_id not in session_ids,
+                 'missing, invalid or reused owned session identity')
+            session_ids.add(session_id)
         else:
             need(actual.get('preinstall_refused') is True and
                  actual.get('installed_original_intact') is True and
                  actual.get('version_code')==1 and actual.get('installed_path_count')==1 and
-                 actual.get('android_confirmations')==0,
+                 actual.get('android_confirmations')==0 and 'owned_session_id' not in actual,
                  'unsafe archive mutated installed package or reached installer')
     need(len(set(x['archive_sha256'] for x in cases))==7,
          'archive case input digests are not independently unique')

@@ -13,3 +13,14 @@ No user data or real installed packages are touched. Every scenario is source- a
 **Scope limitations:** This is NOT full R02 runtime-matrix acceptance. It is an archive **extraction-to-session** hosted emulator test, NOT qualification of the complete user-facing download/import/picker UX, XAPK OBB installation or data paths, SAF, external/Shizuku/Dhizuku installers, API-specific UI, user cancellation or interrupted-install rollback. Actual application UX and physical devices remain unqualified. No releases. No merges. No force-pushes. PR #5 and its RT02B evidence remain untouched.
 
 The self-executing `python3 overlay.zip` launcher creates one new stacked PR, runs all inherited Python contracts and source mutation tests in an isolated `$TMPDIR` worktree, checks staged whitespace, and follows **six** exact-head pull-request-triggered GitHub Actions workflows (R00 source, R00 Flutter, RT01, RT02A, RT02B and RT02C). `--watch-only` resumes monitoring without another push; `gh run watch` opens the native GitHub terminal UI, followed by independent SHA-scoped checking and optional Termux success/failure notifications.
+
+## HF11 — owned foreground installer
+
+All five positive archives now use the first-party production StockInstaller
+foreground owner (sealed `InstallPrecommitGate`), not the legacy plugin route.
+A matching terminal journal, exact baseline and resulting signed APK hashes,
+a distinct positive Android session identity, exactly one observed installer
+approval, and independent host package-state verification are required. No
+negative case may reach the session bridge or publish a session identity. The
+previous exact-head run `45512130442` failed before completing a case; no new
+hosted result is claimed by this change.

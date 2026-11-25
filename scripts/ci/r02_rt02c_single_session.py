@@ -108,7 +108,7 @@ class SingleSession:
             self.need(self.failure is None, 'previous control failure')
             self.need(route in ('/rt02c/prepare', '/rt02c/call', '/rt02c/finish'),
                       'unapproved protocol operation')
-            self.need(set(data).issubset({'case', 'result'}) and
+            self.need(set(data).issubset({'case', 'result', 'owned_session_id'}) and
                       isinstance(data.get('case'), str), 'invalid scenario request')
             case = data['case']
             self.need(self.next_index < len(CASES) and
@@ -156,14 +156,20 @@ class SingleSession:
                 self.call_at = time.monotonic()
                 self.phase = 'STOCK_INSTALLER_CALL'
                 return {'authorized': True}
-            self.need(route == '/rt02c/finish' and set(data) == {'case', 'result'},
+            finish_fields = {'case', 'result', 'owned_session_id'} if case in POSITIVE else {'case', 'result'}
+            self.need(route == '/rt02c/finish' and set(data) == finish_fields,
                       'invalid scenario completion request')
             expected = 'installed' if case in POSITIVE else 'refused'
             self.need(data['result'] == expected, 'unexpected scenario disposition')
             if case in POSITIVE:
                 self.need(self.called, 'positive scenario never called stock installer')
+                self.need(self.taps == 1, 'owned foreground install requires explicit Android approval')
+                session_id = data['owned_session_id']
+                self.need(type(session_id) is int and 0 < session_id <= 2147483647 and
+                          all(item.get('owned_session_id') != session_id for item in self.receipt['cases']),
+                          'missing, invalid or reused owned Android session identity')
                 proof = self.base.installed_state(2, True, self.fixtures)
-                proof.update(installed_signed_members_verified=True)
+                proof.update(installed_signed_members_verified=True, owned_session_id=session_id)
                 self.phase = 'ANDROID_V2_SPLIT_VERIFIED'
             else:
                 self.need(not self.called and self.taps == 0,
@@ -265,6 +271,7 @@ class SingleSession:
                    'package_state_observation':state,
                    'private_log_sha256':self.H.sha(self.flutter_log),
                    'raw_device_logs_uploaded':False}
+        details['native_session_observation'] = self.H.native_session_observation(text)
         self.receipt['status'] = 'FAILED'
         self.receipt['failure_details'] = details
         self.rp.write_text(json.dumps(self.receipt, sort_keys=True, indent=2) + '\n')
@@ -278,7 +285,8 @@ class SingleSession:
                 '--reporter', 'expanded',
                 '--dart-define=OX_R02C_CONTROL_TOKEN=' + self.token,
                 '--dart-define=OX_R02C_BASE_SHA=' + self.inv['signed_base_sha256'],
-                '--dart-define=OX_R02C_SPLIT_SHA=' + self.inv['signed_split_sha256']]
+                '--dart-define=OX_R02C_SPLIT_SHA=' + self.inv['signed_split_sha256'],
+                '--dart-define=OX_R02C_V1_SHA=' + self.H.sha(self.fixtures / 'base_v1.apk')]
         started = time.monotonic()
         watchdog = RT02CWatchdog(started)  # Bounded, phase-aware real runtime.
         with self.flutter_log.open('wb') as target:

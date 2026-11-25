@@ -1,3 +1,31 @@
+# ObtainX — RT02C-HF11 owned foreground session (24 November 2026)
+
+**Preimage:** PR #30 `33a9a6fa489111f0b5f02744bdb07fb708d1e84e`.
+Five of six required workflows passed (including hosted Flutter #110); RT02C
+run `45512130442` failed at APKS with `INSTALLER_TIMEOUT_NO_APPROVAL`, 57
+`FIXTURE_NOT_VISIBLE` observations, no approval, and exact signed v1 intact.
+
+**Repair:** RT02C now exercises the production foreground StockInstaller route
+used by AppsProvider: an exact, sealed InstallPrecommitGate selects the first-party
+owned session bridge. The legacy plugin uses activity-delivered callbacks and
+requests no user action; the first-party route uses a session-specific broadcast
+and explicit Android approval. Each positive case must return success and a
+matching native terminal journal with exact listing, Android status and v1/v2
+signed member hashes. The host requires a unique native session ID, one real
+installer approval and independently checks installed signed base and split
+bytes before acknowledgement. The negative cases cannot supply a session ID.
+Failure evidence includes only allowlisted native session and terminal states.
+No change to standalone or negative legacy-plugin lanes, no synthetic approvals,
+no replay, no local Gradle, no weakened seven-case coverage.
+
+**Acceptance:** source implementation candidate; runtime resolution requires a
+fresh exact-head hosted run. The absent UI in the prior legacy route is proven;
+the particular Android callback failure was not observed directly. Physical
+device and release acceptance remain separate. R07/R08 acceptance remains open;
+R09, R10, R11 and R12 remain implementation/qualification work.
+
+---
+
 # ObtainX — R08-F03 / RT02C failure-repair candidate (24 November 2026)
 
 **Preimage:** draft PR #30 `60f44d5fdfc1616e54a7d59b3b9b101b89312228`,

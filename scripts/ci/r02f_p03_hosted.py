@@ -115,6 +115,8 @@ def run(out: Path) -> int:
     server = ThreadingHTTPServer(('127.0.0.1', base.PORT), P03Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     log = out/'r02f-p03-private.log'
+    process = None
+    eligible_seen = False
     try:
         base.adb('reverse','tcp:'+str(base.PORT),'tcp:'+str(base.PORT))
         # The Flutter runner's normal debug app is installed by flutter test.
@@ -128,7 +130,7 @@ def run(out: Path) -> int:
         started=time.monotonic()
         with log.open('wb') as f:
             process=subprocess.Popen(argv,stdout=f,stderr=subprocess.STDOUT,
-                                     stdin=subprocess.DEVNULL)
+                                     stdin=subprocess.DEVNULL,start_new_session=True)
             stage='FLUTTER_STARTING'
             last_report=0.0
             while process.poll() is None and time.monotonic()-started < 1100:
@@ -139,16 +141,20 @@ def run(out: Path) -> int:
                 elif MARKERS[1] in tail: stage='PRODUCTION_PROVIDER_INSTALL_STARTED'
                 elif MARKERS[0] in tail: stage='APP_ROUTE_OWNER_SURVIVED'
                 elif 'Running Gradle task' in tail: stage='GRADLE_BUILD'
-                if base.command(['adb','-s',base.SERIAL,'shell','pm','path',base.APP],
-                                allow_failure=True).returncode == 0:
-                    base.adb('shell','appops','set',base.APP,'REQUEST_INSTALL_PACKAGES','allow',timeout=25)
+                # Flutter may replace the debug APK between path and UID
+                # lookup. Defer only exact clean absence/No UID observations
+                # while this live child is bounded by the original deadline.
+                # Stop changing eligibility once approval is observed.
+                if stage not in ('APPROVAL_PENDING','UI_CANCEL_TAPPED','UI_CANCEL_COMPLETED'):
+                    eligible_now = base.grant_runner_install_eligibility()
+                    eligible_seen = eligible_seen or eligible_now
                 if time.monotonic()-last_report>=25:
                     print('OX_R02F_P03_HOSTED_PROGRESS stage='+stage+
                           ' elapsed='+str(int(time.monotonic()-started))+'s',flush=True)
                     last_report=time.monotonic()
                 time.sleep(3)
             if process.poll() is None:
-                process.kill();process.wait(timeout=20)
+                base.terminate_flutter_process_group(process)
                 raise Refused('Flutter runtime P03 timed out in '+stage)
         text=log.read_text('utf-8','replace')
         # Flutter can terminate before the next progress tick. Report only
@@ -167,6 +173,7 @@ def run(out: Path) -> int:
             raise Refused('Flutter P03 app UI test failed; diagnostic_categories='+
                           ','.join(diag['failure_categories'])+
                           '; private_log_sha256='+diag['private_log_sha256'])
+        need(eligible_seen, 'P03 runner eligibility was never established')
         for marker in MARKERS:
             need(text.count(marker) == 1, 'missing/duplicate real UI marker: '+marker)
         first_party = text.count('OX_P03_DART_CLOSURE=FIRST_PARTY_ABANDON') == 1
@@ -196,8 +203,12 @@ def run(out: Path) -> int:
         print('OX_R02F_P03_HOSTED_REAL_APP_UI_CANCEL_AND_V1_BYTES_PASS',flush=True)
         return 0
     finally:
-        server.shutdown();server.server_close()
-        base.adb('reverse','--remove','tcp:'+str(base.PORT), allow_failure=True)
+        try:
+            if process is not None and process.poll() is None:
+                base.terminate_flutter_process_group(process)
+        finally:
+            server.shutdown();server.server_close()
+            base.adb('reverse','--remove','tcp:'+str(base.PORT), allow_failure=True)
 
 
 def bounded_json(path: Path) -> dict:

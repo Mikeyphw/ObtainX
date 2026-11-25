@@ -124,16 +124,12 @@ class SingleSession:
                 self.base.adb('install', '-t', str(self.fixtures / 'base_v1.apk'),
                               timeout=180)
                 self.H.baseline_v1(self.fixtures)
-                runner = self.base.command(['adb', '-s', self.base.SERIAL,
-                                            'shell', 'pm', 'path', self.base.APP],
-                                           allow_failure=True)
-                self.need(runner.returncode == 0 and
-                          runner.stdout.strip().startswith(b'package:'),
-                          'Flutter runner APK not installed at start boundary')
-                if not self.app_installed:
-                    self.base.adb('shell', 'appops', 'set', self.base.APP,
-                                  'REQUEST_INSTALL_PACKAGES', 'allow')
-                    self.app_installed = True
+                # Dart is already at the authenticated prepare boundary;
+                # unlike bootstrap polling, missing eligibility here refuses
+                # the case before it can reach the real installer.
+                self.app_installed = self.base.grant_runner_install_eligibility()
+                self.need(self.app_installed,
+                          'Flutter runner APK not eligible at start boundary')
                 self.active = case
                 self.called = False
                 self.taps = 0
@@ -330,14 +326,7 @@ class SingleSession:
                         if should_probe_runner(now, self.runner_probe_last, runner_stage):
                             self.runner_probe_last = now
                             self.runner_probe_count += 1
-                            probe = self.base.command(['adb', '-s', self.base.SERIAL,
-                                                       'shell', 'pm', 'path', self.base.APP],
-                                                      allow_failure=True)
-                            if (probe.returncode == 0 and
-                                    probe.stdout.strip().startswith(b'package:')):
-                                self.base.adb('shell', 'appops', 'set', self.base.APP,
-                                              'REQUEST_INSTALL_PACKAGES', 'allow')
-                                self.app_installed = True
+                            self.app_installed = self.base.grant_runner_install_eligibility()
                         else:
                             self.runner_probe_skipped += 1
                     # Never interfere with startup/Gradle. Never tap unless Dart

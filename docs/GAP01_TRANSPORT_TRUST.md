@@ -13,3 +13,7 @@ Local source-contract tests and source-bound hosted Flutter/Android gates are se
 ## HF02 — deterministic store-discovery regression
 
 The widget test previously invoked the actual APKMirror network path under Flutter's fake clock. The new shared transport has a real 30-second timeout, which remained pending after widget disposal. The details page now accepts its store-lookup dependency, defaulting to the existing production service. The regression asserts an exact-listing lookup occurs once and both pending and negative answers produce no unconfirmed chip; the separate GAP-01 HTTP fixtures continue to exercise the real secure transport. Neither the network timeout nor production trust policy is changed.
+
+## HF03 — hosted Android runner readiness
+
+After HF02 all full Flutter tests passed. The RT02C P03 runner instead failed while Flutter was replacing its debug APK: package path is not an atomic UID reservation. The shared host helper polls only the fixed debug package in Android user 0, treats clean absent responses and exact No UID as pending, and refuses all other failures. Existing bounded pollers use the same helper; the real RT02C authenticated case start requires eligibility. P03 retains successful eligibility, real UI cancellation and independent unchanged signed bytes, and stops its own Flutter process group on failure. No application-source security policy or device receipt is weakened. The local tests reproduce the exact exit/error race and fatal alternatives; real hosted device acceptance remains mandatory.

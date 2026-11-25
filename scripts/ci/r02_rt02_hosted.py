@@ -49,6 +49,50 @@ def command(args:list[str], timeout:int=30, allow_failure:bool=False)->subproces
 def adb(*args:str, timeout:int=30, allow_failure:bool=False)->str:
     return command(['adb','-s',SERIAL,*args],timeout=timeout,allow_failure=allow_failure).stdout.decode('utf-8','replace').strip()
 
+def runner_apk_present() -> bool:
+    """Only recognize a nonempty, exact user-0 debug APK path response.
+
+    Flutter can remove and reinstall its runner during bootstrap. A clean
+    absent-package observation (including API36 rc=1) is not an ADB failure.
+    Any other diagnostic or malformed reply is a genuine harness refusal.
+    """
+    probe=command(['adb','-s',SERIAL,'shell','pm','path','--user','0',APP],
+                  timeout=25,allow_failure=True)
+    stdout=probe.stdout.decode('utf-8','replace').strip()
+    stderr=probe.stderr.decode('utf-8','replace').strip()
+    if probe.returncode in (0,1) and not stdout and not stderr:
+        return False
+    paths=stdout.splitlines()
+    need(probe.returncode==0 and not stderr and bool(paths) and
+         all(re.fullmatch(r'package:/data/app/[A-Za-z0-9_+./~=-]+\.apk',p) for p in paths) and
+         sum(p.endswith('/base.apk') for p in paths)==1,
+         'RT02_RUNNER_PACKAGE_PATH_REFUSED rc='+str(probe.returncode))
+    return True
+
+
+def grant_runner_install_eligibility() -> bool:
+    """One bounded attempt; callers already own the live-child deadline.
+
+    Only the fixed disposable debug package may receive this app-op. A
+    package-path result is not an atomic UID reservation: the exact Android
+    No UID response can be deferred to the next poll during runner replacement.
+    No other command failure becomes a retry or successful eligibility proof.
+    """
+    if not runner_apk_present():
+        return False
+    result=command(['adb','-s',SERIAL,'shell','appops','set','--user','0',APP,
+                    'REQUEST_INSTALL_PACKAGES','allow'],timeout=25,allow_failure=True)
+    stdout=result.stdout.decode('utf-8','replace').strip()
+    stderr=result.stderr.decode('utf-8','replace').strip()
+    if result.returncode==0 and not stdout and not stderr:
+        return True
+    absent='Error: No UID for '+APP+' in user 0'
+    if result.returncode in (1,255) and (stdout,stderr) in ((absent,''),('',absent)):
+        print('OX_RT02_RUNNER_UID_PENDING',flush=True)
+        return False
+    raise Refused('RT02_RUNNER_APP_OP_REFUSED rc='+str(result.returncode))
+
+
 def sha_file(p:Path)->str: return hashlib.sha256(p.read_bytes()).hexdigest()
 
 def identity_check()->tuple[str,str]:
@@ -400,10 +444,7 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
                         last_progress=now
                     # This is only app-op eligibility, not Android approval.
                     if not installed_app:
-                        r=command(['adb','-s',SERIAL,'shell','pm','path',APP],allow_failure=True)
-                        if r.returncode==0 and r.stdout.strip().startswith(b'package:'):
-                            adb('shell','appops','set',APP,'REQUEST_INSTALL_PACKAGES','allow')
-                            installed_app=True
+                        installed_app=grant_runner_install_eligibility()
                     # CRITICAL: uiautomator.dump can disrupt Flutter startup. Do
                     # not probe Android UI during Gradle/test APK installation.
                     # Probe only after Dart has reached the real installer call.

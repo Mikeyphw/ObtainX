@@ -176,10 +176,7 @@ def run_case(out:Path,fixtures:Path,inv:dict,case:str)->dict:
                 if phase=='STOCK_INSTALLER_CALL' and not called:
                     called=True;deadline=min(deadline,now+240)
                 if not installed:
-                    probe=base.command(['adb','-s',base.SERIAL,'shell','pm','path',base.APP],allow_failure=True)
-                    if probe.returncode==0 and probe.stdout.strip().startswith(b'package:'):
-                        base.adb('shell','appops','set',base.APP,'REQUEST_INSTALL_PACKAGES','allow')
-                        installed=True
+                    installed=base.grant_runner_install_eligibility()
                 # Never probe installer UI during compilation or before Dart calls it.
                 if installed and called and phase=='STOCK_INSTALLER_CALL' and taps==0:
                     if base._tap_confirmed_install_dialog():taps=1

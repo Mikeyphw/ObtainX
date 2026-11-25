@@ -40,3 +40,12 @@ class Gap01TransportTrust(unittest.TestCase):
   for marker in ('HttpServer.bind','/return','/cross','/blocked','probeDownloadResponseMetadata','checkPartialDownloadHash','checkETagHeader','getDownloadSize','githubAttestationStatusVerified'):
    self.assertIn(marker,t)
   self.assertIn('Execute full Flutter test suite',text('.github/workflows/obtainx-r00-flutter.yml'))
+
+ def test_details_lookup_fixture_uses_production_dependency_boundary(self):
+  page=text('lib/pages/app.dart')
+  self.assertIn('this.storeLookup = checkAndCacheStoresForListing,',page)
+  self.assertIn('await widget.storeLookup(',page)
+  fixture=text('test/app_page_version_actions_test.dart').split("testWidgets('an unconfirmed store shows no chip'",1)[1].split("testWidgets('alternate store already tracked",1)[0]
+  for marker in ('Completer<Map<String, String>?>()', 'storeLookup: (apps, listingKey)', 'expect(lookupCalls, 1)', 'lookup.complete(', 'findsNothing'):
+   self.assertIn(marker,fixture)
+  self.assertEqual(fixture.count('expectNoUnconfirmedChips();'),2)

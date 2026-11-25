@@ -912,6 +912,7 @@ class AppPage extends StatefulWidget {
     this.appsListHeroFolderId,
     this.isEmbedded = false,
     this.suppressAutoCheck = false,
+    this.storeLookup = checkAndCacheStoresForListing,
   });
 
   final String appId;
@@ -925,6 +926,11 @@ class AppPage extends StatefulWidget {
 
   final bool isEmbedded;
   final bool suppressAutoCheck;
+
+  /// The existing store service is the default for every details-page scan.
+  /// An explicit dependency allows controlled asynchronous lookup completion
+  /// without replacing the application's secure HTTP transport.
+  final Future<Map<String, String>?> Function(AppsProvider, String) storeLookup;
 
   @override
   State<AppPage> createState() => _AppPageState();
@@ -2558,7 +2564,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
   /// settled before a failure.
   Future<void> _maybeCheckAndCacheAllStores(String listingKey) async {
     if (!mounted) return;
-    final Map<String, String>? entry = await checkAndCacheStoresForListing(
+    final Map<String, String>? entry = await widget.storeLookup(
       Provider.of<AppsProvider>(context, listen: false),
       listingKey,
     );

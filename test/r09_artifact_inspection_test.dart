@@ -26,7 +26,7 @@ void main() {
     expect(result.signerStatus, 'r09ReviewSignerMatches');
     expect(result.actionsDigestVerified, isFalse);
     expect(result.installedVersionCode, 1);
-    final asset = const MapEntry('x86.apk', 'https://example.org/apk');
+    const asset = MapEntry('x86.apk', 'https://example.org/apk');
     expect(r09ChooseArtifact([asset], ['arm64-v8a'], null,
       evaluatedChoice: (_) => const R09ArtifactChoice(true, ['arm64-v8a'], 'r09RoleApk', 'r09ReviewCompatible')), asset);
   });

@@ -1,3 +1,11 @@
+# ObtainX — R09-F02-HF01 strict analyzer repair (25 November 2026)
+
+**Preimage:** PR #30 `f5148be4ff648eced81c0d8a3cd9841ecfb9cb5b`, tree `e0c7a2dd676524cdd8af177f67aac42bc00dc126`. Source integrity and API36 bootstrap passed; Flutter 45545836923, RT02 45545836720, RT02B 45545836850 and RT02C 45545836865 each stopped before their remaining tests at `prefer_const_declarations` in `test/r09_artifact_inspection_test.dart:29`.
+
+**Repair:** declare the constant MapEntry fixture with `const`, preserving its inaccurate filename and verified-metadata selection assertion. Add a named source mutation guard for the exact previous declaration. Do not suppress any lint or alter production APK inspection, signing, digest binding or installer checks. Actual hosted analysis and signed-APK acceptance are pending. Keep incremental CI scope based on the last independently qualified full baseline; the unqualified R09-F02 native changes still require the full matrix. R02 device/backend, R07 and R08 acceptance debt, R09 hosted/device qualification and R10–R12 remain. No local Gradle.
+
+---
+
 # ObtainX — R09-F02 manifest-backed artifact review (25 November 2026)
 
 **Preimage:** PR #30 `00e75b8f7510edd4b2868768b6af453522102bf0`. Six exact-head hosted runs passed: 45540847786, 45540847761, 45540847851, 45540847720, 45540847812, 45540847781. R09-F01 and incremental CI have hosted qualification on that predecessor; no transfer of acceptance to this tree.

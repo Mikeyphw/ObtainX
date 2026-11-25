@@ -25,6 +25,7 @@ REQUIRED = {
     'integration_test/r02c_archive_install_test.dart': ('await inspectR09Apk(copy, name)', 'OX_R09_MANIFEST_REAL_APK_INSPECTION_PASS', 'expect(review.eligible, isTrue)', 'installedSigners: installedSigners'),
     'lib/services/r03_download_engine.dart': ('_activeMaxBytes[key] != maxBytes', 'responseTotal > maxBytes', 'received + incoming.length > maxBytes'),
     'lib/providers/source_provider.dart': ('Review requires HTTPS on every hop', '|| reviewCrossOrigin', 'r04ArtifactStorageHeaders(requestHeaders)'),
+    'test/r09_artifact_inspection_test.dart': ("const asset = MapEntry('x86.apk', 'https://example.org/apk');", 'evaluatedChoice: (_) => const R09ArtifactChoice'),
     'test/r09_discovery_test.dart': ('without URL secrets', 'smart folder search round trips', 'competing installable sources', 'wrong ABI and configuration splits', 'safe default respects eligible', 'exact repository, identity and expiry gate', 'distinguish actual recorded facts'),
 }
 RISK = ('lib/pages/apps.dart','lib/providers/settings_provider.dart','lib/folders/**','lib/components/bulk_update_sheet.dart','lib/components/app_detail_widgets.dart','lib/pages/additional_options_page.dart','lib/widgets/r04_actions_history_dialog.dart','lib/services/r09_*','test/r09_*','scripts/ci/r09_*','scripts/ci/test_r09_*','assets/translations/en.json')

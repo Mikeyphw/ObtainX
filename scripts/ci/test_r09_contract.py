@@ -17,6 +17,7 @@ class R09Wiring(unittest.TestCase):
     def test_analyzer_regressions_refused(self):
         original=Path.read_text
         old_patterns = (
+            ('test/r09_artifact_inspection_test.dart', "const asset = MapEntry('x86.apk', 'https://example.org/apk');", "final asset = const MapEntry('x86.apk', 'https://example.org/apk');"),
             ('lib/components/generated_form_renderer.dart', "'r09BoundSourceUrl': ?boundUrl", "if (boundUrl != null) 'r09BoundSourceUrl': boundUrl"),
             ('lib/providers/apps_provider_install.dart', 'downloadOnly: pickAnyAsset).eligible))) {\n      return null;\n    }', 'downloadOnly: pickAnyAsset).eligible))) return null;'),
             ('lib/widgets/r04_actions_history_dialog.dart', 'if (row.canSelectAt(now())) {', 'if (row.canSelectAt(now()))'),

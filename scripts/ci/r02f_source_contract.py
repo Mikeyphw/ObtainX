@@ -41,7 +41,7 @@ def inspect(root:Path=ROOT)->list[str]:
     block=provider[a:b] if a>=0 and b>a else ''
     need('pendingInstallReleaseKey' in block and
          'if (pending != null)' in block and
-         '_awaitThirdPartyInstallConfirmation(dir.appId)' in block,
+         '_awaitThirdPartyInstallConfirmation(r05Container)' in block,
          'external indicator must not resurrect after broadcast already confirmed pending')
     need('classifyUnverifiedThirdPartyHandoff(true)' in txt[TEST] and
          'classifyUnverifiedThirdPartyHandoff(false)' in txt[TEST] and

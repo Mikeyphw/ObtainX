@@ -28,6 +28,12 @@ class R05ContractMutation(unittest.TestCase):
         self.mutation('lib/providers/apps_provider_install.dart', 'if (!_r05ListingStillBound(attempt) || getInstaller().modeKey != attempt.backend)')
     def test_historical_success_cannot_advance_replacement_release(self):
         self.mutation('lib/providers/apps_provider_install.dart', 'return _r05ListingStillBound(attempt);')
+    def test_late_save_must_recheck_listing(self):
+        self.mutation('lib/providers/apps_provider_install.dart', 'commitGuard: () => identical(apps[attempt.listingKey]?.app, current)')
+    def test_file_publication_guard_cannot_be_removed(self):
+        self.mutation('lib/providers/apps_provider_lifecycle.dart', 'if (!commitGuard()) return false;\n        tmpFile.renameSync(filePath);')
+    def test_timeout_targets_attempt_not_listing(self):
+        self.mutation('lib/providers/apps_provider_install.dart', '_r05MarkUnknownIfStillPending(attempt.id,')
     def test_remove_evidence_gate(self):
         self.mutation('lib/services/r05_operation_receipt.dart',
                       'evidence.packageName != packageId')

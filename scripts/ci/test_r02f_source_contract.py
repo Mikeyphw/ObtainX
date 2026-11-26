@@ -25,7 +25,7 @@ class RT02FMutation(unittest.TestCase):
     def test_external_callback_must_use_classifier(self):
         self.mutate(M.EXTERNAL,'classifyUnverifiedThirdPartyHandoff(changed)','InstallResult.success()')
     def test_pending_indicator_guard(self):
-        self.mutate(M.PROVIDER,"if (pending != null) {\n              _awaitThirdPartyInstallConfirmation(dir.appId);","if (true) {\n              _awaitThirdPartyInstallConfirmation(dir.appId);")
+        self.mutate(M.PROVIDER,"if (pending != null) {\n              _awaitThirdPartyInstallConfirmation(r05Container);","if (true) {\n              _awaitThirdPartyInstallConfirmation(r05Container);")
     def test_selected_flutter_test(self):
         self.mutate(M.FLUTTER,'flutter test --no-pub test/r02f_external_handoff_test.dart','echo test skipped')
     def test_targeted_vs_full_not_disabled(self):

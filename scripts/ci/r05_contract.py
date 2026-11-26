@@ -40,13 +40,20 @@ FILES={
         '_r05CheckHandoff(r05, allAPKs', 'installedEvidence',
         'settled.exactBytesConfirmed', 'r11ChannelFingerprint(app) == attempt.channelFingerprint',
         'downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(app)) == attempt.releaseFingerprint',
-        'return _r05ListingStillBound(attempt);', 'if (!_r05ListingStillBound(attempt) || getInstaller().modeKey != attempt.backend)', 'expectedRelease == null || p04PendingMatchesInstalledPackage', 'result.isCancelled',
+        'return _r05ListingStillBound(attempt);',
+        'commitGuard: () => identical(apps[attempt.listingKey]?.app, current)',
+        '_r05PersistBoundConfirmation(r05, installedRelease, newInfo)',
+        '_r05PersistBoundConfirmation(r05Container, release, packageInfo)',
+        '_r05MarkUnknownIfStillPending(attempt.id,', 'if (!_r05ListingStillBound(attempt) || getInstaller().modeKey != attempt.backend)', 'expectedRelease == null || p04PendingMatchesInstalledPackage', 'result.isCancelled',
         'result.isAlreadyInstalled','result.isHandedOff','result.isError'),
     'lib/services/r02_local_archive_import.dart':(
         'if (confirmed)', 'r02LocalObservedInstallConfirmed(',
         'approvedPlan: plan', "'verifyInstalled'", 'byteEvidenceQualified: exactBytes'),
     'lib/providers/apps_provider_lifecycle.dart':(
-        'R05OperationJournal.instance.recoverInterruptedOnce()',),
+        'R05OperationJournal.instance.recoverInterruptedOnce()',
+        'if (!commitGuard()) return false;\n        tmpFile.renameSync(filePath);',
+        'if (commitGuard != null && !commitGuard()) return;',
+        'if (commitGuard == null && !updateInstalledInfo &&',),
     'lib/pages/settings.dart':(
         'R07ActivityCenterPage()', 'R05ExtraApprovalTile()',
         "ValueKey('r07-activity-center')"),
@@ -96,6 +103,8 @@ def verify(root:Path=ROOT)->int:
         first=code.index('final r05 = await _r05BeginAttempt(')
         native=code.index('result = await activeInstaller.installApk(')
         if first>native:errors.append('R05 intent must be durable before native handoff')
+        if 'journal.latestUnresolved(listingKey)' in code or '_r05MarkUnknownIfStillPending(id,' in code:
+            errors.append('Generic callback cannot settle an unbound receipt')
         if 'unawaited(\n            installApk(' in code or 'unawaited(\n            installApkDir(' in code:
             errors.append('Raw untracked background install future survives')
     except (OSError,ValueError): errors.append('Cannot prove R05 pre-handoff journal ordering')

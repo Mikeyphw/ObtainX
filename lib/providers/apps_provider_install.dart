@@ -423,6 +423,19 @@ extension AppsProviderInstall on AppsProvider {
             downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(app)) == attempt.releaseFingerprint);
   }
 
+  /// Persist an exact confirmation only while the original listing remains
+  /// current. A refresh or replacement during the queued save is conservative:
+  /// the historical receipt stays confirmed, but cannot update another listing.
+  Future<void> _r05PersistBoundConfirmation(R05OperationReceipt attempt,
+      InstallReleaseSnapshot? release, PackageInfo info) async {
+    final current = apps[attempt.listingKey]?.app;
+    if (current == null || !_r05ListingStillBound(attempt)) return;
+    await saveApps([recordConfirmedInstall(current, release, info)],
+        attemptToCorrectInstallStatus: false,
+        commitGuard: () => identical(apps[attempt.listingKey]?.app, current) &&
+            _r05ListingStillBound(attempt));
+  }
+
   Future<void> _r05CheckHandoff(R05OperationReceipt attempt, List<String> paths,
       {File? container}) async {
     if (getInstaller().modeKey != attempt.backend ||
@@ -570,12 +583,9 @@ extension AppsProviderInstall on AppsProvider {
     await R05OperationJournal.instance.recoverInterruptedOnce();
   }
 
-  Future<void> _r05MarkUnknownIfStillPending(String listingKey, String reason) async {
-    final journal = R05OperationJournal.instance;
-    final attempt = await journal.latestUnresolved(listingKey);
-    if (attempt == null || attempt.stage == R05InstallStage.unknown) return;
-    await journal.settleIfOpen(attempt.id, R05InstallStage.unknown,
-        reason: reason);
+  Future<void> _r05MarkUnknownIfStillPending(String attemptId, String reason) async {
+    await R05OperationJournal.instance.settleIfOpen(attemptId,
+        R05InstallStage.unknown, reason: reason);
   }
 
   /// Owns and observes the background future even when Android does not
@@ -585,8 +595,7 @@ extension AppsProviderInstall on AppsProvider {
       await operation;
     } catch (error) {
       try {
-        await _r05MarkUnknownIfStillPending(listingKey,
-            'Background installer future ended without verified resolution');
+        // This wrapper has no attempt identity. The invocation owns settlement.
         await logs.add('R05 background install failed for $listingKey: ${error.runtimeType}',
             level: LogLevel.warning);
       } catch (_) {
@@ -600,22 +609,9 @@ extension AppsProviderInstall on AppsProvider {
   }
 
 
-  /// Starts recording third-party installs the moment the system confirms them.
-  ///
-  /// [ExternalInstaller] cannot learn its own result — the target app never
-  /// reports one — so success is inferred natively from the
-  /// PACKAGE_ADDED/PACKAGE_REPLACED broadcast plus a focus-regain heuristic. That
-  /// inference is lossy: if this activity is destroyed while the installer app is
-  /// in front, or focus returns before the broadcast lands, `installApk`'s
-  /// success branch never runs and the app keeps reporting its old version
-  /// (#222). The broadcast is itself proof that the install landed, so persist it
-  /// as soon as it arrives rather than relying only on the session result.
-  ///
-  /// The native side forwards every PACKAGE_ADDED/PACKAGE_REPLACED, not just the
-  /// package of the handoff in flight, because an installer told to "run in
-  /// background" finishes after its handoff session has already ended (#301).
-  /// [recordThirdPartyInstallBroadcast] ignores packages this install does not
-  /// track, so unrelated package changes are a no-op.
+  /// Listen for package changes as observations only. An external installer
+  /// does not return attempt-bound Android evidence, so a package broadcast
+  /// cannot confirm an operation or promote a source release receipt.
   void listenForThirdPartyInstallResults() =>
       registerThirdPartyInstallPackageChangedCallback(
         recordThirdPartyInstallBroadcast,
@@ -627,7 +623,9 @@ extension AppsProviderInstall on AppsProvider {
   /// Shows the installing indicator for an app whose APK a third-party installer
   /// accepted without reporting a result, until [recordThirdPartyInstallBroadcast]
   /// confirms it or [_awaitingThirdPartyInstallTimeout] elapses.
-  void _awaitThirdPartyInstallConfirmation(String appId) {
+  void _awaitThirdPartyInstallConfirmation(R05OperationReceipt attempt) {
+    final appId = attempt.listingKey;
+    if (!_r05ListingStillBound(attempt)) return;
     thirdPartyInstallIndicatorTimers.remove(appId)?.cancel();
     final entry = apps[appId];
     if (entry == null) return;
@@ -636,14 +634,14 @@ extension AppsProviderInstall on AppsProvider {
       _awaitingThirdPartyInstallTimeout,
       () {
         thirdPartyInstallIndicatorTimers.remove(appId);
-        unawaited(_r05MarkUnknownIfStillPending(appId,
+        unawaited(_r05MarkUnknownIfStillPending(attempt.id,
             'External installer did not provide independent confirmation')
             .catchError((Object error) async {
               await logs.add('R05 receipt timeout could not be persisted: ${error.runtimeType}',
                 level: LogLevel.error);
             }));
         final timedOutEntry = apps[appId];
-        if (timedOutEntry?.downloadProgress ==
+        if (_r05ListingStillBound(attempt) && timedOutEntry?.downloadProgress ==
             _awaitingThirdPartyInstallSentinel) {
           timedOutEntry!.downloadProgress = null;
         }
@@ -1714,7 +1712,7 @@ extension AppsProviderInstall on AppsProvider {
               apps[dir.appId]?.app.additionalSettings[pendingInstallReleaseKey],
             );
             if (pending != null) {
-              _awaitThirdPartyInstallConfirmation(dir.appId);
+              _awaitThirdPartyInstallConfirmation(r05Container);
             }
           }
           if (result.isError) {
@@ -1722,14 +1720,7 @@ extension AppsProviderInstall on AppsProvider {
           }
           if (exactInstalled) {
             somethingInstalled = true;
-            apps[dir.appId]!.app = recordConfirmedInstall(
-              apps[dir.appId]!.app,
-              release,
-              packageInfo,
-            );
-            await saveApps([
-              apps[dir.appId]!.app,
-            ], attemptToCorrectInstallStatus: false);
+            await _r05PersistBoundConfirmation(r05Container, release, packageInfo);
           }
           unawaited(_disposeDownloadedBundle(dir, somethingInstalled));
         } on CancellationException {
@@ -1973,7 +1964,7 @@ extension AppsProviderInstall on AppsProvider {
     }
     if (result.isHandedOff) {
       if (getInstaller().modeKey == 'external') {
-        _awaitThirdPartyInstallConfirmation(file.appId);
+        _awaitThirdPartyInstallConfirmation(r05);
       } else {
         // An uncertain native stock session is not a third-party handoff.
         // Preserve the pending source receipt and allow recovery if it still
@@ -1981,13 +1972,6 @@ extension AppsProviderInstall on AppsProvider {
         apps[file.appId]?.downloadProgress = _recoveredNativeInstallSentinel;
         unawaited(recoverNativeInstallSessions());
       }
-    }
-    if (installed) {
-      apps[file.appId]!.app = recordConfirmedInstall(
-        apps[file.appId]!.app,
-        installedRelease,
-        newInfo,
-      );
     }
     // Dispose the downloaded APK for EVERY outcome (parity with main's
     // _disposeInstalledApkFilesAfterSession): copy it into the save folder if
@@ -2020,23 +2004,9 @@ extension AppsProviderInstall on AppsProvider {
     if (result.isError) {
       await _throwRecordedInstallError(file.appId, result.errorCode!);
     }
-    final AppInMemory? entryToSave = apps[file.appId];
-    if (installed && entryToSave != null) {
-      // Re-apply the recorded version rather than trusting the in-memory entry to
-      // still carry the assignment made above. Handing off to a third-party
-      // installer sends this app to the background, and coming back fires
-      // loadApps(silent: true), which rebuilds every entry from the (still stale)
-      // JSON on disk — that can land inside the file/SAF work above and drop the
-      // version this install just recorded (#222).
-      entryToSave.app = recordConfirmedInstall(
-        entryToSave.app,
-        installedRelease,
-        newInfo,
-      );
+    if (installed) {
+      await _r05PersistBoundConfirmation(r05, installedRelease, newInfo);
     }
-    await saveApps([
-      apps[file.appId]!.app,
-    ], attemptToCorrectInstallStatus: !installed);
     return installed;
   }
 
@@ -2722,8 +2692,7 @@ extension AppsProviderInstall on AppsProvider {
             ),
           );
           if (!sayInstalled) {
-            await _r05MarkUnknownIfStillPending(id,
-              'Native background confirmation poll exhausted');
+            // No attempt identity is available to this generic package poll.
             final latestInfo = await getInstalledInfo(id);
             unawaited(
               logs.add(
@@ -2791,8 +2760,7 @@ extension AppsProviderInstall on AppsProvider {
             ),
           );
           if (!sayInstalled) {
-            await _r05MarkUnknownIfStillPending(id,
-              'Native background confirmation poll exhausted');
+            // No attempt identity is available to this generic package poll.
             final latestInfo = await getInstalledInfo(id);
             unawaited(
               logs.add(

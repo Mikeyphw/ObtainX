@@ -205,7 +205,14 @@ void main() {
       if (compression == 'bzip') {
         bytes = archive.BZip2Encoder().encodeBytes(bytes);
       }
-      if (compression == 'xz') bytes = archive.XZEncoder().encodeBytes(bytes);
+      if (compression == 'xz') {
+        // archive 4.3.0's encoder writes multibyte Index VLIs in the wrong
+        // order. Use the independently generated, standards-compliant fixture
+        // rather than weakening the strict extraction path to accept it.
+        bytes = await File(
+          'test/fixtures/r01_archives/hf02_nested_crc64.tar.xz',
+        ).readAsBytes();
+      }
       final file = await File('${directory.path}/download').writeAsBytes(bytes);
       await extractTarballOffIsolate(file.path, '${directory.path}/output');
       expect(

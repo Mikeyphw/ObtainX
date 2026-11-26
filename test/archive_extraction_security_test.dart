@@ -46,6 +46,9 @@ void main() {
     );
     expect(Directory(target()).existsSync(), isFalse);
     expect(File('${workspace.path}/escape.apk').existsSync(), isFalse);
+    expect(workspace.listSync().where(
+      (file) => file.path.contains('.obtainx-extract-'),
+    ), isEmpty, reason: 'Temporary extraction tree must be removed');
   }
 
   test('ZIP extraction publishes expected APK files only when complete', () async {
@@ -171,6 +174,35 @@ void main() {
     for (final name in ['truncated.tar.bz2', 'trailing.tar.bz2', 'invalid_block.tar.bz2']) {
       await expectTarRejected(name);
     }
+  });
+
+  test('XZ independently compressed CRC32, CRC64 and SHA256 streams', () async {
+    final expected = List<int>.generate(196608 + 37, (i) => (i * 31) % 251);
+    for (final check in ['crc32', 'crc64', 'sha256']) {
+      final destination = '${workspace.path}/extracted-$check';
+      await extractTarballOffIsolate(
+        fixture('hf02_large_$check.tar.xz'),
+        destination,
+      );
+      expect(File('$destination/nested/app.apk').readAsBytesSync(), expected);
+    }
+    expect(workspace.listSync().where(
+      (file) => file.path.contains('.obtainx-extract-'),
+    ), isEmpty);
+  });
+
+  test('XZ rejects legacy reversed index VLIs without publishing', () async {
+    await expectTarRejected('hf02_legacy_index.tar.xz');
+  });
+
+  test('XZ verifies block checks independently of valid stream metadata', () async {
+    await expectTarRejected('hf02_bad_block_check.tar.xz');
+  });
+
+  test('XZ refuses expanded bytes above budget without publishing', () async {
+    await expectTarRejected('hf02_large_crc64.tar.xz', limits:
+        const ArchiveExtractionLimits(maxEntryBytes: 65536,
+            maxExpandedBytes: 65536));
   });
 
   test('XZ oversized dictionary refuses even a tiny valid archive', () async {

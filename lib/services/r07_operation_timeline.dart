@@ -190,7 +190,9 @@ class R07OperationTimeline {
         'resolvedListingKey': resolvedListingKey ?? previous.resolvedListingKey,
         'resolvedPackageId': resolvedPackageId ?? previous.resolvedPackageId};
       if (await txn.update('operations', update, where: 'id = ? AND revision = ?',
-          whereArgs: [id, previous.revision]) != 1) throw StateError('Operation revision conflict');
+          whereArgs: [id, previous.revision]) != 1) {
+        throw StateError('Operation revision conflict');
+      }
       await txn.insert('events', {'operationId': id, 'revision': update['revision'], 'stage': stage,
         'updated': update['updated'], 'reason': reason});
       return R07TimelineEntry.fromRow({...rows.single, ...update});

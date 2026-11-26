@@ -100,7 +100,9 @@ class R03DownloadHistory {
       await for (final entity in directory.list(followLinks: false)) {
         final name = entity.uri.pathSegments.last;
         if (!archived && name.endsWith('.json.tmp') && _receiptName.hasMatch(name.substring(0, name.length - 4)) &&
-            await FileSystemEntity.type(entity.path, followLinks: false) == FileSystemEntityType.file) continue;
+            await FileSystemEntity.type(entity.path, followLinks: false) == FileSystemEntityType.file) {
+          continue;
+        }
         if (entity is! File || !(archived ? archivedName : _receiptName).hasMatch(name)) {
           throw const FormatException('Unknown transfer journal entry');
         }
@@ -131,7 +133,9 @@ class R03DownloadHistory {
         await withR07JournalGuard(root, 'destination:${File('${cache.path}/${record.fileName}').absolute.path}', () async {
           final current = await readRecord(entity);
           if (jsonEncode(current.toJson()) != jsonEncode(record.toJson()) ||
-              !await _eligible(current, cutoff, entity, null, null, null)) return;
+              !await _eligible(current, cutoff, entity, null, null, null)) {
+            return;
+          }
           await verifyDirectory(archive);
           await archive.create(recursive: true);
           final bytes = await entity.readAsBytes();

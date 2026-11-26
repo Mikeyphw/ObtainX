@@ -54,7 +54,7 @@ class R03HistoryBinding {
   final String listingKey, packageId, channel;
   final String? releaseFingerprint;
   Map<String, String> toJson() => {'listingKey': listingKey, 'packageId': packageId, 'channel': channel,
-    if (releaseFingerprint != null) 'releaseFingerprint': releaseFingerprint!};
+    'releaseFingerprint': ?releaseFingerprint};
   static R03HistoryBinding? decode(Object? value) {
     if (value == null) return null;
     if (value is! Map || value.keys.any((key) => !const {'listingKey', 'packageId', 'channel', 'releaseFingerprint'}.contains(key)) ||

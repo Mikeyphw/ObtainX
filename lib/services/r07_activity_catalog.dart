@@ -301,6 +301,6 @@ class R07ActivityCatalog {
         updatedUtc: DateTime.now().toUtc(), historyIntegrityKnown: false));
     }
     availableChannels = Set<String>.unmodifiable(channels);
-    return List<R07ActivityRecord>.unmodifiable([...active, ...finished]..sort(compare));
+    return List<R07ActivityRecord>.unmodifiable(<R07ActivityRecord>[...active, ...finished]..sort(compare));
   }
 }

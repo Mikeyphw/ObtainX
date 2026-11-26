@@ -1125,7 +1125,9 @@ extension AppsProviderInstall on AppsProvider {
         final live = apps[app.listingKey]?.app;
         if (!apps.containsListingKey(app.listingKey) || live == null || r11ChannelFingerprint(live) != expected.channel ||
             downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(live)) != expected.release ||
-            live.id != expected.packageId) throw StateError('Queued release changed before execution');
+            live.id != expected.packageId) {
+          throw StateError('Queued release changed before execution');
+        }
       }
       return _downloadAppOwned(app,
       allowUserInteraction: allowUserInteraction, notificationsProvider: notificationsProvider,
@@ -2470,7 +2472,7 @@ extension AppsProviderInstall on AppsProvider {
     final bool allowUserInteraction = context != null;
     if (notificationsProvider == null && allowUserInteraction) {
       final BuildContext? appContext = globalNavigatorKey.currentContext;
-      if (appContext != null) {
+      if (appContext != null && appContext.mounted) {
         notificationsProvider = appContext.read<NotificationsProvider>();
       }
     }
@@ -2860,7 +2862,7 @@ extension AppsProviderInstall on AppsProvider {
               );
           if (!proceedAfterVerification) {
             await R07OperationTimeline.instance.observePreparation(
-              downloadedFile?.timelineId ?? downloadedDir?.timelineId, 'declined');
+              downloadedFile.timelineId ?? downloadedDir?.timelineId, 'declined');
             return;
           }
           final baseline = await captureInstallBaseline(id);
@@ -2936,7 +2938,7 @@ extension AppsProviderInstall on AppsProvider {
               );
           if (!proceedAfterVerification) {
             await R07OperationTimeline.instance.observePreparation(
-              downloadedFile?.timelineId ?? downloadedDir?.timelineId, 'declined');
+              downloadedFile?.timelineId ?? downloadedDir.timelineId, 'declined');
             return;
           }
           final baseline = await captureInstallBaseline(id);

@@ -300,8 +300,10 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
         preserveListingIdentity: true, resumeRecord: record,
         allowExternalContinuation: () => _matchesListing(entry, provider));
     } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('The retained transfer could not resume. No new install was authorized.')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('The retained transfer could not resume. No new install was authorized.')));
+      }
     } finally {
       if (mounted) setState(() { _busy = false; _load(); });
     }
@@ -543,8 +545,10 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
           listingKey: widget.listingKey, packageId: widget.packageId, channel: channel, preview: preview);
         count += await transfers.prune(downloadPreview);
       } catch (_) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Retention stopped after a history change or I/O error. At least $count receipts removed; review the refreshed history.')));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Retention stopped after a history change or I/O error. At least $count receipts removed; review the refreshed history.')));
+        }
         return;
       }
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('r11RetentionResult', args: ['$count']))));
@@ -622,9 +626,13 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
                     items: [for (final value in channels) DropdownMenuItem(value: value,
                       child: Text(value == 'all' ? tr('r11AllChannels') : value == 'unknown'
                         ? tr('r11UnknownChannel') : value, overflow: TextOverflow.ellipsis))],
-                    onChanged: _busy ? null : (value) { if (value != null) setState(() {
-                      _channel = value; _historyLimit = _pageSize; _load();
-                    }); },
+                    onChanged: _busy ? null : (value) {
+                      if (value != null) {
+                        setState(() {
+                          _channel = value; _historyLimit = _pageSize; _load();
+                        });
+                      }
+                    },
                   )),
                   Wrap(spacing: 8, children: [
                     TextButton.icon(onPressed: _busy ? null : () => _exportHistory(provider, channel),

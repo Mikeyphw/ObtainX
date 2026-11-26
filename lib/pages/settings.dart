@@ -919,7 +919,7 @@ class _UpdatesSection extends StatelessWidget {
         ListTile(key: const ValueKey('r07-activity-center'),
           leading: const Icon(Icons.receipt_long_rounded),
           title: Text(tr('r10SettingsActivityCenter')),
-          subtitle: const Text('Downloads, approvals, installs and recoverable attempts'),
+          subtitle: Text(tr('r07SettingsSummary')),
           onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
             builder: (_) => const R07ActivityCenterPage())),
         ),

@@ -84,7 +84,7 @@ void main() {
     await File('${folder.path}/$digest.json').writeAsString(jsonEncode(entry.toJson()));
   }
 
-  Future<void> mountActivity(WidgetTester tester, {String? operationId}) async {
+  Future<void> mountActivity(WidgetTester tester, {String? operationId, double textScale = 1}) async {
     final fake = _R07FakeApps();
     addTearDown(fake.dispose);
     final observed = _ObservedActivityCatalog(root: root, journal: journal);
@@ -93,7 +93,9 @@ void main() {
     final loaded = await tester.runAsync(() async {
       await tester.pumpWidget(ChangeNotifierProvider<AppsProvider>.value(
         value: fake,
-        child: MaterialApp(home: R07ActivityCenterPage(
+        child: MaterialApp(builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(textScale)),
+          child: child!), home: R07ActivityCenterPage(
           catalog: observed, operationId: operationId)),
       ));
       final initial = observed.initialLoad;
@@ -122,6 +124,24 @@ void main() {
       }
     },
   );
+
+  testWidgets('GAP-05 filter controls wrap and stay actionable at 200 percent text', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 850);
+    addTearDown(tester.view.reset);
+    try {
+      await mountActivity(tester, textScale: 2);
+      for (final value in ['all', 'review', 'done']) {
+        final chip = find.byKey(ValueKey('r07-filter-$value'));
+        expect(chip, findsOneWidget);
+        expect(tester.getSize(chip).height, greaterThanOrEqualTo(48));
+        expect(tester.widget<ChoiceChip>(chip).onSelected, isNotNull);
+      }
+      expect(tester.takeException(), isNull);
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
 
   testWidgets('Activity Center renders only the requested durable attempt',
     (tester) async {

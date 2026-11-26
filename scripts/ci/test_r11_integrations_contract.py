@@ -19,7 +19,7 @@ class R11Contracts(unittest.TestCase):
  def test_automation_authorization_and_no_install(self):
   home=read('lib/pages/home.dart');part=home.split('Future<void> handleAutomation',1)[1].split('Future<void> interpretLink',1)[0]
   for x in ('settings.r11AutomationEnabled','approved != true','appsProvider.isForeground','getInstalledInfo(r11TaskerPackage','r11RunAutomation','r11SendTaskerResult'):self.assertIn(x,part)
-  auto=read('lib/services/r11_automation.dart');self.assertIn('preserveListingIdentity: true',auto);self.assertIn('provider.fetchUpdate(app.listingKey, exactListing: app)',auto);self.assertIn('R05OperationJournal.instance.list()',auto);self.assertNotIn('downloadAndInstallLatestApps',auto);self.assertIn('package: r11TaskerPackage',auto)
+  auto=read('lib/services/r11_automation.dart');self.assertIn('queue.enqueue([intent])',auto);self.assertIn('queue.cancelQueued(entry.id)',auto);self.assertNotIn('provider.downloadApp(',auto);self.assertIn('provider.fetchUpdate(app.listingKey, exactListing: app)',auto);self.assertIn('(journal ?? R05OperationJournal.instance).list()',auto);self.assertNotIn('downloadAndInstallLatestApps',auto);self.assertIn('package: r11TaskerPackage',auto)
   prefs=read('lib/providers/settings_provider.dart');self.assertIn("prefs?.get('r11AutomationEnabled') == true",prefs)
   imports=read('lib/providers/apps_provider_import_export.dart');self.assertIn("..remove('r11AutomationEnabled')",imports);self.assertIn("key == 'r11AutomationEnabled'",imports)
  def test_download_and_install_history_scope(self):
@@ -37,6 +37,12 @@ class R11Contracts(unittest.TestCase):
   policy=read('lib/services/r11_schedule.dart');self.assertIn('database.transaction',policy);self.assertIn('r11RateLimited(timestamp, previous, minutes)',policy)
   worker=read('lib/providers/apps_provider.dart').split('Future<void> bgUpdateCheck(',1)[1];self.assertLess(worker.index('r11InQuietHours'),worker.index('appsProvider.loadApps()'));self.assertLess(worker.index('r11ClaimAutomaticRun'),worker.index('_bgRunUpdateCheck('));self.assertIn('if (networkRestricted || chargingRestricted)',worker);self.assertIn('installStillAllowed',worker)
   self.assertIn('R11ScheduleSettings(settings: sp)',read('lib/pages/settings.dart'))
+  self.assertIn('r11RecordScheduleObservation(reason, DateTime.now())',worker)
+  self.assertIn('r11ReadScheduleObservation()',read('lib/widgets/r11_schedule_settings.dart'))
+  for reason in ('quietHours','notDue','noNetwork','disabled','networkRestriction','chargingRestriction','minimumInterval','policyUnavailable','policyChanged','allowed'):
+   self.assertIn('R11ScheduleReason.'+reason,worker)
+  self.assertIn("'queuedNotInstalled'",read('lib/services/r11_automation.dart'))
+  self.assertIn('r.channelFingerprint == channel',read('lib/services/r11_automation.dart'))
  def test_locale_parity_and_required_full_ci(self):
   from obtainx_ci_policy import classify
   self.assertTrue(classify(['lib/services/r11_automation.dart'])['full_flutter'])

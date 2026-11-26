@@ -1,4 +1,5 @@
 import 'package:sqflite/sqflite.dart';
+import 'package:obtainium/services/r07_journal_guard.dart';
 
 bool r11InQuietHours(DateTime local, int start, int end) {
   if (start == end) return false;
@@ -30,3 +31,45 @@ Future<bool> r11ClaimAutomaticRun(int minutes, DateTime now, {String? databasePa
     await database.close();
   }
 }
+
+/// Last observed automatic scheduling decision, not a claim of current OS
+/// scheduling or a successful installation. Only fixed codes and UTC time
+/// are retained; no package names, URLs, or exception text.
+enum R11ScheduleReason {
+  quietHours, notDue, noNetwork, disabled, networkRestriction,
+  chargingRestriction, minimumInterval, policyUnavailable, policyChanged,
+  allowed,
+}
+
+class R11ScheduleObservation {
+  const R11ScheduleObservation(this.reason, this.observedUtc);
+  final R11ScheduleReason reason;
+  final DateTime observedUtc;
+}
+
+Future<T> _r11ObservationStore<T>(Future<T> Function(Transaction) action,
+    {String? databasePath}) async {
+  final path = databasePath ?? '${await getDatabasesPath()}/r11_schedule_observation.db';
+  return withR07SqliteTransaction(path, () => openDatabase(path,
+    singleInstance: false, version: 1,
+    onConfigure: (db) async { await db.rawQuery('PRAGMA busy_timeout=0'); },
+    onCreate: (db, _) => db.execute('CREATE TABLE observation '
+      '(id INTEGER PRIMARY KEY, reason TEXT NOT NULL, observed INTEGER NOT NULL)')),
+    action, exclusive: true);
+}
+
+Future<void> r11RecordScheduleObservation(R11ScheduleReason reason, DateTime now,
+    {String? databasePath}) => _r11ObservationStore((txn) async {
+  await txn.insert('observation', {'id': 1, 'reason': reason.name,
+    'observed': now.toUtc().millisecondsSinceEpoch},
+    conflictAlgorithm: ConflictAlgorithm.replace);
+}, databasePath: databasePath);
+
+Future<R11ScheduleObservation?> r11ReadScheduleObservation({String? databasePath}) =>
+    _r11ObservationStore((txn) async {
+      final rows = await txn.query('observation', where: 'id = ?', whereArgs: [1]);
+      if (rows.isEmpty) { return null; }
+      final row = rows.single;
+      return R11ScheduleObservation(R11ScheduleReason.values.byName(row['reason'] as String),
+        DateTime.fromMillisecondsSinceEpoch(row['observed'] as int, isUtc: true));
+    }, databasePath: databasePath);

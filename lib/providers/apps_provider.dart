@@ -1835,9 +1835,20 @@ Future<void> bgUpdateCheck(
   params ??= {};
   final SettingsProvider settingsProvider = settings ?? SettingsProvider();
   await settingsProvider.initializeSettings();
+  Future<void> observeSchedule(R11ScheduleReason reason) async {
+    if (forceAll) { return; }
+    try {
+      await r11RecordScheduleObservation(reason, DateTime.now());
+    } catch (_) {
+      // Observation failure cannot override a scheduling refusal or imply
+      // that Android allowed work. Keep the original policy authoritative.
+      unawaited(bgLogs.add('R11 scheduling observation unavailable.'));
+    }
+  }
   if (!forceAll && r11InQuietHours(DateTime.now(), settingsProvider.r11QuietStart,
       settingsProvider.r11QuietEnd)) {
     unawaited(bgLogs.add('R11 automatic work postponed: quiet hours.'));
+    await observeSchedule(R11ScheduleReason.quietHours);
     return;
   }
 
@@ -1857,6 +1868,7 @@ Future<void> bgUpdateCheck(
     unawaited(
       bgLogs.add('BG task $taskId: Nothing due before $nextDue; skipped.'),
     );
+    await observeSchedule(R11ScheduleReason.notDue);
     return;
   }
 
@@ -1879,12 +1891,14 @@ Future<void> bgUpdateCheck(
       netResult.isEmpty ||
       (netResult.contains(ConnectivityResult.vpn) && netResult.length == 1)) {
     unawaited(bgLogs.add('BG update task: No network.'));
+    await observeSchedule(R11ScheduleReason.noNetwork);
     return;
   }
 
   if (appsProvider.settingsProvider.updateInterval == 0) {
     if (!forceAll) {
       unawaited(bgLogs.add('BG update task: Skipped (interval=0)'));
+      await observeSchedule(R11ScheduleReason.disabled);
       return;
     }
     unawaited(
@@ -1941,21 +1955,25 @@ Future<void> bgUpdateCheck(
   if (!forceAll) {
     if (networkRestricted || chargingRestricted) {
       unawaited(bgLogs.add('R11 automatic work postponed: network or charging restriction.'));
+      await observeSchedule(networkRestricted ? R11ScheduleReason.networkRestriction : R11ScheduleReason.chargingRestriction);
       await appsProvider.appCheckStore?.close();
       return;
     }
     try {
       if (!await r11ClaimAutomaticRun(settingsProvider.r11RateMinutes, DateTime.now())) {
         unawaited(bgLogs.add('R11 automatic work postponed: minimum interval.'));
+      await observeSchedule(R11ScheduleReason.minimumInterval);
         await appsProvider.appCheckStore?.close();
         return;
       }
     } catch (_) {
       unawaited(bgLogs.add('R11 automatic work postponed: scheduling policy unavailable.'));
+      await observeSchedule(R11ScheduleReason.policyUnavailable);
       await appsProvider.appCheckStore?.close();
       return;
     }
   }
+  await observeSchedule(R11ScheduleReason.allowed);
   final canInstall = !networkRestricted && !chargingRestricted;
   final silentlyInstallable = <String>[];
 
@@ -2095,6 +2113,7 @@ Future<void> bgUpdateCheck(
          BatteryState.full, BatteryState.connectedNotCharging}.contains(await Battery().batteryState)));
   if (canInstall && !installStillAllowed) {
     unawaited(bgLogs.add('R11 automatic installation postponed: policy changed during check.'));
+    await observeSchedule(R11ScheduleReason.policyChanged);
   }
   final bool installWaiting = installStillAllowed
       ? await _runBGInstallMode(

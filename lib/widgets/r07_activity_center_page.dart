@@ -115,8 +115,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
       if (mounted) setState(_load);
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Recheck failed; no operation was marked successful.'),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr('r07RecheckFailed')),
         ));
       }
     } finally {
@@ -151,99 +151,119 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     final prep = matching && provider.canCancelInstallPreparation(entry.listingKey!);
     final installed = matching &&
         provider.apps[entry.listingKey]!.installedInfo?.packageName == entry.packageId;
-    return r07AllowedActions(entry, listingMatches: matching,
+    final actions = r07AllowedActions(entry, listingMatches: matching,
         liveDownload: live, cancellableInstall: prep,
         independentlyInstalled: installed);
+    if (matching && provider.apps[entry.listingKey]!.app.settings.getBool('trackOnly') &&
+        (entry.download != null || entry.timeline?.intent.kind == 'download' ||
+            entry.timeline?.intent.kind == 'install')) {
+      actions.remove(R07ActivityAction.resume);
+    }
+    return actions;
   }
 
   String _explanation(R07ActivityRecord entry) {
     final raw = entry.reason?.toLowerCase() ?? '';
     if (raw.contains('sign') || raw.contains('certif')) {
-      return 'Signature mismatch: review the installed signer and source. Never bypass verification.';
+      return tr('r07SignerMismatch');
     }
     if (raw.contains('abi') || raw.contains('incompatib')) {
-      return 'Incompatible device ABI: choose a build for this device.';
+      return tr('r07AbiMismatch');
     }
     if (raw.contains('sdk') || raw.contains('android version')) {
-      return 'Android SDK requirement not met: review the package requirements.';
+      return tr('r07SdkMismatch');
     }
     if (raw.contains('split')) {
-      return 'Split APK set requires all compatible splits; review the selection.';
+      return tr('r07SplitMismatch');
     }
     if (raw.contains('expir') || raw.contains('404')) {
-      return 'Build artifact expired or unavailable: refresh its source release.';
+      return tr('r07ArtifactExpired');
     }
     if (raw.contains('429') || raw.contains('rate limit')) {
-      return 'Source rate limit: retry after the server allows requests.';
+      return tr('r07RateLimit');
     }
     if (raw.contains('regex') || raw.contains('filter')) {
-      return 'Invalid filter: check the source configuration before retrying.';
+      return tr('r07InvalidFilter');
     }
     if (entry.stage == 'unknown' || entry.stage == 'handedOff' ||
         entry.stage == 'awaitingApproval') {
-      return 'Android confirmation is not independently established. Review the package and installer state; do not infer success.';
+      return tr('r07Unconfirmed');
     }
-    return entry.reason ??
-        (entry.kind == 'download' ? 'Download state from its persisted R03 record.' :
-            'Only a separately verified Android install can be confirmed.');
+    return entry.reason != null ? tr('r07ReviewReason') :
+        (entry.kind == 'download' ? tr('r07DownloadEvidence') :
+            tr('r07InstallEvidence'));
   }
 
+  String _kindLabel(String kind) => switch (kind) {
+    'check' => tr('r07CheckingSources'),
+    'download' => tr('r07Download'),
+    'install' => tr('r07Installation'),
+    _ => tr('r07CurrentOperation'),
+  };
+
+  String _stageLabel(String stage) => tr('r07Stage_$stage');
+
   String _details(R07ActivityRecord entry) {
+    String field(String key, Object? value) => '${tr(key)}: ${value ?? tr('unknown')}';
     final receipt = entry.install;
-    if (receipt != null) {
-      return 'Attempt: ${receipt.id}\n'
-          'Parent attempt: ${receipt.parentAttemptId ?? '-'}\n'
-          'Operation: ${receipt.timelineId ?? '-'}\n'
-          'Listing: ${receipt.listingKey}\n'
-          'Historical channel: ${receipt.channelFingerprint ?? tr('r11UnknownChannel')}\n'
-          '${tr('r11HistoricalOnly')}\n'
-          'Package: ${receipt.packageId}\n'
-          'Source: ${receipt.sourceHost ?? 'not recorded'}\n'
-          'Branch/workflow: ${receipt.sourceBranch ?? '-'} / ${receipt.workflow ?? '-'}\n'
-          'Run/attempt/artifact: ${receipt.runId ?? '-'} / ${receipt.runAttempt ?? '-'} / ${receipt.artifactId ?? '-'}\n'
-          'Commit: ${receipt.commitSha ?? 'not recorded'}\n'
-          'Downloaded digest: ${receipt.downloadSha256 ?? 'not recorded'}\n'
-          'Installed signer: ${receipt.installedSignerSha256 ?? 'not verified'}\n'
-          'Backend: ${receipt.backend}\n'
-          'Files: ${receipt.fileNames.length}\n'
-          'Status: ${receipt.stage.name}\n'
-          'Verified exact bytes: ${receipt.exactBytesConfirmed ? receipt.verifiedUtc : 'not verified'}\n\n'
-          '${_explanation(entry)}';
-    }
-    if (entry.kind == 'integrity') return entry.reason ?? entry.title;
     final operation = entry.timeline;
-    if (operation != null) {
-      return 'Operation: ${operation.id}\nKind: ${operation.intent.kind}\n'
-          'Listing: ${operation.intent.listingKey}\nRelease: ${operation.intent.release}\n'
-          'Parent: ${operation.intent.parentId ?? '-'}\nTransfer: ${operation.transferId ?? '-'}\n'
-          'Installation receipt: ${operation.attemptId ?? '-'}\nStage: ${operation.stage}\n'
-          'Source checks finished: ${entry.batchCompleted ?? '-'} / ${entry.batchTotal ?? '-'}\n'
-          'Reason: ${operation.reason ?? '-'}\nNo installation is confirmed by this timeline.';
-    }
-    if (entry.kind == 'live') {
-      return 'Current provider operation: ${entry.id}\n'
-          'Stage: ${entry.stage}\n'
-          'This row is live in-memory state, not durable R03/R05 proof.';
-    }
-    return 'Download fingerprint: ${entry.id}\n'
-        'Source: ${entry.sourceHost ?? 'not recorded'}\n'
-        'Historical channel: ${_historyChannel(entry) ?? tr('r11UnknownChannel')}\n'
-        '${tr('r11HistoricalOnly')}\n'
-        'Stage: ${entry.stage}\n'
-        'Verified bytes: ${entry.verifiedBytes ?? 'unknown'}\n'
-        'Expected total: ${entry.totalBytes ?? 'unknown'}\n'
-        'Digest: ${entry.download?.finalDigest ?? 'not verified'}\n\n'
-        '${_explanation(entry)}';
+    final rows = <String>[
+      if (receipt != null) ...[
+        field('r07Attempt', receipt.id),
+        field('r07Parent', receipt.parentAttemptId),
+        field('r07Operation', receipt.timelineId),
+        field('r07Listing', receipt.listingKey),
+        field('r07Channel', receipt.channelFingerprint),
+        tr('r11HistoricalOnly'),
+        field('package', receipt.packageId),
+        field('source', receipt.sourceHost),
+        field('r07BranchWorkflow', '${receipt.sourceBranch ?? '-'} / ${receipt.workflow ?? '-'}'),
+        field('r07RunArtifact', '${receipt.runId ?? '-'} / ${receipt.runAttempt ?? '-'} / ${receipt.artifactId ?? '-'}'),
+        field('r07Commit', receipt.commitSha),
+        field('r07Digest', receipt.downloadSha256),
+        field('r07Signer', receipt.installedSignerSha256),
+        field('r07Backend', receipt.backend),
+        field('r07Files', receipt.fileNames.length),
+        field('r07VerifiedBytes', receipt.exactBytesConfirmed ? receipt.verifiedUtc : null),
+      ] else if (operation != null) ...[
+        field('r07Operation', operation.id),
+        field('r07Kind', _kindLabel(operation.intent.kind)),
+        field('r07Listing', operation.intent.listingKey),
+        field('r07Release', operation.intent.release),
+        field('r07Parent', operation.intent.parentId),
+        field('r07Transfer', operation.transferId),
+        field('r07Attempt', operation.attemptId),
+        tr('r07CheckCount', args: ['${entry.batchCompleted ?? '-'}', '${entry.batchTotal ?? '-'}']),
+        tr('r07InstallEvidence'),
+      ] else if (entry.kind == 'live') ...[
+        field('r07Operation', entry.id),
+        tr('r07LiveEvidence'),
+      ] else if (entry.kind == 'integrity') ...[
+        tr('r07ReadFailed'),
+      ] else ...[
+        field('r07Operation', entry.id),
+        field('source', entry.sourceHost),
+        field('r07Channel', _historyChannel(entry)),
+        tr('r11HistoricalOnly'),
+        tr('r07Bytes', args: ['${entry.verifiedBytes ?? tr('unknown')}', '${entry.totalBytes ?? tr('unknown')}']),
+        field('r07Digest', entry.download?.finalDigest),
+      ],
+      field('r07Status', _stageLabel(entry.stage)),
+      if (entry.reason != null) field('r07Reason', entry.reason),
+      _explanation(entry),
+    ];
+    return rows.join('\n');
   }
 
   Future<void> _review(R07ActivityRecord entry) async {
     await _refresh(reconcile: true);
     if (!mounted) return;
     await showDialog<void>(context: context, builder: (dialog) => AlertDialog(
-      title: Text('Review ${entry.packageId ?? entry.title}'),
+      title: Text(tr('r07ReviewTitle', args: [entry.kind == 'integrity'
+        ? tr('r07Warning') : entry.packageId ?? entry.title])),
       content: SingleChildScrollView(child: SelectableText(_details(entry))),
       actions: [TextButton(onPressed: () => Navigator.pop(dialog),
-          child: const Text('Close'))],
+          child: Text(tr('close')))],
     ));
     // R07 cannot safely recreate a consumed Android pending-intent token.
     // A separate retry must be explicitly requested as a fresh attempt.
@@ -254,8 +274,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     if (queued != null) {
       if (!_actions(entry, provider).contains(R07ActivityAction.resume)) return;
       final approved = await showDialog<bool>(context: context, builder: (dialog) => AlertDialog(
-        title: Text('Continue exact queued ${queued.intent.kind}?'),
-        content: const Text('Continue the same persisted operation. Current source identity and all required approval checks still apply.'),
+        title: Text(tr('r07QueueTitle', args: [_kindLabel(queued.intent.kind)])),
+        content: Text(tr('r07QueueConsent')),
         actions: [TextButton(onPressed: () => Navigator.pop(dialog, false), child: Text(tr('cancel'))),
           FilledButton(onPressed: () => Navigator.pop(dialog, true), child: Text(tr('continue')))],
       ));
@@ -278,7 +298,7 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
             throw StateError('Unknown queue kind');
         }
       } catch (_) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Queued operation could not continue. Review its exact status.')));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('r07QueueFailed'))));
       } finally {
         if (mounted) setState(() { _busy = false; _load(); });
       }
@@ -287,8 +307,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     final record = entry.download;
     if (record == null || !_actions(entry, provider).contains(R07ActivityAction.resume)) return;
     final approved = await showDialog<bool>(context: context, builder: (dialog) => AlertDialog(
-      title: const Text('Resume verified transfer?'),
-      content: const Text('Continue the same verified bytes and release. If the server or receipt changed, resume stops without starting a new installation.'),
+      title: Text(tr('r07ResumeTitle')),
+      content: Text(tr('r07ResumeConsent')),
       actions: [TextButton(onPressed: () => Navigator.pop(dialog, false), child: Text(tr('cancel'))),
         FilledButton(onPressed: () => Navigator.pop(dialog, true), child: Text(tr('continue')))],
     ));
@@ -301,8 +321,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
         allowExternalContinuation: () => _matchesListing(entry, provider));
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('The retained transfer could not resume. No new install was authorized.')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr('r07ResumeFailed'))));
       }
     } finally {
       if (mounted) setState(() { _busy = false; _load(); });
@@ -322,20 +342,20 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
          x.stage == R05InstallStage.handedOff)).toList();
     if (!mounted) return;
     if (pending.isNotEmpty || !_matchesListing(entry, provider)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Another active attempt or changed listing blocks retry.'),
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(tr('r07RetryBlocked')),
       ));
       return;
     }
     final approved = await showDialog<bool>(context: context,
       builder: (dialog) => AlertDialog(
-        title: const Text('Start a new attempt?'),
-        content: const Text('This repeats the normal source download and install flow. It does not resolve or overwrite the previous receipt; Android approvals remain required.'),
+        title: Text(tr('r07RetryTitle')),
+        content: Text(tr('r07RetryConsent')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialog, false),
-              child: const Text('Not now')),
+              child: Text(tr('cancel'))),
           FilledButton(onPressed: () => Navigator.pop(dialog, true),
-              child: const Text('Continue')),
+              child: Text(tr('continue'))),
         ],
       ));
     if (approved != true || !mounted || !_matchesListing(entry, provider)) return;
@@ -344,8 +364,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
       await provider.downloadAndInstallLatestApps(<String>[key], context, retryParent: entry.install);
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('New attempt could not finish; inspect its recorded status.'),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr('r07RetryFailed')),
         ));
       }
     } finally {
@@ -360,7 +380,11 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
       try {
         await R07OperationTimeline.instance.cancelQueued(entry.timeline!.id);
       } catch (_) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Queue ownership changed; no active operation was cancelled.')));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('r07CancelChanged'))));
+          await _refresh();
+        }
+        return;
       }
     } else if (entry.kind == 'live') {
       provider.cancelDownload(key);
@@ -374,8 +398,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
       return; // R03 history is not the active provider-owned transfer.
     }
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Cancel requested. Final status still requires confirmation.'),
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(tr('r07CancelRequested')),
       ));
       await _refresh();
     }
@@ -388,23 +412,19 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     // Live bytes are an estimate. Persisted R03 chunks are authoritative;
     // transfer progress never becomes installer confirmation.
     final fraction = entry.progress;
-    final label = entry.kind == 'integrity' ? 'History warning' :
-        entry.kind == 'download' ? 'Download' :
-        entry.kind == 'timeline' ? 'Operation: ${entry.timeline!.intent.kind}' :
-        entry.kind == 'live' ? 'Current operation' : 'Installation';
-    final status = entry.stage == 'confirmed' ? 'Confirmed on device' :
-        entry.stage == 'handedOff' ? 'Android handoff — not confirmed' :
-        entry.stage == 'unknown' ? 'Outcome unknown' :
-        entry.stage == 'awaitingApproval' ? 'Approval needs review' :
-        entry.stage == 'ready' ? 'Verified download ready' : entry.stage;
+    final label = entry.kind == 'integrity' ? tr('r07Warning') :
+        entry.kind == 'download' ? tr('r07Download') :
+        entry.kind == 'timeline' ? _kindLabel(entry.timeline!.intent.kind) :
+        entry.kind == 'live' ? tr('r07CurrentOperation') : tr('r07Installation');
+    final status = _stageLabel(entry.stage);
     Widget action(R07ActivityAction x) {
       final text = switch (x) {
-        R07ActivityAction.review => 'Review',
-        R07ActivityAction.resume => 'Resume',
-        R07ActivityAction.retry => 'Retry',
-        R07ActivityAction.cancel => 'Cancel',
-        R07ActivityAction.open => 'Open',
-        R07ActivityAction.details => 'Details',
+        R07ActivityAction.review => tr('r07Review'),
+        R07ActivityAction.resume => tr('r07Resume'),
+        R07ActivityAction.retry => tr('retry'),
+        R07ActivityAction.cancel => tr('cancel'),
+        R07ActivityAction.open => tr('r07Open'),
+        R07ActivityAction.details => tr('details'),
       };
       return TextButton(
         key: ValueKey('r07-${x.name}-${entry.id}'),
@@ -432,6 +452,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
               break;
           }
         },
+        style: TextButton.styleFrom(minimumSize: const Size(48, 48),
+          tapTargetSize: MaterialTapTargetSize.padded),
         child: Text(text),
       );
     }
@@ -441,33 +463,28 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Semantics(
-            label: '$label ${entry.title}, $status',
-            child: ListTile(
+          ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Icon(entry.stage == 'confirmed' ? Icons.verified_rounded :
                 entry.needsReview ? Icons.pending_actions_rounded :
                 entry.kind == 'download' ? Icons.download_rounded :
                 Icons.receipt_long_rounded),
-              title: Text(entry.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+              title: Text(entry.kind == 'integrity' ? tr('r07Warning') : entry.title),
               subtitle: Text('$label · $status\n${entry.updatedUtc.toLocal()}'),
-              isThreeLine: true,
               onTap: () => _review(entry),
-            ),
           ),
           if (entry.kind == 'download') ...[
             if (fraction != null)
               LinearProgressIndicator(value: fraction,
-                  semanticsLabel: 'Verified download progress'),
+                  semanticsLabel: tr('r07VerifiedProgress')),
             if (fraction == null && (live != null || !entry.isFinished))
-              const LinearProgressIndicator(semanticsLabel: 'Download progress indeterminate'),
+              LinearProgressIndicator(semanticsLabel: tr('r07IndeterminateProgress')),
             const SizedBox(height: 5),
-            Text('Verified ${entry.verifiedBytes ?? 'unknown'} bytes'
-              '${entry.totalBytes == null ? ' · Total unknown' : ' / ${entry.totalBytes} bytes'}',
+            Text(tr('r07Bytes', args: ['${entry.verifiedBytes ?? tr('unknown')}', '${entry.totalBytes ?? tr('unknown')}']),
               style: Theme.of(context).textTheme.bodySmall),
           ],
           if (entry.kind == 'live')
-            Text('Current app state only; no durable completion claimed.',
+            Text(tr('r07LiveEvidence'),
                 style: Theme.of(context).textTheme.bodySmall),
           if (entry.reason != null || entry.needsReview)
             Padding(padding: const EdgeInsets.symmetric(vertical: 4),
@@ -531,8 +548,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
       final approved = await showDialog<bool>(context: context, builder: (dialog) => AlertDialog(
         title: Text(tr('r11RetentionConfirm')),
         content: Text('${tr('r11RetentionDays', args: ['$days'])}\n'
-          'Package: ${widget.packageId ?? tr('r11AllChannels')}\n'
-          'Listing: ${widget.listingKey ?? tr('r11AllChannels')}\n'
+          '${tr('package')}: ${widget.packageId ?? tr('r11AllChannels')}\n'
+          '${tr('r07Listing')}: ${widget.listingKey ?? tr('r11AllChannels')}\n'
           '${channel == null ? tr('r11AllChannels') : channel == 'unknown' ? tr('r11UnknownChannel') : channel}\n'
           '${tr('r11RetentionPreview', args: ['${preview.entries.length}', '${downloadPreview.entries.length}'])}'),
         actions: [TextButton(onPressed: () => Navigator.pop(dialog, false), child: Text(tr('cancel'))),
@@ -547,7 +564,7 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
       } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Retention stopped after a history change or I/O error. At least $count receipts removed; review the refreshed history.')));
+            content: Text(tr('r07RetentionStopped', args: ['$count']))));
         }
         return;
       }
@@ -563,8 +580,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
   Widget build(BuildContext context) => Consumer<AppsProvider>(
     builder: (context, provider, _) => Scaffold(
       appBar: AppBar(title: Text(widget.packageId == null ?
-          'Activity Center' : 'Activity: ${widget.packageId}'), actions: [
-        IconButton(tooltip: 'Reconcile installed packages',
+          tr('r10SettingsActivityCenter') : tr('r07PackageActivity', args: [widget.packageId!])), actions: [
+        IconButton(tooltip: tr('r07Reconcile'),
           icon: const Icon(Icons.refresh_rounded),
           onPressed: _busy ? null : () => _refresh(reconcile: true)),
       ]),
@@ -572,10 +589,11 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
         future: _entries,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Text('Activity receipts could not be read. Evidence was not erased.'),
-              TextButton(onPressed: () => _refresh(), child: const Text('Retry reading')),
-            ]));
+            return Center(child: SingleChildScrollView(child: Padding(
+              padding: const EdgeInsets.all(16), child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text(tr('r07ReadFailed')),
+              TextButton(onPressed: () => _refresh(), child: Text(tr('r07RetryReading'))),
+            ]))));
           }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           final warnings = snapshot.data!.where((x) => x.kind == 'integrity').toList();
@@ -606,26 +624,27 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
               SliverToBoxAdapter(child: Column(children: [
                 for (final warning in warnings) ListTile(
                   leading: const Icon(Icons.warning_amber_rounded),
-                  title: Text(warning.title), subtitle: Text(warning.reason ?? ''),
+                  title: Text(tr('r07Warning')), subtitle: Text(tr('r07ReadFailed')),
+                  onTap: () => _review(warning),
                 ),
                 if (liveCheck) ListTile(
                   key: const ValueKey('r07-live-check'),
                   leading: const CircularProgressIndicator(),
-                  title: const Text('Checking app sources'),
+                  title: Text(tr('r07CheckingSources')),
                   subtitle: Text(() {
                     final activeChecks = items.where((x) => x.timeline?.intent.kind == 'check' && !x.isFinished).toList();
-                    if (activeChecks.isEmpty) return 'Preparing durable check queue';
+                    if (activeChecks.isEmpty) return tr('r07PreparingQueue');
                     final check = activeChecks.first;
-                    return '${check.batchCompleted ?? 0} / ${check.batchTotal ?? 0} source checks finished';
+                    return tr('r07CheckCount', args: ['${check.batchCompleted ?? 0}', '${check.batchTotal ?? 0}']);
                   }()),
                 ),
                 if (widget.operationId == null) ...[
                   Padding(padding: const EdgeInsets.all(12), child: Text(tr('r11HistoricalOnly'))),
                   Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: DropdownButton<String>(
-                    isExpanded: true, value: channel,
+                    isExpanded: true, itemHeight: null, value: channel,
                     items: [for (final value in channels) DropdownMenuItem(value: value,
                       child: Text(value == 'all' ? tr('r11AllChannels') : value == 'unknown'
-                        ? tr('r11UnknownChannel') : value, overflow: TextOverflow.ellipsis))],
+                        ? tr('r11UnknownChannel') : value, softWrap: true))],
                     onChanged: _busy ? null : (value) {
                       if (value != null) {
                         setState(() {
@@ -643,17 +662,20 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
                   ]),
                 ],
                 if (widget.operationId == null)
-                  Padding(padding: const EdgeInsets.all(8), child: SegmentedButton<String>(
-                    showSelectedIcon: false,
-                    segments: const [
-                      ButtonSegment(value: 'all', label: Text('All')),
-                      ButtonSegment(value: 'review', label: Text('Review')),
-                      ButtonSegment(value: 'done', label: Text('Finished')),
+                  Padding(padding: const EdgeInsets.all(8), child: Wrap(
+                    spacing: 8, runSpacing: 8, children: [
+                      for (final value in ['all', 'review', 'done'])
+                        ChoiceChip(
+                          key: ValueKey('r07-filter-$value'),
+                          label: Text(value == 'all' ? tr('all') :
+                            value == 'review' ? tr('r07Review') : tr('r07Finished')),
+                          selected: _filter == value,
+                          materialTapTargetSize: MaterialTapTargetSize.padded,
+                          onSelected: _busy ? null : (_) => setState(() {
+                            _filter = value; _historyLimit = _pageSize; _load();
+                          }),
+                        ),
                     ],
-                    selected: {_filter},
-                    onSelectionChanged: (value) => setState(() {
-                      _filter = value.first; _historyLimit = _pageSize; _load();
-                    }),
                   )),
               ])),
               if (items.isEmpty)
@@ -661,8 +683,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
                   child: Center(child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Text(widget.operationId == null ?
-                      'No matching activity records. Pull down to recheck.' :
-                      'This exact operation was not found. No other attempt was substituted.'),
+                      tr('r07Empty') :
+                      tr('r07ExactMissing')),
                   )))
               else SliverList.builder(
                 itemCount: visible.length,

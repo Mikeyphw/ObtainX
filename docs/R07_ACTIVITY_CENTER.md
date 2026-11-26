@@ -30,3 +30,7 @@ PR #30 at `840f2c7eab4838c2b536649b433945c90b3d0bbe` contained two malformed YAM
 ## R07-F02: real journal widget-test synchronization
 
 On PR #30 head `6c146dda3e6914190badbae074c4f51f3a5808cd`, five required workflows succeeded. Hosted Flutter run 45396187724 failed one of 17 R07 tests: the empty view was asserted after a simulated 250ms delay, without awaiting real disk I/O. The test now runs actual catalog I/O in the real asynchronous zone, awaits the first request with a bounded deadline, renders completion and disposes the refresh timer. The original empty-state assertion remains, and an additional two-receipt fixture verifies exact operation routing and absent unsafe actions. No production behavior or hosted qualification gate changed. Fresh hosted evidence is required.
+
+## GAP-05 — Localized controls and queued automation
+
+Activity Center presents localized status and evidence explanations. Filters wrap at large text sizes, action targets are padded to at least 48 logical pixels, and review remains accessible without gestures. Raw diagnostic evidence remains in Details. Automation may enqueue an exact download intent only; explicit continuation revalidates listing, release and eligibility. A failed queued cancellation is reported as a failure rather than a successful cancellation request.

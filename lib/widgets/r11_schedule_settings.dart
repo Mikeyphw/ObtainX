@@ -1,10 +1,40 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:obtainium/providers/settings_provider.dart';
+import 'package:obtainium/services/r11_schedule.dart';
 
-class R11ScheduleSettings extends StatelessWidget {
+class R11ScheduleSettings extends StatefulWidget {
   const R11ScheduleSettings({super.key, required this.settings});
   final SettingsProvider settings;
+
+  @override
+  State<R11ScheduleSettings> createState() => _R11ScheduleSettingsState();
+}
+
+class _R11ScheduleSettingsState extends State<R11ScheduleSettings>
+    with WidgetsBindingObserver {
+  late Future<R11ScheduleObservation?> _observation;
+  SettingsProvider get settings => widget.settings;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _observation = r11ReadScheduleObservation();
+  }
+
+  void _reload() => setState(() { _observation = r11ReadScheduleObservation(); });
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) { _reload(); }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
 
   String _time(BuildContext context, int minutes) => TimeOfDay(
     hour: minutes ~/ 60, minute: minutes % 60).format(context);
@@ -44,10 +74,29 @@ class R11ScheduleSettings extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => ListTile(
+  Widget build(BuildContext context) => Column(children: [ListTile(
     title: Text(tr('r11Schedule')),
     subtitle: Text('${_time(context, settings.r11QuietStart)} – ${_time(context, settings.r11QuietEnd)} · '
       '${tr('r11Minutes', args: ['${settings.r11RateMinutes}'])}\n${tr('r11ScheduleHelp')}'),
     onTap: () => _configure(context),
-  );
+  ), FutureBuilder<R11ScheduleObservation?>(future: _observation,
+    builder: (context, snapshot) {
+      final observation = snapshot.data;
+      final String message;
+      if (snapshot.connectionState != ConnectionState.done) {
+        message = tr('r11ScheduleReading');
+      } else if (snapshot.hasError) {
+        message = tr('r11ScheduleUnavailable');
+      } else if (observation == null) {
+        message = tr('r11ScheduleNoObservation');
+      } else {
+        message = '${tr('r11ScheduleReason_${observation.reason.name}')}\n'
+          '${observation.observedUtc.toLocal()}';
+      }
+      return ListTile(title: Text(tr('r11ScheduleLastObservation')),
+        subtitle: Text(message), trailing: IconButton(
+          tooltip: tr('r07Refresh'), onPressed: _reload,
+          icon: const Icon(Icons.refresh)));
+    }),
+  ]);
 }

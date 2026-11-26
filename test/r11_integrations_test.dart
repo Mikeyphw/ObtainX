@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,6 +10,7 @@ import 'package:obtainium/services/r03_download_engine.dart';
 import 'package:obtainium/services/r05_operation_journal.dart';
 import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/r11_automation.dart';
+import 'package:obtainium/services/r07_operation_timeline.dart';
 import 'package:obtainium/services/r11_external_requests.dart';
 import 'package:obtainium/services/r11_history.dart';
 import 'package:obtainium/services/r11_schedule.dart';
@@ -23,6 +25,28 @@ App listing({String? key, String url = 'https://github.com/example/project'}) =>
 class _NoProvider implements AppsProvider {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _AutomationProvider implements AppsProvider {
+  @override
+  final AppListings apps = AppListings();
+  @override
+  bool isForeground = true;
+  @override
+  Completer<List<App>>? get updateCheckCompleter => null;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _RevokingTimeline extends R07OperationTimeline {
+  _RevokingTimeline({required super.testingRoot, required this.onWritten});
+  final void Function() onWritten;
+  @override
+  Future<List<R07TimelineEntry>> enqueue(List<R07OperationIntent> intents) async {
+    final rows = await super.enqueue(intents);
+    onWritten();
+    return rows;
+  }
 }
 
 void main() {
@@ -71,6 +95,109 @@ void main() {
     final app = listing();
     final request = R11AutomationRequest(app.id, R11AutomationAction.download, 'r1');
     expect(await r11RunAutomation(provider, settings, request, app), {'status': 'refused'});
+  });
+  group('GAP-05 enabled automation dispatch', () {
+    late Directory root;
+    late SettingsProvider settings;
+    late _AutomationProvider provider;
+    late App app;
+    late R07OperationTimeline timeline;
+    setUp(() async {
+      root = await Directory.systemTemp.createTemp('r11-automation-');
+      SharedPreferences.setMockInitialValues({'r11AutomationEnabled': true});
+      settings = SettingsProvider()..prefs = await SharedPreferences.getInstance();
+      provider = _AutomationProvider();
+      app = listing().copyWith(apkUrls: const [MapEntry('base.apk', 'https://example.org/base.apk')]);
+      provider.apps[app.listingKey] = AppInMemory(app, null, null, null);
+      timeline = R07OperationTimeline(testingRoot: root);
+    });
+    tearDown(() async {
+      settings.dispose();
+      await root.delete(recursive: true);
+    });
+    R11AutomationRequest request(R11AutomationAction action) => R11AutomationRequest(app.id, action, 'r1');
+    test('download persists exact release without entering a provider transfer', () async {
+      final result = await r11RunAutomation(provider, settings,
+        request(R11AutomationAction.download), app, timeline: timeline);
+      expect(result['status'], 'queuedNotInstalled');
+      final rows = await R07OperationTimeline(testingRoot: root).readActivity();
+      final row = rows.single;
+      expect(result['operation'], row.id);
+      expect(row.stage, 'queued');
+      expect(row.intent.matches(R07OperationIntent(kind: 'download',
+        listingKey: app.listingKey, packageId: app.id, channel: r11ChannelFingerprint(app),
+        release: downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(app)))), isTrue);
+      expect(row.attemptId, isNull);
+      expect(row.transferId, isNull);
+    });
+    test('revoked consent cancels only the newly queued intent', () async {
+      final first = await r11RunAutomation(provider, settings,
+        request(R11AutomationAction.download), app, timeline: timeline);
+      final revoking = _RevokingTimeline(testingRoot: root,
+        onWritten: () { settings.r11AutomationEnabled = false; });
+      expect(await r11RunAutomation(provider, settings, request(R11AutomationAction.download),
+        app, timeline: revoking), {'status': 'refused'});
+      final rows = await timeline.readActivity();
+      expect(rows.length, 2);
+      expect(rows.singleWhere((row) => row.id == first['operation']).stage, 'queued');
+      expect(rows.singleWhere((row) => row.id != first['operation']).stage, 'cancelled');
+    });
+    test('release change during enqueue cancels old intent', () async {
+      final revoking = _RevokingTimeline(testingRoot: root, onWritten: () {
+        provider.apps[app.listingKey] = AppInMemory(app.copyWith(latestVersion: '2'), null, null, null);
+      });
+      expect(await r11RunAutomation(provider, settings, request(R11AutomationAction.download),
+        app, timeline: revoking), {'status': 'refused'});
+      expect((await timeline.readActivity()).single.stage, 'cancelled');
+    });
+    test('check and state return only current observation and revalidate consent', () async {
+      final checked = await r11RunAutomation(provider, settings, request(R11AutomationAction.check),
+        app, checkSource: (_) async => app.copyWith(latestVersion: '2'));
+      expect(checked['status'], 'ok');
+      expect(checked['persisted'], isFalse);
+      expect(checked['updateAvailable'], isTrue);
+      expect(provider.apps[app.listingKey]!.app.latestVersion, '1');
+      final state = await r11RunAutomation(provider, settings, request(R11AutomationAction.state), app);
+      expect(state['status'], 'ok');
+      expect(state['observedFrom'], 'currentLibrary');
+      expect(state['installed'], isFalse);
+      final changed = await r11RunAutomation(provider, settings, request(R11AutomationAction.check),
+        app, checkSource: (_) async => app.copyWith(url: 'https://example.org/other'));
+      expect(changed['status'], 'notAvailable');
+      final revoked = await r11RunAutomation(provider, settings, request(R11AutomationAction.check),
+        app, checkSource: (_) async { settings.r11AutomationEnabled = false; return app; });
+      expect(revoked['status'], 'notAvailable');
+    });
+    test('receipt ignores newer wrong-channel and unknown-channel attempts', () async {
+      final journal = R05OperationJournal(testingRoot: root);
+      Future<R05OperationReceipt> begin(String? channel) => journal.begin(listingKey: app.listingKey,
+        packageId: app.id, backend: 'system', kind: 'apk', fileNames: ['private.apk'],
+        channelFingerprint: channel);
+      final current = await begin(r11ChannelFingerprint(app));
+      await begin('b' * 64);
+      await begin(null);
+      final result = await r11RunAutomation(provider, settings, request(R11AutomationAction.receipt),
+        app, journal: journal);
+      expect(result['status'], 'ok');
+      expect(result['receipt'], r11PublicReceipt(current));
+      expect(jsonEncode(result), isNot(contains('private.apk')));
+    });
+  });
+  test('last scheduling observation survives reopening and replaces previous reason', () async {
+    final root = await Directory.systemTemp.createTemp('r11-observation-');
+    addTearDown(() async { await root.delete(recursive: true); });
+    final path = '${root.path}/observation.db';
+    final start = DateTime.utc(2026, 11, 26, 12);
+    expect(await r11ReadScheduleObservation(databasePath: path), isNull);
+    await r11RecordScheduleObservation(R11ScheduleReason.quietHours, start, databasePath: path);
+    final quiet = await r11ReadScheduleObservation(databasePath: path);
+    expect(quiet?.reason, R11ScheduleReason.quietHours);
+    expect(quiet?.observedUtc, start);
+    final next = start.add(const Duration(minutes: 30));
+    await r11RecordScheduleObservation(R11ScheduleReason.allowed, next, databasePath: path);
+    final allowed = await r11ReadScheduleObservation(databasePath: path);
+    expect(allowed?.reason, R11ScheduleReason.allowed);
+    expect(allowed?.observedUtc, next);
   });
   test('receipt projection excludes raw metadata and separates old channel from current', () {
     final app = listing();

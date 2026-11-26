@@ -7,7 +7,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 def read(path): return (ROOT/path).read_text()
-def locale(lang): return json.loads(read(f'assets/translations/{lang}.json'))
+def locale(lang):
+    def unique(pairs):
+        data = dict(pairs)
+        if len(data) != len(pairs):
+            raise ValueError(f'Duplicate translation key in {lang}')
+        return data
+    return json.loads(read(f'assets/translations/{lang}.json'), object_pairs_hook=unique)
 def flatten(data, prefix=''):
     for key, value in data.items():
         if isinstance(value, dict): yield from flatten(value, prefix+key+'.')
@@ -77,7 +83,7 @@ class R10Accessibility(unittest.TestCase):
             self.assertEqual(result['extra'],sorted(data.keys()-en.keys()))
             self.assertEqual(result['placeholder_mismatches'],[k for k in sorted(shared) if placeholders(en[k]) != placeholders(data[k])])
             self.assertEqual(result['blank'],[k for k in sorted(shared) if not data[k].strip()])
-            self.assertFalse(result['placeholder_mismatches']);self.assertFalse(result['blank'])
+            self.assertFalse(result['placeholder_mismatches']);self.assertFalse(result['blank']);self.assertFalse(result['missing'])
         for lang in ('en','fr','ja','tr','pt','pt-BR'):
             for key in report['new_labels']:
                 self.assertTrue(locale(lang)[key].strip())

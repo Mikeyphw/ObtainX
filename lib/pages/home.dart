@@ -564,7 +564,8 @@ class HomePageState extends State<HomePage> {
         final result = await r11RunAutomation(appsProvider, settings, request, selected);
         if (!mounted || !settings.r11AutomationEnabled || !appsProvider.isForeground) return;
         await r11SendTaskerResult(request, result);
-        showMessage(tr('r11AutomationResult'));
+        showMessage(tr(result['status'] == 'queuedNotInstalled'
+            ? 'r11AutomationQueued' : 'r11AutomationResult'));
       } catch (_) {
         // Never send raw exceptions, source URLs, or credentials to a caller.
         if (mounted) showMessage(tr('r11AutomationFailed'), isError: true);

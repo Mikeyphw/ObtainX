@@ -26,7 +26,7 @@ FILES={
         'class R05ExtraApprovalTile', 'r05ExtraApprovalPreference'),
     'lib/widgets/r07_activity_center_page.dart':(
         'class R07ActivityCenterPage', 'R05OperationJournal.instance.list()',
-        'reconcileR05OperationReceipts()', 'Android confirmation is not independently established.'),
+        'reconcileR05OperationReceipts()', "tr('r07Unconfirmed')"),
     'lib/providers/apps_provider_install.dart':(
         '_r05BeginAttempt(', 'sha256FileOffIsolate(primary.path)',
         '_r05AdditionalApproval(', '_r05CloseAttempt(',

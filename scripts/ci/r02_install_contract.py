@@ -20,9 +20,9 @@ _BAD_ARCHIVE_CLEANUP_RE = re.compile(
     parsedArchivePath\s*=\s*plan\.baseApkPath;\s*
     \}\s*catch\s*\(_\)\s*\{\s*
     //\s*Discard\s+any\s+archive\s+whose\s+package\s+inventory\s+is\s+invalid\.\s*
-    final\s+extracted\s*=\s*Directory\(apkDirPath\);\s*
-    if\s*\(\s*extracted\.existsSync\(\)\s*\)\s*\{\s*
-    extracted\.deleteSync\(\s*recursive:\s*true\s*\);\s*
+    //\s*Only\s+remove\s+a\s+destination\s+that\s+this\s+invocation\s+published\.\s*
+    if\s*\(\s*apkDir\s*!=\s*null\s*&&\s*apkDir\.existsSync\(\)\s*\)\s*\{\s*
+    apkDir\.deleteSync\(\s*recursive:\s*true\s*\);\s*
     \}\s*rethrow;\s*\}
     """,
     re.VERBOSE,
@@ -83,7 +83,7 @@ def inspect(root: Path = ROOT) -> list[str]:
                   'await dir.extracted.delete(recursive: true)',
                   'installArtifactFormat(originalAssetName)',
                   'originalSplits.difference(retained).isNotEmpty',
-                  'extracted.deleteSync(recursive: true)'):
+                  'apkDir.deleteSync(recursive: true)'):
         require(check in provider, f'R02 install source integration missing: {check}')
     require(archive_inventory_cleanup_intact(provider),
             'invalid archive inventory must delete published extraction and rethrow')

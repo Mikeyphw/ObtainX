@@ -21,7 +21,7 @@ class CISelection(unittest.TestCase):
     def test_adversarial_source_and_workflows_require_full(self):
         for path in ('.github/workflows/obtainx-r02-rt02c.yml','scripts/ci/r02_rt02c_hosted.py',
                      'scripts/ci/obtainx_ci_policy.py','android/app/build.gradle',
-                     'pubspec.lock','docs/SECURITY_RELEASE_POLICY.md'):
+                     'pubspec.lock','packages/obtainx_native_evidence/android/build.gradle.kts','docs/SECURITY_RELEASE_POLICY.md'):
             self.assertTrue(classify([path])['full_flutter'],path)
     def test_unknown_github_configuration_fails_closed(self):
         self.assertTrue(classify(['.github/codeowners'])['full_flutter'])

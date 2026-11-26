@@ -943,9 +943,9 @@ extension AppsProviderInstall on AppsProvider {
       } else {
         final extracted = Directory('${stage.path}/extracted');
         if (format == InstallArtifactFormat.tarball) {
-          await extractTarballOffIsolate(artifact.path, extracted.path, limits: r09InspectionLimits);
+          await extractTarballOffIsolate(artifact.path, extracted.path, limits: r09InspectionLimits, checkCancellation: token.throwIfCancelled);
         } else {
-          await extractZipOffIsolate(artifact.path, extracted.path, limits: r09InspectionLimits);
+          await extractZipOffIsolate(artifact.path, extracted.path, limits: r09InspectionLimits, checkCancellation: token.throwIfCancelled);
         }
         token.throwIfCancelled();
         final allApks = extracted.listSync(recursive: true, followLinks: false).whereType<File>()
@@ -1321,9 +1321,9 @@ extension AppsProviderInstall on AppsProvider {
         final String apkDirPath = '${downloadedFile.path}-dir';
         try {
           if (isTarball) {
-            await extractTarballFile(downloadedFile.path, apkDirPath);
+            await extractTarballFile(downloadedFile.path, apkDirPath, cancellationToken);
           } else {
-            await unzipFile(downloadedFile.path, apkDirPath);
+            await unzipFile(downloadedFile.path, apkDirPath, cancellationToken);
           }
           apkDir = Directory(apkDirPath);
           final apks = _archiveApkCandidates(apkDir, app, isTarball);
@@ -1335,9 +1335,9 @@ extension AppsProviderInstall on AppsProvider {
           parsedArchivePath = plan.baseApkPath;
         } catch (_) {
           // Discard any archive whose package inventory is invalid.
-          final extracted = Directory(apkDirPath);
-          if (extracted.existsSync()) {
-            extracted.deleteSync(recursive: true);
+          // Only remove a destination that this invocation published.
+          if (apkDir != null && apkDir.existsSync()) {
+            apkDir.deleteSync(recursive: true);
           }
           rethrow;
         }
@@ -1506,15 +1506,18 @@ extension AppsProviderInstall on AppsProvider {
       await isDowngradeModuleInstalled();
 
   // R01: both ZIP and TAR use the same bounded, atomic archive extractor.
-  Future<void> unzipFile(String filePath, String destinationPath) async {
-    await extractZipOffIsolate(filePath, destinationPath);
+  Future<void> unzipFile(String filePath, String destinationPath,
+      [CancellationToken? token]) async {
+    await extractZipOffIsolate(filePath, destinationPath,
+        checkCancellation: token?.throwIfCancelled);
   }
 
   Future<void> extractTarballFile(
     String filePath,
-    String destinationPath,
+    String destinationPath, [CancellationToken? token]
   ) async {
-    await extractTarballOffIsolate(filePath, destinationPath);
+    await extractTarballOffIsolate(filePath, destinationPath,
+        checkCancellation: token?.throwIfCancelled);
   }
 
   void _ensureGitHubAttestationPolicy(String appId) {

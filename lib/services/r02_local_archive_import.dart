@@ -9,6 +9,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:obtainium/providers/apps_provider.dart';
+import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/services/r02_local_archive_policy.dart';
@@ -51,6 +52,9 @@ Future<void> showR02LocalArchiveImport(
 
   final request = 'r02local${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
   var wasCancelled = false;
+  void checkCancellation() {
+    if (wasCancelled) throw const CancellationException();
+  }
   String? privatePath;
   Directory? extracted;
 
@@ -102,14 +106,16 @@ Future<void> showR02LocalArchiveImport(
     } else {
       final temp = await getTemporaryDirectory();
       final stage = Directory('${temp.path}/r02-local-extracted-${DateTime.now().microsecondsSinceEpoch}');
-      extracted = stage;
       // R01's atomic bounded extractor refuses traversal, symlinks, duplicate
       // entries, CRC failures, excessive depth, bytes and expansion bombs.
       if (format == InstallArtifactFormat.tarball) {
-        await extractTarballOffIsolate(source.path, stage.path);
+        await extractTarballOffIsolate(source.path, stage.path,
+            checkCancellation: checkCancellation);
       } else {
-        await extractZipOffIsolate(source.path, stage.path);
+        await extractZipOffIsolate(source.path, stage.path,
+            checkCancellation: checkCancellation);
       }
+      extracted = stage;
       for (final entity in stage.listSync(recursive: true, followLinks: false)) {
         if (FileSystemEntity.typeSync(entity.path, followLinks: false) ==
             FileSystemEntityType.link) {
@@ -312,6 +318,8 @@ Future<void> showR02LocalArchiveImport(
     } finally {
       provider.endInstallPreparation(listing, gate);
     }
+  } on CancellationException {
+    notice('Local archive operation cancelled.');
   } finally {
     if (extracted != null && extracted.existsSync()) {
       await extracted.delete(recursive: true);

@@ -79,6 +79,7 @@ RISK_GLOBS = (
     'lib/services/artifact_file_work.dart',
     'integration_test/**',
     'android/**',
+    'packages/obtainx_native_evidence/**',
     '.github/workflows/**',
     'scripts/ci/r02_rt02**',
     'scripts/ci/r02f_p02_*',

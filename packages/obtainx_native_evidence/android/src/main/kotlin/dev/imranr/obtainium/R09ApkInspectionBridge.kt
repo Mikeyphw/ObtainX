@@ -39,6 +39,8 @@ internal class R09ApkInspectionBridge(context: Context, messenger: BinaryMesseng
             }
         }
     }
+    fun close() { channel.setMethodCallHandler(null) }
+
     @Suppress("DEPRECATION")
     private fun inspect(path: String): Map<String, Any?> {
         val file = checked("R09_APK_PATH_REFUSED") {
@@ -79,16 +81,20 @@ internal class R09ApkInspectionBridge(context: Context, messenger: BinaryMesseng
             }
         }
         val signers = checked("R09_APK_SIGNERS_REFUSED") {
+            val verified = R09ApkSignatures.current(file, Build.VERSION.SDK_INT)
             val signatures = if (Build.VERSION.SDK_INT >= 28) info?.signingInfo?.apkContentsSigners else info?.signatures
-            signatures?.map { signature ->
+            val platform = signatures?.map { signature ->
                 MessageDigest.getInstance("SHA-256").digest(signature.toByteArray())
                     .joinToString("") { byte -> "%02x".format(byte.toInt() and 255) }
             }?.distinct()?.sorted().orEmpty()
+            if (manifest.split == null || platform.isNotEmpty()) require(platform == verified)
+            verified
         }
         return mapOf(
             "packageName" to manifest.packageName, "versionCode" to manifest.versionCode,
             "versionName" to info?.versionName, "split" to manifest.split,
             "configForSplit" to manifest.configForSplit, "minSdk" to manifest.minSdk,
+            "targetSdk" to info?.applicationInfo?.targetSdkVersion,
             "splitRequired" to manifest.splitRequired, "requiredSplits" to manifest.requiredSplits,
             "requiredSplitTypes" to manifest.requiredSplitTypes, "splitTypes" to manifest.splitTypes,
             "nativeAbis" to manifest.nativeAbis, "signers" to signers,

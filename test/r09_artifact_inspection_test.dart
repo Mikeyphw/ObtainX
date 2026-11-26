@@ -87,7 +87,8 @@ void main() {
   test('split inventory must match actual manifest and base identity', () {
     final base = member('base.apk');
     final split = member('config.arm64_v8a.apk', split: 'config.arm64_v8a', signers: []);
-    expect(review([base, split], format: InstallArtifactFormat.apks).eligible, isTrue);
+    expect(review([base, split], format: InstallArtifactFormat.apks).eligible, isFalse);
+    expect(review([base, member('config.arm64_v8a.apk', split: 'config.arm64_v8a')], format: InstallArtifactFormat.apks).eligible, isTrue);
     for (final bad in [
       member('config.arm64_v8a.apk', split: 'config.x86_64'),
       member('config.arm64_v8a.apk', split: 'config.arm64_v8a', version: 3),

@@ -1594,6 +1594,7 @@ class GitHub extends AppSource {
       'runId': archive.runId,
       'runAttempt': archive.runAttempt,
       'workflowId': archive.workflowId,
+      'branch': archive.branch,
       'commitSha': archive.commitSha,
       'expiresAt': archive.expiresAt.toUtc().toIso8601String(),
     };

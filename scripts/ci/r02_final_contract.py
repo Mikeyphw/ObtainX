@@ -9,7 +9,13 @@ import argparse
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[2]
-BRIDGE='android/app/src/main/kotlin/dev/imranr/obtainium/R02LocalArchiveBridge.kt'
+BRIDGE='packages/obtainx_native_evidence/android/src/main/kotlin/dev/imranr/obtainium/R02LocalArchiveBridge.kt'
+PLUGIN='packages/obtainx_native_evidence/android/src/main/kotlin/dev/imranr/obtainium/ObtainxNativeEvidencePlugin.kt'
+SIGNATURES='packages/obtainx_native_evidence/android/src/main/kotlin/dev/imranr/obtainium/R09ApkSignatures.kt'
+PLUGIN_PUB='packages/obtainx_native_evidence/pubspec.yaml'
+PLUGIN_BUILD='packages/obtainx_native_evidence/android/build.gradle.kts'
+APP_PUB='pubspec.yaml'
+APP_LOCK='pubspec.lock'
 MAIN='android/app/src/main/kotlin/dev/imranr/obtainium/MainActivity.kt'
 SERVICE='lib/services/r02_local_archive_import.dart'
 POLICY='lib/services/r02_local_archive_policy.dart'
@@ -19,7 +25,7 @@ DOC='docs/R02_FINAL_COMPLETION_ACCEPTANCE.md'
 R00='.github/workflows/obtainx-r00-contracts.yml'
 FLUTTER='.github/workflows/obtainx-r00-flutter.yml'
 RT02C='.github/workflows/obtainx-r02-rt02c.yml'
-PATHS=(BRIDGE,MAIN,SERVICE,POLICY,PAGE,TEST,DOC,R00,FLUTTER,RT02C)
+PATHS=(BRIDGE,MAIN,PLUGIN,SIGNATURES,PLUGIN_PUB,PLUGIN_BUILD,APP_PUB,APP_LOCK,SERVICE,POLICY,PAGE,TEST,DOC,R00,FLUTTER,RT02C)
 
 def inspect(root:Path=ROOT)->list[str]:
     issues=[];d={}
@@ -36,16 +42,30 @@ def inspect(root:Path=ROOT)->list[str]:
                    'MessageDigest.getInstance("SHA-256")', 'target.fd.sync()',
                    'uri.scheme == "content"', 'R02_COPY_REFUSED',
                    'PackageManager.GET_SIGNING_CERTIFICATES',
-                   'installedPaths.map { digestFile(File(it)) }.sorted()',
-                   'sources.map { digestFile(File(it)) }.sorted()'):
+                   'val hashes = installedPaths.map { path ->', 'digestFile(apk)',
+                   'observed["hashes"] == hashes.sorted()', 'observed["signers"] == signers.sorted()',
+                   'after.lastUpdateTime != observed.lastUpdateTime',
+                   'sources.mapIndexed { index, path ->', 'R09ApkManifest.inspect(file)', 'R09ApkSignatures.current(file, Build.VERSION.SDK_INT)', 'expectedSigners == signers', 'digestFile(file) == before', 'afterSigners != signers'):
         if anchor=='FLAG_GRANT_':
             continue  # Existing SAF picker controls its read grants.
         check(anchor in k,'Android SAF streaming/evidence contract missing '+anchor)
-    check(d[MAIN].count('R02LocalArchiveBridge(applicationContext, flutterEngine.dartExecutor.binaryMessenger)')==1,
-          'native method channel not registered exactly once')
-    check(k.count('val flags = PackageManager.GET_SIGNING_CERTIFICATES')==1 and
-          k.count('getPackageInfo(target, PackageManager.GET_SIGNING_CERTIFICATES)')==1,
-          'source and installed signing-certificate flags must both be enforced')
+    check(d[PLUGIN].count('R02LocalArchiveBridge(binding.applicationContext, binding.binaryMessenger)')==1 and
+          'R02LocalArchiveBridge(' not in d[MAIN] and 'R09ApkInspectionBridge(' not in d[MAIN] and
+          'onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding)' in d[PLUGIN] and
+          'local?.close()' in d[PLUGIN] and 'inspection?.close()' in d[PLUGIN] and
+          'pluginClass: ObtainxNativeEvidencePlugin' in d[PLUGIN_PUB] and
+          'path: packages/obtainx_native_evidence' in d[APP_PUB] and
+          'path: packages/obtainx_native_evidence' in d[APP_LOCK],
+          'native evidence channels must register exactly once per Flutter engine')
+    check(k.count('getPackageInfo(target, flags)')==2 and
+          'PackageManager.GET_SIGNING_CERTIFICATES' in k and 'afterSigners != signers' in k,
+          'installed signing-certificate flags must be enforced')
+    for anchor in ('ApkVerifier.Builder(file)', '.setMinCheckedPlatformVersion(sdk)',
+                   '.setMaxCheckedPlatformVersion(sdk)', '.build().verify()',
+                   'require(result.isVerified)', 'result.signerCertificates.map', 'certs.isNotEmpty()'):
+        check(anchor in d[SIGNATURES], 'cryptographic member signer evidence missing '+anchor)
+    check('implementation("com.android.tools.build:apksig:9.3.1")' in d[PLUGIN_BUILD],
+          'pinned APK signature verifier dependency missing')
     check(k.count('reply.success(verified)')==1 and 'getOrDefault(false)' in k,
           'native verification cannot default to true')
     check('sudo ' not in service and 'Process.run(' not in service,

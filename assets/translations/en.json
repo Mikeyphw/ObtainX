@@ -945,7 +945,7 @@
   "r09ReviewAbiMismatch": "Selected native libraries are incompatible",
   "r09ReviewMissingSplits": "Required split dependencies are missing",
   "r09ReviewSplitSignerMismatch": "Observed split certificate differs from base",
-  "r09ReviewSignerUnavailable": "Base certificate unavailable",
+  "r09ReviewSignerUnavailable": "Required APK certificate unavailable",
   "r09ReviewNoInstalledSigner": "No installed package observed",
   "r09ReviewInstalledSignerUnknown": "Installed certificate unknown",
   "r09ReviewSignerMatches": "Observed installed certificate matches",

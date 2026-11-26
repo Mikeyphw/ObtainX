@@ -10,7 +10,7 @@ const InstallApkMember baseMember = InstallApkMember(
 
 InstallApkMember config(String qualifier, {int? sdk, int? target}) =>
     InstallApkMember(path: '/tmp/p05/config.$qualifier.apk',
-      packageName: packageId, versionCode: 5,
+      packageName: packageId, versionCode: 5, splitName: 'config.$qualifier',
       minSdkVersion: sdk, targetSdkVersion: target);
 
 void main() {

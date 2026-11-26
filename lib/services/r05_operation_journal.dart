@@ -131,6 +131,9 @@ class R05OperationJournal {
     String? channelFingerprint,
     int? runId, int? runAttempt, String? commitSha, int? artifactId,
     String? downloadSha256, String? archiveSignerSha256, int? expectedVersionCode,
+    List<String> selectedApkSha256 = const [], List<String> archiveSignerSet = const [],
+    String? releaseFingerprint, String? containerSha256, int? workflowId,
+    String? sourceRepository, String? finalOrigin,
   }) => _exclusive(() async {
     final all = await _readAll();
     if (all.length >= maxOperations) {
@@ -147,6 +150,9 @@ class R05OperationJournal {
       runId: runId, runAttempt: runAttempt, commitSha: commitSha,
       artifactId: artifactId, expectedVersionCode: expectedVersionCode, downloadSha256: downloadSha256,
       archiveSignerSha256: archiveSignerSha256,
+      selectedApkSha256: selectedApkSha256, archiveSignerSet: archiveSignerSet,
+      releaseFingerprint: releaseFingerprint, containerSha256: containerSha256,
+      workflowId: workflowId, sourceRepository: sourceRepository, finalOrigin: finalOrigin,
     );
     await _write(receipt, creating: true);
     return receipt;

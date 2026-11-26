@@ -24,9 +24,25 @@ class R05ContractMutation(unittest.TestCase):
             victim.write_text(data.replace(needle,'R05_REMOVED_BY_MUTATION',1),encoding='utf8')
             self.assertNotEqual(contract.verify(target),0)
 
+    def test_source_swap_before_handoff_is_rejected(self):
+        self.mutation('lib/providers/apps_provider_install.dart', 'if (!_r05ListingStillBound(attempt) || getInstaller().modeKey != attempt.backend)')
+    def test_historical_success_cannot_advance_replacement_release(self):
+        self.mutation('lib/providers/apps_provider_install.dart', 'return _r05ListingStillBound(attempt);')
     def test_remove_evidence_gate(self):
         self.mutation('lib/services/r05_operation_receipt.dart',
                       'evidence.packageName != packageId')
+    def test_late_attempt_cannot_confirm(self):
+        self.mutation('lib/services/r05_operation_receipt.dart','evidence.attemptId != id')
+    def test_installed_bytes_cannot_be_ignored(self):
+        self.mutation('lib/services/r05_operation_receipt.dart','_r05SameDigests(selectedApkSha256, evidence.installedApkSha256)')
+    def test_installed_signer_set_cannot_be_ignored(self):
+        self.mutation('lib/services/r05_operation_receipt.dart','_r05SameDigests(archiveSignerSet, evidence.installedSignerSet)')
+    def test_download_channel_cannot_be_relabelled(self):
+        self.mutation('lib/providers/apps_provider_install.dart','provenance.channelFingerprint != r11ChannelFingerprint(app)')
+    def test_archive_selection_cannot_change(self):
+        self.mutation('lib/providers/apps_provider_install.dart','entry.value.sha256 == plan.selectedMembers[entry.key].sha256')
+    def test_member_digest_cannot_change(self):
+        self.mutation('lib/providers/apps_provider_install.dart','plannedMembers[i].sha256 != hashes[i]')
     def test_remove_nonmonotonic_receipt_check(self):
         self.mutation('lib/services/r05_operation_receipt.dart','if (time.isBefore(updatedUtc))')
     def test_remove_private_app_storage(self):
@@ -43,7 +59,7 @@ class R05ContractMutation(unittest.TestCase):
                       'Future<void> _r05TrackBackgroundInstall(')
     def test_remove_signed_local_reconciliation(self):
         self.mutation('lib/services/r02_local_archive_import.dart',
-                      'R05OperationJournal.instance.uniqueUnresolved(listing)')
+                      'byteEvidenceQualified: exactBytes')
     def test_remove_crash_recovery(self):
         self.mutation('lib/providers/apps_provider_lifecycle.dart',
                       'R05OperationJournal.instance.recoverInterruptedOnce()')

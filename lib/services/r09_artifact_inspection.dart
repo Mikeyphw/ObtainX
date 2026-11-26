@@ -5,6 +5,7 @@ library;
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
 
@@ -22,14 +23,14 @@ final _digest = RegExp(r'^[0-9a-f]{64}$');
 class R09ApkFacts {
   R09ApkFacts({required this.path, required this.name, required this.sha256,
     required this.packageName, required this.versionCode, this.versionName,
-    this.split, this.configForSplit, this.minSdk, this.splitRequired = false,
+    this.split, this.configForSplit, this.minSdk, this.targetSdk, this.splitRequired = false,
     this.requiredSplits = const [], this.requiredSplitTypes = const [],
     this.splitTypes = const [], this.nativeAbis = const [], this.signers = const []});
 
   final String path, name, sha256, packageName;
   final int versionCode;
   final String? versionName, split, configForSplit;
-  final int? minSdk;
+  final int? minSdk, targetSdk;
   final bool splitRequired;
   final List<String> requiredSplits, requiredSplitTypes, splitTypes, nativeAbis, signers;
 
@@ -54,16 +55,19 @@ class R09ApkFacts {
     final package = text('packageName');
     final version = data['versionCode'];
     final sdk = data['minSdk'];
+    final targetSdk = data['targetSdk'];
     final signers = strings('signers');
     if (package == null || !RegExp(r'^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$').hasMatch(package) ||
         version is! int || version < 0 || (sdk != null && (sdk is! int || sdk <= 0)) ||
+        (targetSdk != null && (targetSdk is! int || targetSdk <= 0)) ||
         data['splitRequired'] is! bool || !_digest.hasMatch(sha256) ||
+        signers.isEmpty || signers.toSet().length != signers.length ||
         signers.any((value) => !_digest.hasMatch(value))) {
       throw const FormatException('Invalid APK identity evidence');
     }
     return R09ApkFacts(path: path, name: name, sha256: sha256,
       packageName: package, versionCode: version, versionName: text('versionName'),
-      split: text('split'), configForSplit: text('configForSplit'), minSdk: sdk as int?,
+      split: text('split'), configForSplit: text('configForSplit'), minSdk: sdk as int?, targetSdk: targetSdk as int?,
       splitRequired: data['splitRequired'] as bool, requiredSplits: strings('requiredSplits'),
       requiredSplitTypes: strings('requiredSplitTypes'), splitTypes: strings('splitTypes'),
       nativeAbis: strings('nativeAbis'), signers: signers);
@@ -80,6 +84,41 @@ Future<R09ApkFacts> inspectR09Apk(File file, String displayName) async {
     throw const FormatException('APK inspection bytes changed');
   }
   return R09ApkFacts.fromNative(data, path: file.path, name: displayName, sha256: digest);
+}
+
+Future<InstallApkMember> inspectInstallApkMember(File file) async {
+  if (await FileSystemEntity.type(file.path, followLinks: false) != FileSystemEntityType.file ||
+      await file.length() > 768 * 1024 * 1024 || await file.length() <= 0) {
+    throw const FormatException('Invalid APK inspection input');
+  }
+  final before = await sha256FileOffIsolate(file.path);
+  final root = await (await getTemporaryDirectory()).createTemp('r09-review-');
+  try {
+    final copy = File('${root.path}/member.apk');
+    final sink = copy.openWrite();
+    try {
+      var copied = 0;
+      await for (final bytes in file.openRead()) {
+        copied += bytes.length;
+        if (copied > 768 * 1024 * 1024) throw const FormatException('APK inspection size limit');
+        sink.add(bytes);
+        await sink.flush();
+      }
+    } finally {
+      await sink.close();
+    }
+    final facts = await inspectR09Apk(copy, file.uri.pathSegments.last);
+    if (facts.sha256 != before || await sha256FileOffIsolate(file.path) != before) {
+      throw const FormatException('APK changed during manifest inspection');
+    }
+    return InstallApkMember(path: file.path, packageName: facts.packageName,
+      versionCode: facts.versionCode, minSdkVersion: facts.minSdk, targetSdkVersion: facts.targetSdk,
+      splitName: facts.split, configForSplit: facts.configForSplit, sha256: facts.sha256,
+      signers: facts.signers, nativeAbis: facts.nativeAbis, requiredSplits: facts.requiredSplits,
+      requiredSplitTypes: facts.requiredSplitTypes, splitTypes: facts.splitTypes, splitRequired: facts.splitRequired);
+  } finally {
+    await root.delete(recursive: true);
+  }
 }
 
 bool _sameSigners(List<String> first, List<String> second) =>
@@ -128,15 +167,7 @@ R09ArtifactInspection reviewR09Artifact({required String artifactSha256,
     if (base != null && (member.packageName != base.packageName || member.versionCode != base.versionCode)) {
       refusals.add('r09ReviewPackageMismatch');
     }
-    final stem = member.name.split('/').last.toLowerCase().replaceFirst(RegExp(r'\.apk$'), '');
-    final normalizedSplit = split?.toLowerCase().replaceAll('-', '_');
-    final normalizedStem = stem.replaceFirst(RegExp(r'^split_'), '').replaceAll('-', '_');
-    if (format != InstallArtifactFormat.apk && ((split != null) != isConfigurationSplitApk(member.path) ||
-        (split != null && normalizedSplit != normalizedStem))) {
-      // The existing installer supports configuration splits only. Never
-      // pretend a feature split or misleading filename is a supported plan.
-      refusals.add('r09ReviewSplitIdentity');
-    }
+
   }
   if (base != null && expectedPackage != null && base.packageName != expectedPackage) {
     refusals.add('r09ReviewPackageMismatch');
@@ -148,7 +179,10 @@ R09ArtifactInspection reviewR09Artifact({required String artifactSha256,
     try {
       final plan = resolveInstallBundlePlan(members: members.map((entry) => InstallApkMember(
         path: entry.path, packageName: entry.packageName, versionCode: entry.versionCode,
-        minSdkVersion: entry.minSdk)).toList(), format: format,
+        minSdkVersion: entry.minSdk, targetSdkVersion: entry.targetSdk, splitName: entry.split, configForSplit: entry.configForSplit,
+        sha256: entry.sha256, signers: entry.signers, nativeAbis: entry.nativeAbis,
+        requiredSplits: entry.requiredSplits, requiredSplitTypes: entry.requiredSplitTypes,
+        splitTypes: entry.splitTypes, splitRequired: entry.splitRequired)).toList(), format: format,
         supportedAbis: supportedAbis, deviceSdkVersion: sdk,
         deviceLocales: locales, deviceDensityDpi: density, expectedPackageName: expectedPackage);
       selected = plan.sessionPaths;
@@ -173,8 +207,9 @@ R09ArtifactInspection reviewR09Artifact({required String artifactSha256,
         (member.configForSplit != null && member.configForSplit != 'base' && !chosenSplits.contains(member.configForSplit))) {
       refusals.add('r09ReviewMissingSplits');
     }
-    if (base != null && member.signers.isNotEmpty && base.signers.isNotEmpty &&
-        !_sameSigners(member.signers, base.signers)) {
+    if (member.signers.isEmpty) {
+      refusals.add('r09ReviewSignerUnavailable');
+    } else if (base != null && !_sameSigners(member.signers, base.signers)) {
       refusals.add('r09ReviewSplitSignerMismatch');
     }
   }

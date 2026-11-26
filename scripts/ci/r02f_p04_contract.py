@@ -46,19 +46,16 @@ def inspect(root: Path = ROOT) -> list[str]:
     for anchor in (
         'apps.values', 'entry.app.id == packageName',
         'installedInfo.packageName != packageName',
-        'if (p04PendingMatchesInstalledPackage(entry.app, pending, installedInfo)) {',
-        'recordConfirmedInstall(entry.app, pending, installedInfo)',
+        'if (pending != null) continue;',
         'getCorrectedInstallStatusAppIfPossible(',
-        'thirdPartyInstallIndicatorTimers.remove(listingKey)?.cancel();',
     ):
         if anchor not in block:
             errors.append('P04 broadcast scope/confirmation anchor missing ' + anchor)
     if 'final entry = apps[packageName];' in block:
         errors.append('P04 old single-listing broadcast handler was reintroduced')
-    if (block.count('recordConfirmedInstall(') != 1 or
-        block.find('if (p04PendingMatchesInstalledPackage(') > block.find('recordConfirmedInstall(') or
-        block.find('if (p04PendingMatchesInstalledPackage(') < 0):
-        errors.append('P04 recordConfirmedInstall bypasses validated pending receipt')
+    if ('recordConfirmedInstall(' in block or 'R05InstallStage.confirmed' in block or
+        block.find('if (pending != null) continue;') > block.find('getCorrectedInstallStatusAppIfPossible(')):
+        errors.append('P04 package-only broadcast may not promote an install attempt')
     if "classifyUnverifiedThirdPartyHandoff(changed)" not in docs[EXTERNAL]:
         errors.append('external installer no longer returns unverified handoff')
     if 'InstallResult.success()' in docs[CLASSIFY] or \

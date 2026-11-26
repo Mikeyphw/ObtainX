@@ -69,7 +69,7 @@ class R02InstallContracts(unittest.TestCase):
         self.refused()
     def test_container_handoff_not_validated(self):
         self.mutate('lib/providers/apps_provider_install.dart',
-                    'expectedPackageName: dir.appId','expectedPackageName: null')
+                    'expectedPackageName: apps[dir.appId]?.app.id','expectedPackageName: null')
         self.refused()
     def test_bad_archive_inventory_cleanup_removed(self):
         self.mutate('lib/providers/apps_provider_install.dart',

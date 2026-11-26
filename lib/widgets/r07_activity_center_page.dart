@@ -191,7 +191,7 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
           'Backend: ${receipt.backend}\n'
           'Files: ${receipt.fileNames.length}\n'
           'Status: ${receipt.stage.name}\n'
-          'Verified: ${receipt.verifiedUtc ?? 'not verified'}\n\n'
+          'Verified exact bytes: ${receipt.exactBytesConfirmed ? receipt.verifiedUtc : 'not verified'}\n\n'
           '${_explanation(entry)}';
     }
     if (entry.kind == 'live') {

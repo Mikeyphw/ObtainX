@@ -11,7 +11,9 @@ FILES={
     'lib/services/r05_operation_receipt.dart':(
         'enum R05InstallStage {','pending, awaitingApproval, handedOff, confirmed, failed, cancelled, unknown',
         'R05AndroidEvidence','exactAttemptMatches','evidence.packageName != packageId',
-        'expectedVersionCode != null','verifiedUtc','if (time.isBefore(updatedUtc))',
+        'expectedVersionCode == null', 'evidence.attemptId != id',
+        '_r05SameDigests(selectedApkSha256, evidence.installedApkSha256)',
+        '_r05SameDigests(archiveSignerSet, evidence.installedSignerSet)','verifiedUtc','if (time.isBefore(updatedUtc))',
         'downloadSha256','archiveSignerSha256','installedSignerSha256',
         'sourceHost','workflow','runAttempt','artifactId','fileNames'),
     'lib/services/r05_operation_journal.dart':(
@@ -31,13 +33,18 @@ FILES={
         'Future<void> _r05TrackBackgroundInstall(', '_r05MarkUnknownIfStillPending(',
         'R05InstallStage.handedOff','R05InstallStage.confirmed',
         'p04PendingMatchesInstalledPackage(',
-        'R05OperationJournal.instance.uniqueUnresolved(listingKey)',
-        'expectedRelease != null', 'result.isCancelled',
+        'if (pending != null) continue;', 'provenance.archiveSha256 != (containerDigest ?? digest)',
+        'provenance.channelFingerprint != r11ChannelFingerprint(app)',
+        'entry.value.sha256 == plan.selectedMembers[entry.key].sha256',
+        'plannedMembers[i].sha256 != hashes[i]',
+        '_r05CheckHandoff(r05, allAPKs', 'installedEvidence',
+        'settled.exactBytesConfirmed', 'r11ChannelFingerprint(app) == attempt.channelFingerprint',
+        'downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(app)) == attempt.releaseFingerprint',
+        'return _r05ListingStillBound(attempt);', 'if (!_r05ListingStillBound(attempt) || getInstaller().modeKey != attempt.backend)', 'expectedRelease == null || p04PendingMatchesInstalledPackage', 'result.isCancelled',
         'result.isAlreadyInstalled','result.isHandedOff','result.isError'),
     'lib/services/r02_local_archive_import.dart':(
         'if (confirmed)', 'r02LocalObservedInstallConfirmed(',
-        'R05OperationJournal.instance.uniqueUnresolved(listing)',
-        'R05InstallStage.confirmed', 'exactAttemptMatches: true'),
+        'approvedPlan: plan', "'verifyInstalled'", 'byteEvidenceQualified: exactBytes'),
     'lib/providers/apps_provider_lifecycle.dart':(
         'R05OperationJournal.instance.recoverInterruptedOnce()',),
     'lib/pages/settings.dart':(

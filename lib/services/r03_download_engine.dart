@@ -81,6 +81,7 @@ class R03DownloadRecord {
     this.finalDigest,
     this.completedBytes,
     this.historyBinding,
+    this.originObserved = false,
   });
 
   final String jobId;
@@ -96,6 +97,7 @@ class R03DownloadRecord {
   final String? finalDigest;
   final int? completedBytes;
   final R03HistoryBinding? historyBinding;
+  final bool originObserved;
 
   int get validatedBytes => blocks.length * r03ChunkBytes;
   String? get ifRange => etag ?? lastModified;
@@ -107,6 +109,7 @@ class R03DownloadRecord {
     'sourceFingerprint': sourceFingerprint,
     'origin': origin,
     'finalOrigin': finalOrigin,
+    if (originObserved) 'originObserved': true,
     'fileName': fileName,
     'stage': stage.name,
     'blocks': blocks,
@@ -157,6 +160,7 @@ class R03DownloadRecord {
       finalDigest: input['finalDigest'] as String?,
       completedBytes: completed as int?,
       historyBinding: R03HistoryBinding.decode(input['historyBinding']),
+      originObserved: input['originObserved'] == true,
     );
   }
 
@@ -182,7 +186,7 @@ class R03DownloadRecord {
     lastModified: lastModified ?? this.lastModified,
     finalDigest: finalDigest ?? this.finalDigest,
     completedBytes: completedBytes ?? this.completedBytes,
-    historyBinding: historyBinding,
+    historyBinding: historyBinding, originObserved: originObserved,
   );
 }
 
@@ -226,12 +230,14 @@ String? r03StrongEtag(String? value) {
   return (start: start, end: end, total: total);
 }
 
-String r03FinalOrigin(HttpClientResponse response, Uri source) {
+String r03FinalOrigin(HttpClientResponse response, Uri source, {Uri? resolved}) {
   // The HttpService's redirect policy still owns authorization forwarding.
   // A receipt records only the final origin, never a presigned URL/query.
-  Uri current = source;
-  for (final redirect in response.redirects) {
-    current = current.resolveUri(redirect.location);
+  Uri current = resolved ?? source;
+  if (resolved == null) {
+    for (final redirect in response.redirects) {
+      current = current.resolveUri(redirect.location);
+    }
   }
   return '${current.scheme}://${current.host}${current.hasPort ? ':${current.port}' : ''}';
 }
@@ -247,12 +253,13 @@ class R03DownloadEngine {
   }
   final Directory journalDirectory;
   final int maxBytes;
-  static final Map<String, Future<File>> _active = {};
+  static final Map<String, Future<({File file, R03DownloadRecord receipt})>> _active = {};
   // A caller with different trusted-byte requirements must never inherit a
   // transfer owned by another caller, even when URL and destination match.
   static final Map<String, String?> _activeExpectedDigest = {};
   static final Map<String, int> _activeMaxBytes = {};
   static final Map<String, R03HistoryBinding?> _activeHistory = {};
+  static final Map<String, bool> _activeOriginObserved = {};
 
   static String jobKey(Uri url, File destination, Map<String, String> headers) {
     final sorted = headers.entries.toList()
@@ -276,45 +283,49 @@ class R03DownloadEngine {
     bool useExisting = true,
     String? expectedSha256,
     R03HistoryBinding? historyBinding,
+    Uri? Function(HttpClientResponse)? resolvedUri,
+    void Function(R03DownloadRecord)? onVerified,
   }) {
     final key = jobKey(source, destination, headers);
     final existing = _active[key];
     if (existing != null) {
       unawaited(firstResponse.listen((_) {}).cancel());
       if (_activeExpectedDigest[key] != expectedSha256 || _activeMaxBytes[key] != maxBytes ||
-          _activeHistory[key] != historyBinding) {
+          _activeHistory[key] != historyBinding || _activeOriginObserved[key] != (resolvedUri != null)) {
         return Future<File>.error(const R03InvalidEntityException(
           'conflicting trusted digest for active transfer'));
       }
-      return existing;
+      return existing.then((result) { onVerified?.call(result.receipt); return result.file; });
     }
     final next = _run(
       source: source, destination: destination, headers: headers,
       firstResponse: firstResponse, fetch: fetch,
       isCancelled: isCancelled, onProgress: onProgress,
       useExisting: useExisting, expectedSha256: expectedSha256,
-      jobId: key, historyBinding: historyBinding,
+      jobId: key, historyBinding: historyBinding, resolvedUri: resolvedUri,
     );
     _active[key] = next;
     _activeExpectedDigest[key] = expectedSha256;
     _activeMaxBytes[key] = maxBytes;
     _activeHistory[key] = historyBinding;
+    _activeOriginObserved[key] = resolvedUri != null;
     void clearActive() {
       if (identical(_active[key], next)) {
         _active.remove(key);
         _activeExpectedDigest.remove(key);
         _activeMaxBytes.remove(key);
         _activeHistory.remove(key);
+        _activeOriginObserved.remove(key);
       }
     }
     // Consume completion and failure without returning the failed Future from
     // cleanup (a returned Future can re-emit its error into the cleanup chain).
     unawaited(next.then<void>((_) { clearActive(); },
       onError: (Object error, StackTrace trace) { clearActive(); }));
-    return next;
+    return next.then((result) { onVerified?.call(result.receipt); return result.file; });
   }
 
-  Future<File> _run({
+  Future<({File file, R03DownloadRecord receipt})> _run({
     required Uri source,
     required File destination,
     required Map<String, String> headers,
@@ -326,6 +337,7 @@ class R03DownloadEngine {
     required String jobId,
     String? expectedSha256,
     R03HistoryBinding? historyBinding,
+    Uri? Function(HttpClientResponse)? resolvedUri,
   }) async {
     await journalDirectory.create(recursive: true);
     final journal = File('${journalDirectory.path}/$jobId.json');
@@ -343,6 +355,7 @@ class R03DownloadEngine {
       jobId: jobId, sourceFingerprint: jobId, origin: origin,
       finalOrigin: origin, fileName: destination.uri.pathSegments.last,
       stage: R03Stage.queued, blocks: const [], historyBinding: historyBinding,
+      originObserved: resolvedUri != null,
     );
     R03DownloadRecord? previous;
     if (useExisting && await journal.exists()) {
@@ -352,6 +365,7 @@ class R03DownloadEngine {
         final candidate = R03DownloadRecord.fromJson(decoded);
         if (candidate.jobId == jobId && candidate.sourceFingerprint == jobId &&
             candidate.fileName == initial.fileName && candidate.origin == origin &&
+            (resolvedUri == null || candidate.originObserved) &&
             (candidate.totalBytes ?? 0) <= maxBytes &&
             (candidate.completedBytes ?? 0) <= maxBytes && candidate.validatedBytes <= maxBytes) {
           previous = candidate;
@@ -368,14 +382,21 @@ class R03DownloadEngine {
     final effectiveInitial = previous != null && previous.historyBinding == null
         ? R03DownloadRecord(jobId: initial.jobId, sourceFingerprint: initial.sourceFingerprint,
           origin: initial.origin, finalOrigin: initial.finalOrigin, fileName: initial.fileName,
-          stage: R03Stage.queued, blocks: const []) : initial;
+          stage: R03Stage.queued, blocks: const [], originObserved: initial.originObserved) : initial;
     var active = effectiveInitial;
     var committed = <String>[];
     var acceptedBytes = 0;
     int? total;
     String? etag;
     String? lastModified;
-    var currentOrigin = r03FinalOrigin(firstResponse, source);
+    String responseOrigin(HttpClientResponse value) {
+      final resolved = resolvedUri?.call(value);
+      if (resolvedUri != null && resolved == null) {
+        throw const R03InvalidEntityException('transport did not establish final origin');
+      }
+      return r03FinalOrigin(value, source, resolved: resolved);
+    }
+    var currentOrigin = responseOrigin(firstResponse);
     bool eligibleForResume = false;
 
     try {
@@ -388,7 +409,7 @@ class R03DownloadEngine {
         if (digest == previous.finalDigest &&
             (expectedSha256 == null || digest == expectedSha256)) {
           await response.listen((_) {}).cancel();
-          return destination;
+          return (file: destination, receipt: previous);
         }
       }
       if (useExisting && previous != null &&
@@ -416,7 +437,7 @@ class R03DownloadEngine {
           ..['range'] = 'bytes=$acceptedBytes-'
           ..['if-range'] = previous.ifRange!;
         response = await fetch(resumableHeaders);
-        currentOrigin = r03FinalOrigin(response, source);
+        currentOrigin = responseOrigin(response);
         final range = r03ContentRange(response.headers.value(HttpHeaders.contentRangeHeader));
         final correct206 = response.statusCode == HttpStatus.partialContent &&
             range != null && range.start == acceptedBytes &&
@@ -437,7 +458,7 @@ class R03DownloadEngine {
               ..removeWhere((key, _) => key.toLowerCase() == 'range' ||
                   key.toLowerCase() == 'if-range'));
           }
-          currentOrigin = r03FinalOrigin(response, source);
+          currentOrigin = responseOrigin(response);
         }
       }
       if (response.statusCode != HttpStatus.ok &&
@@ -522,7 +543,7 @@ class R03DownloadEngine {
       );
       await _save(journal, active);
       onProgress?.call(null, null, null);
-      return destination;
+      return (file: destination, receipt: active);
     } catch (error) {
       final status = isCancelled() ? R03Stage.cancelled :
           error is R03DownloadHttpException && r03CanRetryHttpStatus(error.statusCode)

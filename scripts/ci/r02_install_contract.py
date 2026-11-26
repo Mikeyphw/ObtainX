@@ -76,7 +76,7 @@ def inspect(root: Path = ROOT) -> list[str]:
             'base and split minimum Android API gates both mandatory')
     for check in ('_inspectInstallBundle(', 'resolveInstallBundlePlan(',
                   'plan.baseApkPath', 'plan.configApkPaths',
-                  'expectedPackageName: dir.appId', 'validateObbFileNames(',
+                  'expectedPackageName: apps[dir.appId]?.app.id', 'validateObbFileNames(',
                   'FileSystemEntity.typeSync(file.path, followLinks: false)',
                   'apkFiles.add(file)', 'obbFiles.add(file)',
                   'if (wasInstalled)', 'await moveObbFile(obb, plan.packageName)',

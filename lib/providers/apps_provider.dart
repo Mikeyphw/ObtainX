@@ -25,7 +25,9 @@ import 'package:obtainium/http/response_bytes.dart';
 import 'package:obtainium/services/app_check_store.dart';
 import 'package:obtainium/services/r11_schedule.dart';
 import 'package:obtainium/services/r03_download_engine.dart';
+import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/install_precommit_gate.dart';
+import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/installers/r02f_p03_cancellable_stock.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/notifications_provider.dart';
@@ -275,7 +277,9 @@ class DownloadedApk {
   String appId;
   File file;
   final InstallReleaseSnapshot? release;
-  DownloadedApk(this.appId, this.file, {this.release});
+  final R05DownloadProvenance? provenance;
+  final File? container;
+  DownloadedApk(this.appId, this.file, {this.release, this.provenance, this.container});
 }
 
 enum DownloadedDirType { xapk, apks, apkm, zip, tarball }
@@ -286,12 +290,14 @@ class DownloadedDir {
   Directory extracted;
   DownloadedDirType type;
   final InstallReleaseSnapshot? release;
+  final R05DownloadProvenance? provenance;
+  final InstallBundlePlan? inspectedPlan;
   DownloadedDir(
     this.appId,
     this.file,
     this.extracted,
     this.type, {
-    this.release,
+    this.release, this.provenance, this.inspectedPlan,
   });
 }
 
@@ -335,6 +341,7 @@ Future<File> downloadFileWithRetry(
   LogsProvider? logs,
   CancellationToken? cancellationToken,
   R03HistoryBinding? historyBinding,
+  void Function(R03DownloadRecord)? onVerified,
 }) async {
   int remaining = retries;
   while (true) {
@@ -343,7 +350,7 @@ Future<File> downloadFileWithRetry(
       return await downloadFile(
         url, fileName, fileNameHasExt, onProgress, destDir,
         useExisting: useExisting, headers: headers, allowInsecure: allowInsecure,
-        logs: logs, cancellationToken: cancellationToken, historyBinding: historyBinding,
+        logs: logs, cancellationToken: cancellationToken, historyBinding: historyBinding, onVerified: onVerified,
       );
     } catch (error) {
       final int? code = error is ObtainiumError && error.code == 'HTTP_ERROR'
@@ -595,6 +602,7 @@ Future<File> downloadFile(
   Directory? privateJournalDirectory,
   bool reviewHttpsOnly = false,
   R03HistoryBinding? historyBinding,
+  void Function(R03DownloadRecord)? onVerified,
 }) async {
   final bool keepAwakeAcquired =
       await NativeFeatures.acquireDownloadKeepAwake();
@@ -613,7 +621,7 @@ Future<File> downloadFile(
       maxBytes: maxBytes,
       privateJournalDirectory: privateJournalDirectory,
       reviewHttpsOnly: reviewHttpsOnly,
-      historyBinding: historyBinding,
+      historyBinding: historyBinding, onVerified: onVerified,
     );
   } finally {
     if (keepAwakeAcquired) {
@@ -637,6 +645,7 @@ Future<File> _downloadFile(
   Directory? privateJournalDirectory,
   bool reviewHttpsOnly = false,
   R03HistoryBinding? historyBinding,
+  void Function(R03DownloadRecord)? onVerified,
 }) async {
   final requestHeaders = withDefaultObtainXUserAgent(headers);
   if (requestHeaders.keys.any((key) =>
@@ -648,12 +657,15 @@ Future<File> _downloadFile(
   cancellationToken?.addListener(abortDownload);
   try {
     cancellationToken?.throwIfCancelled();
-    Future<HttpClientResponse> fetch(Map<String, String> requestHeaders) async =>
-        (await HttpService().sourceRequestStreamResponse(
+    final resolvedOrigins = Expando<Uri>('R03 response origin');
+    Future<HttpClientResponse> fetch(Map<String, String> requestHeaders) async {
+      final streamed = await HttpService().sourceRequestStreamResponse(
           'GET', url, requestHeaders, {'allowInsecure': allowInsecure},
-          sharedClient: responseClient,
-          reviewHttpsOnly: reviewHttpsOnly,
-        )).value.value;
+          sharedClient: responseClient, reviewHttpsOnly: reviewHttpsOnly);
+      final response = streamed.value.value;
+      resolvedOrigins[response] = streamed.key;
+      return response;
+    }
     final firstResponse = await fetch(requestHeaders);
     final suggested = extractDownloadFileNameFromContentDisposition(
       firstResponse.headers.value('content-disposition'));
@@ -691,7 +703,8 @@ Future<File> _downloadFile(
         headers: requestHeaders, firstResponse: firstResponse, fetch: fetch,
         isCancelled: () => cancellationToken?.isCancelled ?? false,
         useExisting: useExisting,
-        historyBinding: historyBinding,
+        historyBinding: historyBinding, resolvedUri: (response) => resolvedOrigins[response],
+        onVerified: onVerified,
         onProgress: (progress, received, total) {
           onProgress?.call(progress, received, total);
         },

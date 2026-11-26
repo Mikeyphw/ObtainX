@@ -10,6 +10,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, visibleForTesting;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_fgbg/flutter_fgbg.dart';
 import 'package:obtainium/app_sources/fdroid.dart';
 import 'package:obtainium/app_sources/fdroidrepo.dart';
@@ -35,7 +36,7 @@ import 'package:obtainium/services/r04_actions_archive_integrity.dart';
 import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/r05_operation_journal.dart';
 import 'package:obtainium/services/r11_external_requests.dart';
-import 'package:obtainium/services/r03_download_engine.dart' show R03HistoryBinding;
+import 'package:obtainium/services/r03_download_engine.dart' show R03HistoryBinding, R03DownloadRecord;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/services/r09_discovery.dart';
@@ -352,55 +353,120 @@ extension AppsProviderInstall on AppsProvider {
     String listingKey, File primary, PackageInfo packageInfo, {
     required String kind,
     List<File> selected = const <File>[],
+    InstallReleaseSnapshot? release,
+    R05DownloadProvenance? provenance,
+    File? container,
+    InstallBundlePlan? plan,
   }) async {
     final app = apps[listingKey]?.app;
-    if (app == null) throw StateError('Tracked listing disappeared before install');
-    final settings = app.additionalSettings;
-    int? positiveSetting(String key) {
-      final v = int.tryParse('${settings[key] ?? ''}');
-      return v != null && v > 0 ? v : null;
+    if (app == null || app.listingKey != listingKey || packageInfo.packageName != app.id || packageInfo.versionCode == null ||
+        (release != null && !release.belongsTo(app))) {
+      throw StateError('Exact tracked release identity is missing');
     }
-    final sha = '${settings['r04CommitSha'] ?? ''}'.toLowerCase();
-    final sourceHost = Uri.tryParse(app.url)?.host;
-    final signers = packageInfo.signingInfo?.apkContentSigners;
-    final signerHashes = signers == null ? const <String>[] :
-        certificateHashesFromSignatures(signers);
-    final signer = signerHashes.isEmpty ? null :
-        signerHashes.first.replaceAll(':', '').toLowerCase();
-    // This SHA-256 is computed locally from the exact file before handoff,
-    // not inferred from a filename or substituted for installed APK proof.
+    if (provenance != null && (release == null ||
+        provenance.releaseFingerprint != downloadReleaseCacheKey(release) ||
+        provenance.channelFingerprint != r11ChannelFingerprint(app))) {
+      throw StateError('Download provenance does not belong to this release');
+    }
+    if (release != null && app.additionalSettings[GitHub.r04SourceModeKey] == GitHub.r04ModeActions &&
+        (provenance == null || provenance.artifactId == null)) {
+      throw StateError('Actions installation requires original archive provenance');
+    }
     final digest = await sha256FileOffIsolate(primary.path);
+    final hashes = [digest, ...await Future.wait(selected.map((f) => sha256FileOffIsolate(f.path)))];
+    if (plan == null || plan.selectedMembers.length != hashes.length ||
+        plan.packageName != app.id || plan.versionCode != packageInfo.versionCode) {
+      throw StateError('Missing manifest-bound APK selection');
+    }
+    final plannedMembers = plan.selectedMembers;
+    final signers = plannedMembers.first.signers.toSet().toList()..sort();
+    if (signers.isEmpty) throw StateError('Current APK signing evidence unavailable');
+    for (var i = 0; i < hashes.length; i++) {
+      if (plannedMembers[i].sha256 != hashes[i]) {
+        throw StateError('Planned APK bytes changed');
+      }
+      final memberSigners = plannedMembers[i].signers.toSet();
+      if (memberSigners.length != signers.length || !memberSigners.containsAll(signers)) {
+        throw StateError('Selected APK signer evidence missing or mismatched');
+      }
+    }
+    final containerDigest = container == null ? null : await sha256FileOffIsolate(container.path);
+    if (provenance != null && provenance.archiveSha256 != (containerDigest ?? digest)) {
+      throw StateError('Downloaded artifact bytes no longer match provenance');
+    }
     return R05OperationJournal.instance.begin(
       listingKey: listingKey, packageId: app.id,
       backend: getInstaller().modeKey, kind: kind,
-      fileNames: <String>[
-        primary.uri.pathSegments.last,
-        ...selected.map((f) => f.uri.pathSegments.last),
-      ],
+      fileNames: <String>[primary.uri.pathSegments.last,
+        ...selected.map((f) => f.uri.pathSegments.last)],
       channelFingerprint: r11ChannelFingerprint(app),
-      sourceHost: sourceHost?.isEmpty == true ? null : sourceHost,
-      sourceBranch: settings['r04Branch'] is String
-          ? settings['r04Branch'] as String : null,
-      workflow: settings['r04Workflow'] is String
-          ? settings['r04Workflow'] as String : null,
-      runId: positiveSetting('r04RunId'),
-      runAttempt: positiveSetting('r04RunAttempt'),
-      artifactId: positiveSetting('r04ArtifactId'),
-      commitSha: RegExp(r'^[0-9a-f]{40}$').hasMatch(sha) ? sha : null,
-      downloadSha256: digest.toLowerCase(),
-      archiveSignerSha256: signer,
+      sourceHost: provenance?.sourceHost,
+      workflowId: provenance?.workflowId, sourceRepository: provenance?.repository,
+      sourceBranch: provenance?.branch, finalOrigin: provenance?.finalOrigin,
+      runId: provenance?.runId, runAttempt: provenance?.runAttempt,
+      artifactId: provenance?.artifactId, commitSha: provenance?.commitSha,
+      downloadSha256: digest,
+      archiveSignerSha256: signers.first,
+      selectedApkSha256: hashes, archiveSignerSet: signers,
+      releaseFingerprint: provenance?.releaseFingerprint,
+      containerSha256: containerDigest,
       expectedVersionCode: packageInfo.versionCode,
     );
   }
 
-  String? _r05InstalledSigner(PackageInfo info) {
-    final signing = info.signingInfo;
-    final hashes = signing == null ? const <String>[] :
-        certificateHashesFromSignatures(signing.apkContentSigners ?? const <List<int>>[]);
-    return hashes.isEmpty ? null : hashes.first.replaceAll(':', '').toLowerCase();
+  bool _r05ListingStillBound(R05OperationReceipt attempt) {
+    final app = apps[attempt.listingKey]?.app;
+    return app != null && app.id == attempt.packageId &&
+        app.listingKey == attempt.listingKey &&
+        r11ChannelFingerprint(app) == attempt.channelFingerprint &&
+        (attempt.releaseFingerprint == null ||
+            downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(app)) == attempt.releaseFingerprint);
   }
 
-  Future<void> _r05CloseAttempt(
+  Future<void> _r05CheckHandoff(R05OperationReceipt attempt, List<String> paths,
+      {File? container}) async {
+    if (getInstaller().modeKey != attempt.backend ||
+        paths.length != attempt.selectedApkSha256.length) {
+      throw StateError('Approved APK plan or backend changed');
+    }
+    for (var i = 0; i < paths.length; i++) {
+      if (await FileSystemEntity.type(paths[i], followLinks: false) != FileSystemEntityType.file ||
+          await sha256FileOffIsolate(paths[i]) != attempt.selectedApkSha256[i]) {
+        throw StateError('Approved APK bytes changed before handoff');
+      }
+    }
+    if (attempt.containerSha256 != null && (container == null ||
+        await sha256FileOffIsolate(container.path) != attempt.containerSha256)) {
+      throw StateError('Approved archive bytes changed before handoff');
+    }
+    // Recheck after asynchronous hashing and immediately before dispatch.
+    if (!_r05ListingStillBound(attempt) || getInstaller().modeKey != attempt.backend) {
+      throw StateError('Approved listing, release or backend changed');
+    }
+  }
+
+  // Only a result returned to this specific native invocation may enter this
+  // confirmation path. A generic package broadcast never supplies its identity.
+  Future<R05AndroidEvidence?> _r05ObserveInstalled(R05OperationReceipt attempt) async {
+    try {
+      const bridge = MethodChannel('dev.imranr.obtainium/r02_local_archive');
+      final raw = await bridge.invokeMapMethod<String, dynamic>('installedEvidence',
+        {'package': attempt.packageId});
+      if (raw == null || raw['package'] != attempt.packageId || raw['version'] is! int ||
+          raw['hashes'] is! List || raw['signers'] is! List) return null;
+      final hashes = List<String>.from(raw['hashes'] as List);
+      final signers = List<String>.from(raw['signers'] as List);
+      if (signers.isEmpty || hashes.isEmpty) return null;
+      return R05AndroidEvidence(packageName: attempt.packageId,
+        exactAttemptMatches: true, attemptId: attempt.id, versionCode: raw['version'] as int,
+        installedSignerSha256: signers.first, installedApkSha256: hashes, installedSignerSet: signers);
+    } catch (_) {
+      // No platform bridge/visibility or unreadable installed bytes: unknown.
+      return null;
+    }
+  }
+
+  Future<bool> _r05CloseAttempt(
     R05OperationReceipt attempt, InstallResult result,
     InstallReleaseSnapshot? expectedRelease,
   ) async {
@@ -419,37 +485,36 @@ extension AppsProviderInstall on AppsProvider {
           reason: 'Android reported already installed or pending; not proof of this attempt');
     } else if (result.isSuccess) {
       final observed = await getInstalledInfo(attempt.packageId);
-      if (observed != null && expectedRelease != null &&
-          p04PendingMatchesInstalledPackage(apps[attempt.listingKey]!.app,
-              expectedRelease, observed) &&
-          (attempt.expectedVersionCode == null ||
-              observed.versionCode == attempt.expectedVersionCode) &&
-          (attempt.archiveSignerSha256 == null ||
-              _r05InstalledSigner(observed) == attempt.archiveSignerSha256)) {
-        await journal.settleIfOpen(attempt.id, R05InstallStage.confirmed,
-          evidence: R05AndroidEvidence(packageName: observed.packageName ?? '',
-            exactAttemptMatches: true, versionCode: observed.versionCode,
-            installedSignerSha256: _r05InstalledSigner(observed)));
-      } else {
-        await journal.settleIfOpen(attempt.id, R05InstallStage.unknown,
-          reason: 'Installer returned success but matching Android/release proof is missing');
+      final evidence = await _r05ObserveInstalled(attempt);
+      final entry = apps[attempt.listingKey];
+      if (entry != null && entry.app.id == attempt.packageId && observed != null &&
+          (expectedRelease == null || p04PendingMatchesInstalledPackage(entry.app, expectedRelease, observed)) &&
+          evidence != null) {
+        try {
+          final settled = await journal.settleIfOpen(attempt.id, R05InstallStage.confirmed, evidence: evidence);
+          if (settled.exactBytesConfirmed) {
+            // Historical evidence belongs to the original attempt; do not
+            // advance a replacement listing or release after an await.
+            return _r05ListingStillBound(attempt);
+          }
+        } on StateError {
+          // Matching package/version alone cannot override a digest mismatch.
+        }
       }
+      await journal.settleIfOpen(attempt.id, R05InstallStage.unknown,
+          reason: 'Matching attempt-bound Android byte proof is missing');
     }
-    // A notification is optional UX; the R05 journal, never the notification,
-    // owns installer success/uncertainty. Notification failure cannot undo it.
     try {
       final latest = (await journal.list()).firstWhere((x) => x.id == attempt.id);
       if (latest.stage == R05InstallStage.failed ||
-          latest.stage == R05InstallStage.handedOff ||
-          latest.stage == R05InstallStage.unknown) {
-        await NotificationsProvider().notifyR07Attention(
-          attemptId: latest.id, packageId: latest.packageId,
-          stage: latest.stage.name);
+          latest.stage == R05InstallStage.handedOff || latest.stage == R05InstallStage.unknown) {
+        await NotificationsProvider().notifyR07Attention(attemptId: latest.id,
+          packageId: latest.packageId, stage: latest.stage.name);
       }
     } catch (_) {
-      // No swallowed installation failure: this catch is only around the
-      // optional notification, after the authoritative journal settled.
+      // Notification failure never changes the journal decision.
     }
+    return false;
   }
 
   Future<bool> _r05AdditionalApproval(R05OperationReceipt receipt,
@@ -499,38 +564,10 @@ extension AppsProviderInstall on AppsProvider {
   /// Read-only package reconciliation for the R05 review screen. A package
   /// broadcast without exact tracked release evidence never confirms.
   Future<void> reconcileR05OperationReceipts() async {
-    final journal = R05OperationJournal.instance;
-    for (final attempt in await journal.list()) {
-      if (attempt.stage == R05InstallStage.confirmed ||
-          attempt.stage == R05InstallStage.failed ||
-          attempt.stage == R05InstallStage.cancelled) {
-        continue;
-      }
-      final entry = apps[attempt.listingKey];
-      if (entry == null || entry.app.id != attempt.packageId) {
-        continue;
-      }
-      final unique = await journal.uniqueUnresolved(attempt.listingKey);
-      if (unique?.id != attempt.id) {
-        continue;
-      }
-      final pending = InstallReleaseSnapshot.fromJson(
-        entry.app.additionalSettings[pendingInstallReleaseKey],
-      );
-      final observed = await getInstalledInfo(attempt.packageId);
-      if (observed == null ||
-          !p04PendingMatchesInstalledPackage(entry.app, pending, observed) ||
-          (attempt.expectedVersionCode != null &&
-           attempt.expectedVersionCode != observed.versionCode) ||
-          (attempt.archiveSignerSha256 != null &&
-           _r05InstalledSigner(observed) != attempt.archiveSignerSha256)) {
-        continue;
-      }
-      await journal.settleIfOpen(attempt.id, R05InstallStage.confirmed,
-        evidence: R05AndroidEvidence(packageName: observed.packageName ?? '',
-          versionCode: observed.versionCode, exactAttemptMatches: true,
-          installedSignerSha256: _r05InstalledSigner(observed)));
-    }
+    // A process restart cannot recreate the invocation that produced a native
+    // result. Preserve unknown/handed-off evidence without attributing a
+    // generic package observation to a particular receipt.
+    await R05OperationJournal.instance.recoverInterruptedOnce();
   }
 
   Future<void> _r05MarkUnknownIfStillPending(String listingKey, String reason) async {
@@ -653,41 +690,13 @@ extension AppsProviderInstall on AppsProvider {
       final pending = InstallReleaseSnapshot.fromJson(
         entry.app.additionalSettings[pendingInstallReleaseKey],
       );
-      if (p04PendingMatchesInstalledPackage(entry.app, pending, installedInfo)) {
-        // Verified package/version for this exact pending source snapshot.
-        thirdPartyInstallIndicatorTimers.remove(listingKey)?.cancel();
-        if (entry.downloadProgress == _awaitingThirdPartyInstallSentinel ||
-            entry.downloadProgress == _recoveredNativeInstallSentinel) {
-          entry.downloadProgress = null;
-        }
-        recoveredNativeInstallIds.remove(listingKey);
-        uncertainNativeInstallListings.remove(listingKey);
-        final r05 = await R05OperationJournal.instance.uniqueUnresolved(listingKey);
-        if (r05 != null && r05.packageId == packageName &&
-            (r05.expectedVersionCode == null ||
-             r05.expectedVersionCode == installedInfo.versionCode) &&
-            (r05.archiveSignerSha256 == null ||
-             _r05InstalledSigner(installedInfo) == r05.archiveSignerSha256)) {
-          await R05OperationJournal.instance.settleIfOpen(r05.id,
-            R05InstallStage.confirmed,
-            evidence: R05AndroidEvidence(packageName: installedInfo.packageName ?? '',
-              versionCode: installedInfo.versionCode,
-              exactAttemptMatches: true,
-              installedSignerSha256: _r05InstalledSigner(installedInfo)));
-        }
-        entry.app = recordConfirmedInstall(entry.app, pending, installedInfo);
+      // A package broadcast cannot identify the originating operation. Keep
+      // pending evidence and report the device state separately.
+      if (pending != null) continue;
+      final corrected = getCorrectedInstallStatusAppIfPossible(entry.app, installedInfo);
+      if (corrected != null) {
+        entry.app = corrected;
         await saveApps([entry.app], attemptToCorrectInstallStatus: false);
-      } else {
-        // A generic broadcast, stale v1, or different attempted release is
-        // only a device observation. Preserve the unresolved pending receipt
-        // and its UI timeout; it is NOT proof of a completed installation.
-        final corrected = getCorrectedInstallStatusAppIfPossible(
-          entry.app, installedInfo,
-        );
-        if (corrected != null) {
-          entry.app = corrected;
-          await saveApps([entry.app], attemptToCorrectInstallStatus: false);
-        }
       }
     }
   }
@@ -842,17 +851,13 @@ extension AppsProviderInstall on AppsProvider {
     await saveApps([listing.app]);
   }
 
-  List<File> _archiveApkCandidates(Directory directory, App app, bool isTarball) {
+  Future<List<File>> _archiveApkCandidates(Directory directory, App app, bool isTarball) async {
     // Nested containers must not be mistaken for installable APKs.
     final apks = directory
         .listSync(recursive: true, followLinks: false)
         .whereType<File>()
         .where((file) => file.path.toLowerCase().endsWith('.apk'))
         .toList();
-    final originalSplits = apks
-        .where((file) => isConfigurationSplitApk(file.path))
-        .map((file) => file.path)
-        .toSet();
 
     String? filterRegEx;
     if (isTarball &&
@@ -867,6 +872,11 @@ extension AppsProviderInstall on AppsProvider {
       filterRegEx = app.settings.getStringOrNull('zippedApkFilterRegEx');
     }
     if (filterRegEx != null) {
+      final originalSplits = <String>{};
+      for (final file in apks) {
+        final facts = await inspectInstallApkMember(file);
+        if (facts.splitName != null) originalSplits.add(file.path);
+      }
       final reg = RegExp(filterRegEx);
       apks.removeWhere((apk) {
         final relativePath = apk.path.substring(directory.path.length + 1);
@@ -953,7 +963,7 @@ extension AppsProviderInstall on AppsProvider {
         if (allApks.isEmpty || allApks.length > r09InspectionMaxApks) {
           throw const FormatException('Review APK inventory limit');
         }
-        final candidates = _archiveApkCandidates(extracted, app, format == InstallArtifactFormat.tarball);
+        final candidates = await _archiveApkCandidates(extracted, app, format == InstallArtifactFormat.tarball);
         excludedApks = candidates.length != allApks.length;
         // The installer independently inventories the entire extracted tree.
         // Do not overstate compatibility where a download filter hides files.
@@ -1074,6 +1084,15 @@ extension AppsProviderInstall on AppsProvider {
       }
       if (app.preferredApkIndex < 0) app = app.copyWith(preferredApkIndex: 0);
       final downloadRelease = InstallReleaseSnapshot.fromApp(app);
+      // Copy the discovery identity now; do not read mutable listing settings
+      // after a download or Android approval returns.
+      final discoverySettings = Map<String, dynamic>.of(app.additionalSettings);
+      final discoveryChannel = r11ChannelFingerprint(app);
+      final actionsEvidence = discoverySettings[r04ActionsArchiveEvidenceKey];
+      if (actionsEvidence is Map) {
+        discoverySettings[r04ActionsArchiveEvidenceKey] = Map<String, dynamic>.from(actionsEvidence);
+      }
+      R03DownloadRecord? transferEvidence;
       final reviewBinding = _r09Selections[this]?[app.listingKey];
       if (reviewBinding != null && reviewBinding.releaseKey != _r09ReleaseKey(app)) {
         throw ObtainiumError(tr('r09ReviewSelectionChanged'));
@@ -1227,6 +1246,7 @@ extension AppsProviderInstall on AppsProvider {
               GitHub.r04ModeActions ? false : app.settings.getBool('allowInsecure'),
           logs: logs,
           cancellationToken: cancellationToken,
+          onVerified: (receipt) => transferEvidence = receipt,
           historyBinding: r11ValidPackage(app.id) ? R03HistoryBinding(
             app.listingKey, app.id, r11ChannelFingerprint(app)) : null,
         );
@@ -1261,13 +1281,31 @@ extension AppsProviderInstall on AppsProvider {
       // saved provenance and poisoned downloads reused from the local cache.
       await verifyR04ActionsArchiveBeforeExtraction(
         archive: downloadedFile,
-        additionalSettings: app.additionalSettings,
-        sourceUrl: app.url,
-        selectedAssetUrl: app.apkUrls[app.preferredApkIndex].value,
-        selectedAssetName: app.apkUrls[app.preferredApkIndex].key,
+        additionalSettings: discoverySettings,
+        sourceUrl: downloadRelease.sourceUrl,
+        selectedAssetUrl: downloadRelease.assetUrl,
+        selectedAssetName: downloadRelease.assetName,
+      );
+      final transfer = transferEvidence;
+      final archiveDigest = await sha256FileOffIsolate(downloadedFile.path);
+      if (transfer == null || !transfer.originObserved || transfer.finalDigest != archiveDigest) {
+        throw StateError('Missing exact transfer receipt for installation');
+      }
+      final isActions = discoverySettings[GitHub.r04SourceModeKey] == GitHub.r04ModeActions;
+      final rawActions = discoverySettings[r04ActionsArchiveEvidenceKey];
+      final canonicalSource = Uri.parse(downloadRelease.sourceUrl);
+      final actions = isActions ? Map<String, dynamic>.from(rawActions as Map) : const <String, dynamic>{};
+      final provenance = R05DownloadProvenance(
+        releaseFingerprint: downloadReleaseCacheKey(downloadRelease), archiveSha256: archiveDigest,
+        sourceHost: canonicalSource.host, finalOrigin: transfer.finalOrigin,
+        channelFingerprint: discoveryChannel,
+        repository: isActions ? canonicalSource.pathSegments.join('/') : null,
+        branch: actions['branch'] as String?, workflowId: actions['workflowId'] as int?,
+        runId: actions['runId'] as int?, runAttempt: actions['runAttempt'] as int?,
+        artifactId: actions['artifactId'] as int?, commitSha: actions['commitSha'] as String?,
       );
       if (reviewBinding != null) {
-        final actualDigest = await sha256FileOffIsolate(downloadedFile.path);
+        final actualDigest = archiveDigest;
         if (!reviewBinding.matches(_r09ReleaseKey(app), actualDigest)) {
           await downloadedFile.delete();
           throw ObtainiumError(tr('r09ReviewSelectionChanged'));
@@ -1312,6 +1350,7 @@ extension AppsProviderInstall on AppsProvider {
       final isXAPK = artifactFormat == InstallArtifactFormat.xapk;
       final isTarball = artifactFormat == InstallArtifactFormat.tarball;
       Directory? apkDir;
+      InstallBundlePlan? inspectedPlan;
       if (isAPK) {
         parsedArchivePath = downloadedFile.path;
         newInfo = await packageManager.getPackageArchiveInfo(
@@ -1326,12 +1365,13 @@ extension AppsProviderInstall on AppsProvider {
             await unzipFile(downloadedFile.path, apkDirPath, cancellationToken);
           }
           apkDir = Directory(apkDirPath);
-          final apks = _archiveApkCandidates(apkDir, app, isTarball);
+          final apks = await _archiveApkCandidates(apkDir, app, isTarball);
           final (plan, baseInfo) = await _inspectInstallBundle(
             apks,
             format: artifactFormat,
           );
           newInfo = baseInfo;
+          inspectedPlan = plan;
           parsedArchivePath = plan.baseApkPath;
         } catch (_) {
           // Discard any archive whose package inventory is invalid.
@@ -1388,7 +1428,7 @@ extension AppsProviderInstall on AppsProvider {
         return DownloadedApk(
           resolvedAppId,
           downloadedFile,
-          release: downloadRelease.withPackage(newInfo),
+          release: downloadRelease.withPackage(newInfo), provenance: provenance,
         );
       } else {
         DownloadedDirType dirType;
@@ -1408,7 +1448,7 @@ extension AppsProviderInstall on AppsProvider {
           downloadedFile,
           apkDir!,
           dirType,
-          release: downloadRelease.withPackage(newInfo),
+          release: downloadRelease.withPackage(newInfo), provenance: provenance, inspectedPlan: inspectedPlan,
         );
       }
     } finally {
@@ -1593,8 +1633,17 @@ extension AppsProviderInstall on AppsProvider {
       final (plan, plannedInfo) = await _inspectInstallBundle(
         apkFiles,
         format: format,
-        expectedPackageName: dir.appId,
+        expectedPackageName: apps[dir.appId]?.app.id,
       );
+      final inspected = dir.inspectedPlan;
+      if (inspected == null || inspected.packageName != plan.packageName ||
+          inspected.versionCode != plan.versionCode ||
+          inspected.selectedMembers.length != plan.selectedMembers.length ||
+          !inspected.selectedMembers.asMap().entries.every((entry) =>
+            entry.value.path == plan.selectedMembers[entry.key].path &&
+            entry.value.sha256 == plan.selectedMembers[entry.key].sha256)) {
+        throw StateError('Archive selection changed after inspection');
+      }
       validateObbFileNames(
         obbFiles.map((file) => file.path).toList(),
         plan.packageName,
@@ -1632,7 +1681,9 @@ extension AppsProviderInstall on AppsProvider {
           final packageInfo = plannedInfo;
           release = dir.release?.withPackage(packageInfo);
           final r05Container = await _r05BeginAttempt(
-              dir.appId, dir.file, packageInfo, kind: 'container-handoff');
+              dir.appId, File(plan.baseApkPath), packageInfo, kind: 'container-handoff',
+              selected: plan.configApkPaths.map(File.new).toList(), release: release,
+              provenance: dir.provenance, container: dir.file, plan: plan);
           await _recordPendingInstall(dir.appId, release);
           if (!await _r05AdditionalApproval(r05Container,
               interactive: showMalwareScanDialog)) {
@@ -1641,6 +1692,7 @@ extension AppsProviderInstall on AppsProvider {
           }
           // No await after this synchronous barrier: a route-level Cancel
           // cannot claim to undo a third-party handoff already dispatched.
+          await _r05CheckHandoff(r05Container, plan.sessionPaths, container: dir.file);
           _ensureGitHubAttestationPolicy(dir.appId);
           if (!sealInstallHandoff(preparationGate)) {
             throw const CancellationException();
@@ -1650,7 +1702,7 @@ extension AppsProviderInstall on AppsProvider {
             appId: dir.appId,
             installOptions: installOptions,
           );
-          await _r05CloseAttempt(r05Container, result, release);
+          final exactInstalled = await _r05CloseAttempt(r05Container, result, release);
           if (result.isError || result.isCancelled) {
             await _clearPendingInstall(dir.appId, release);
           }
@@ -1668,7 +1720,7 @@ extension AppsProviderInstall on AppsProvider {
           if (result.isError) {
             await _throwRecordedInstallError(dir.appId, result.errorCode ?? -1);
           }
-          if (result.isSuccess) {
+          if (exactInstalled) {
             somethingInstalled = true;
             apps[dir.appId]!.app = recordConfirmedInstall(
               apps[dir.appId]!.app,
@@ -1700,7 +1752,7 @@ extension AppsProviderInstall on AppsProvider {
 
       try {
         final wasInstalled = await installApk(
-          DownloadedApk(dir.appId, File(plan.baseApkPath), release: dir.release),
+          DownloadedApk(dir.appId, File(plan.baseApkPath), release: dir.release, provenance: dir.provenance, container: dir.file),
           firstInstallNotificationsProvider,
           needsBGWorkaround: needsBGWorkaround,
           preparationGate: preparationGate,
@@ -1714,6 +1766,7 @@ extension AppsProviderInstall on AppsProvider {
           // The bundle itself is what gets saved (below); don't also persist
           // the extracted primary APK under the same release asset name.
           skipApkSaveFolderPersistForPrimaryApk: true,
+          approvedPlan: plan,
         );
         somethingInstalled = somethingInstalled || wasInstalled;
         if (wasInstalled) {
@@ -1767,6 +1820,7 @@ extension AppsProviderInstall on AppsProvider {
     /// bundle ([DownloadedDir.file]) is what gets persisted to the save folder,
     /// so the extracted APK must not be copied again under the same asset name.
     bool skipApkSaveFolderPersistForPrimaryApk = false,
+    InstallBundlePlan? approvedPlan,
   }) async {
     // Resolve the "Save downloaded APK copies" target once, up front (matches
     // main). Only touched when the feature is on and this isn't the extracted
@@ -1852,12 +1906,21 @@ extension AppsProviderInstall on AppsProvider {
       }
       throw DowngradeError(oldVersionCode!, newVersionCode!);
     }
-    // Persist intent before handoff. A broadcast or later device observation can
-    // confirm it even if this background isolate never resumes after install.
+    // Persist exact intent before handoff. Uncorrelated broadcasts cannot confirm it.
+    final manifestPlan = approvedPlan ?? (await _inspectInstallBundle(
+      [file.file, ...additionalAPKs.map((apk) => apk.file)],
+      format: additionalAPKs.isEmpty ? InstallArtifactFormat.apk : InstallArtifactFormat.apks,
+      expectedPackageName: apps[file.appId]?.app.id)).$1;
+    final suppliedPaths = [file.file.path, ...additionalAPKs.map((apk) => apk.file.path)];
+    if (manifestPlan.sessionPaths.length != suppliedPaths.length ||
+        !manifestPlan.sessionPaths.asMap().entries.every((entry) => suppliedPaths[entry.key] == entry.value)) {
+      throw StateError('Supplied APKs differ from the manifest-selected session');
+    }
     final installedRelease = file.release?.withPackage(newInfo);
     final r05 = await _r05BeginAttempt(file.appId, file.file, newInfo,
         kind: additionalAPKs.isEmpty ? 'apk' : 'split-session',
-        selected: additionalAPKs.map((x) => x.file).toList());
+        selected: additionalAPKs.map((x) => x.file).toList(),
+        release: installedRelease, provenance: file.provenance, container: file.container, plan: manifestPlan);
     await _recordPendingInstall(file.appId, installedRelease);
     if (!await _r05AdditionalApproval(r05,
         interactive: showMalwareScanDialog)) {
@@ -1876,6 +1939,7 @@ extension AppsProviderInstall on AppsProvider {
             r05.id, R05InstallStage.awaitingApproval,
             reason: 'Android session may require approval');
       }
+      await _r05CheckHandoff(r05, allAPKs, container: file.container);
       _ensureGitHubAttestationPolicy(file.appId);
       if (!sealInstallHandoff(preparationGate,
           nativeCancelable: activeInstaller.modeKey == 'system')) {
@@ -1903,8 +1967,7 @@ extension AppsProviderInstall on AppsProvider {
       await _clearPendingInstall(file.appId, installedRelease);
       rethrow;
     }
-    await _r05CloseAttempt(r05, result, installedRelease);
-    final bool installed = result.isSuccess;
+    final bool installed = await _r05CloseAttempt(r05, result, installedRelease);
     if (result.isError || result.isCancelled) {
       await _clearPendingInstall(file.appId, installedRelease);
     }
@@ -2530,26 +2593,17 @@ extension AppsProviderInstall on AppsProvider {
           FileSystemEntityType.file) {
         throw const FormatException('APK member is not a regular file');
       }
+      final member = await inspectInstallApkMember(file);
       PackageInfo? info;
-      try {
-        info = await packageManager.getPackageArchiveInfo(
-          archiveFilePath: file.path,
-        );
-      } catch (_) {
-        if (!isConfigurationSplitApk(file.path)) {
-          rethrow;
+      if (member.splitName == null) {
+        info = await packageManager.getPackageArchiveInfo(archiveFilePath: file.path);
+        if (info == null || info.packageName != member.packageName ||
+            info.versionCode != member.versionCode) {
+          throw const FormatException('Manifest/platform package identity mismatch');
         }
-      }
-      if (info != null) {
         infoByPath[file.path] = info;
       }
-      members.add(InstallApkMember(
-        path: file.path,
-        packageName: info?.packageName,
-        versionCode: info?.versionCode,
-        minSdkVersion: info?.applicationInfo?.minSdkVersion,
-        targetSdkVersion: info?.applicationInfo?.targetSdkVersion,
-      ));
+      members.add(member);
     }
     final device = await DeviceInfoPlugin().androidInfo;
     final dispatcher = WidgetsBinding.instance.platformDispatcher;
@@ -2652,17 +2706,19 @@ extension AppsProviderInstall on AppsProvider {
               skipMalwareScan: true,
             ),
           ));
-          sayInstalled = await waitForPackageInstall(
+          final packageChanged = await waitForPackageInstall(
             id,
             baseline,
             attempts: _bgInstallConfirmAttempts,
           );
+          // A changed package is an observation, not an attempt-bound receipt.
+          sayInstalled = false;
           unawaited(
             logs.add(
-              sayInstalled
-                  ? 'BG install confirmed for $id via polling'
+              packageChanged
+                  ? 'BG package changed for $id; receipt remains unconfirmed'
                   : 'BG install poll timed out for $id after $_bgInstallConfirmAttempts attempts',
-              level: sayInstalled ? LogLevel.info : LogLevel.warning,
+              level: packageChanged ? LogLevel.info : LogLevel.warning,
             ),
           );
           if (!sayInstalled) {
@@ -2719,17 +2775,19 @@ extension AppsProviderInstall on AppsProvider {
               skipPreInstallVerification: true,
             ),
           ));
-          sayInstalled = await waitForPackageInstall(
+          final packageChanged = await waitForPackageInstall(
             id,
             baseline,
             attempts: _bgInstallConfirmAttempts,
           );
+          // A changed package is an observation, not an attempt-bound receipt.
+          sayInstalled = false;
           unawaited(
             logs.add(
-              sayInstalled
-                  ? 'BG install confirmed for $id via polling'
+              packageChanged
+                  ? 'BG package changed for $id; receipt remains unconfirmed'
                   : 'BG install poll timed out for $id after $_bgInstallConfirmAttempts attempts',
-              level: sayInstalled ? LogLevel.info : LogLevel.warning,
+              level: packageChanged ? LogLevel.info : LogLevel.warning,
             ),
           );
           if (!sayInstalled) {

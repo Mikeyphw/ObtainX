@@ -233,7 +233,8 @@ Future<int?> runScenario(String caseName, String archiveSha) async {
         final actual = await sha256.bind(file.openRead()).first;
         if (actual.toString() != expected) throw StateError('Extracted APK SHA256 mismatch');
         members.add(InstallApkMember(path: file.path, packageName: packageName,
-          versionCode: 2, minSdkVersion: 26, targetSdkVersion: 35));
+          versionCode: 2, minSdkVersion: 26, targetSdkVersion: 35,
+          splitName: isSplit ? 'config.x86_64' : null));
       }
       mark('BUNDLE_PLAN');
       if (caseName == 'ambiguous') {
@@ -281,6 +282,8 @@ Future<int?> runScenario(String caseName, String archiveSha) async {
           mark('R09_BASE_SIGNERS');
           final baseFacts = inspected.singleWhere((member) => member.split == null);
           expect(baseFacts.signers, isNotEmpty);
+          final splitFacts = inspected.singleWhere((member) => member.split != null);
+          expect(splitFacts.signers, unorderedEquals(baseFacts.signers));
           mark('R09_INSTALLED_QUERY');
           final installed = await getInstalledInfo(packageName, light: false, printErr: false, throwOnError: true);
           mark('R09_INSTALLED_VERSION');

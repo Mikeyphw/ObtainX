@@ -10,6 +10,7 @@ void main() {
     fileNames: <String>['base.apk'], sourceHost: 'api.github.com',
     commitSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     downloadSha256: digest, expectedVersionCode: 123,
+    selectedApkSha256: [digest], archiveSignerSet: [digest],
     now: DateTime.utc(2026, 11, 16),
   );
   test('pending, approval, handoff and unknown are distinct durable states', () {
@@ -42,7 +43,8 @@ void main() {
     final done = begin().transition(R05InstallStage.confirmed,
       now: DateTime.utc(2026, 11, 16, 0, 1),
       evidence: const R05AndroidEvidence(packageName: 'com.example.app',
-        exactAttemptMatches: true, versionCode: 123, installedSignerSha256: digest));
+        exactAttemptMatches: true, versionCode: 123, installedSignerSha256: digest,
+        attemptId: 'r05_12345678_123456789abcdef0', installedApkSha256: [digest], installedSignerSet: [digest]));
     expect(done.stage, R05InstallStage.confirmed);
     expect(done.verifiedUtc, isNotNull);
     expect(done.installedSignerSha256, digest);
@@ -53,7 +55,7 @@ void main() {
       id: 'r05_signed_123456789abcdef0', listingKey: 'store:package',
       packageId: 'com.example.app', backend: 'system', kind: 'apk',
       fileNames: <String>['base.apk'], expectedVersionCode: 123,
-      archiveSignerSha256: digest, now: DateTime.utc(2026, 11, 16),
+      archiveSignerSha256: digest, selectedApkSha256: [digest], archiveSignerSet: [digest], now: DateTime.utc(2026, 11, 16),
     );
     expect(() => signed.transition(R05InstallStage.confirmed,
       evidence: const R05AndroidEvidence(packageName: 'com.example.app',
@@ -61,12 +63,37 @@ void main() {
     expect(() => signed.transition(R05InstallStage.confirmed,
       evidence: const R05AndroidEvidence(packageName: 'com.example.app',
         exactAttemptMatches: true, versionCode: 123,
+        attemptId: 'r05_signed_123456789abcdef0', installedApkSha256: [digest],
+        installedSignerSet: ['bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'],
         installedSignerSha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')),
       throwsStateError);
     final result = signed.transition(R05InstallStage.confirmed,
       evidence: const R05AndroidEvidence(packageName: 'com.example.app',
-        exactAttemptMatches: true, versionCode: 123, installedSignerSha256: digest));
+        exactAttemptMatches: true, versionCode: 123, installedSignerSha256: digest,
+        attemptId: 'r05_signed_123456789abcdef0', installedApkSha256: [digest], installedSignerSet: [digest]));
     expect(result.stage, R05InstallStage.confirmed);
+  });
+
+  test('same-version substituted bytes, stale attempt and unknown signers cannot confirm', () {
+    final pending = begin();
+    for (final evidence in [
+      const R05AndroidEvidence(packageName: 'com.example.app', exactAttemptMatches: true,
+        attemptId: 'r05_12345678_123456789abcdef0', versionCode: 123,
+        installedApkSha256: ['bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'],
+        installedSignerSet: [digest]),
+      const R05AndroidEvidence(packageName: 'com.example.app', exactAttemptMatches: true,
+        attemptId: 'r05_older_123456789abcdef0', versionCode: 123,
+        installedApkSha256: [digest], installedSignerSet: [digest]),
+      const R05AndroidEvidence(packageName: 'com.example.app', exactAttemptMatches: true,
+        attemptId: 'r05_12345678_123456789abcdef0', versionCode: 123, installedApkSha256: [digest]),
+    ]) {
+      expect(() => pending.transition(R05InstallStage.confirmed, evidence: evidence), throwsStateError);
+    }
+  });
+  test('legacy confirmed receipt stays historical, never exact byte evidence', () {
+    final legacy = begin().toJson()..remove('selectedApkSha256')..remove('archiveSignerSet');
+    legacy['stage'] = 'confirmed'; legacy['verifiedUtc'] = legacy['updatedUtc'];
+    expect(R05OperationReceipt.fromJson(legacy).exactBytesConfirmed, isFalse);
   });
 
   test('reject malformed JSON, signed URLs, unsafe filenames and forged timestamps', () {

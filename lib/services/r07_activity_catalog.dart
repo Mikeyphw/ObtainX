@@ -147,7 +147,8 @@ class R07ActivityCatalog {
       for (final attempt in installs)
         R07ActivityRecord(
           id: 'install:${attempt.id}', kind: 'install',
-          stage: attempt.stage.name, title: attempt.packageId,
+          stage: attempt.stage == R05InstallStage.confirmed && !attempt.exactBytesConfirmed
+              ? 'unknown' : attempt.stage.name, title: attempt.packageId,
           listingKey: attempt.listingKey, packageId: attempt.packageId,
           sourceHost: attempt.sourceHost, reason: attempt.reason,
           updatedUtc: attempt.updatedUtc, install: attempt,

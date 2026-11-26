@@ -12,9 +12,8 @@ import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
+import 'package:obtainium/services/r09_artifact_inspection.dart';
 import 'package:obtainium/services/r02_local_archive_policy.dart';
-import 'package:obtainium/services/r05_operation_journal.dart';
-import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/r02f_p05_device_profile.dart';
 import 'package:shared_storage/shared_storage.dart' as saf;
 import 'package:path_provider/path_provider.dart';
@@ -136,21 +135,17 @@ Future<void> showR02LocalArchiveImport(
           FileSystemEntityType.file) {
         throw const FormatException('APK member is not a regular file');
       }
+      final member = await inspectInstallApkMember(file);
       PackageInfo? info;
-      try {
-        info = await packageManager.getPackageArchiveInfo(
-          archiveFilePath: file.path,
-        );
-      } catch (_) {
-        if (!isConfigurationSplitApk(file.path)) rethrow;
+      if (member.splitName == null) {
+        info = await packageManager.getPackageArchiveInfo(archiveFilePath: file.path);
+        if (info == null || info.packageName != member.packageName ||
+            info.versionCode != member.versionCode) {
+          throw const FormatException('Manifest/platform package identity mismatch');
+        }
+        infos[file.path] = info;
       }
-      if (info != null) infos[file.path] = info;
-      members.add(InstallApkMember(
-        path: file.path, packageName: info?.packageName,
-        versionCode: info?.versionCode,
-        minSdkVersion: info?.applicationInfo?.minSdkVersion,
-        targetSdkVersion: info?.applicationInfo?.targetSdkVersion,
-      ));
+      members.add(member);
     }
     final device = await DeviceInfoPlugin().androidInfo;
     final dispatcher = WidgetsBinding.instance.platformDispatcher;
@@ -255,19 +250,19 @@ Future<void> showR02LocalArchiveImport(
       final bool reported;
       if (format == InstallArtifactFormat.apk) {
         reported = await provider.installApk(
-          DownloadedApk(plan.packageName, source), null,
-          preparationGate: gate, showMalwareScanDialog: true,
+          DownloadedApk(listing, source), null,
+          preparationGate: gate, showMalwareScanDialog: true, approvedPlan: plan,
         );
       } else {
         reported = await provider.installApkDir(
-          DownloadedDir(plan.packageName, source, extracted!,
+          DownloadedDir(listing, source, extracted!,
             switch (format) {
               InstallArtifactFormat.xapk => DownloadedDirType.xapk,
               InstallArtifactFormat.apks => DownloadedDirType.apks,
               InstallArtifactFormat.apkm => DownloadedDirType.apkm,
               InstallArtifactFormat.tarball => DownloadedDirType.tarball,
               _ => DownloadedDirType.zip,
-            }),
+            }, inspectedPlan: plan),
           null, preparationGate: gate, showMalwareScanDialog: true,
         );
       }
@@ -290,27 +285,6 @@ Future<void> showR02LocalArchiveImport(
         byteEvidenceQualified: exactBytes,
       );
       if (confirmed) {
-        final r05 = await R05OperationJournal.instance.uniqueUnresolved(listing);
-        if (r05 != null && r05.packageId == plan.packageName &&
-            (r05.expectedVersionCode == null ||
-             r05.expectedVersionCode == plan.versionCode) &&
-            current != null) {
-          final signatures = current.signingInfo?.apkContentSigners;
-          final signerHashes = signatures == null
-              ? const <String>[] : certificateHashesFromSignatures(signatures);
-          final observedSigner = signerHashes.isEmpty ? null
-              : signerHashes.first.replaceAll(':', '').toLowerCase();
-          if (r05.archiveSignerSha256 == null ||
-              r05.archiveSignerSha256 == observedSigner) {
-            await R05OperationJournal.instance.settleIfOpen(
-              r05.id, R05InstallStage.confirmed,
-              evidence: R05AndroidEvidence(
-                packageName: current.packageName ?? '',
-                versionCode: current.versionCode,
-                installedSignerSha256: observedSigner,
-                exactAttemptMatches: true));
-          }
-        }
         notice('R02 local installation verified: Android package, version and exact APK bytes match.');
       } else {
         notice('Installation not independently qualified. Check Android status or retry; no success claim.');

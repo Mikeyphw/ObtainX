@@ -58,8 +58,9 @@ Future<Map<String, Object?>> r11RunAutomation(
     case R11AutomationAction.receipt:
       final records = await R05OperationJournal.instance.list();
       if (current() == null) return {'status': 'listingChanged'};
+      final channel = r11ChannelFingerprint(app);
       final matching = records.where((r) => r.listingKey == app.listingKey &&
-        r.packageId == app.id);
+        r.packageId == app.id && r.channelFingerprint == channel);
       if (matching.isEmpty) return {'status': 'notFound'};
       result['receipt'] = r11PublicReceipt(matching.first);
       break;

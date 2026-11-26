@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:obtainium/services/r05_operation_journal.dart';
+import 'package:obtainium/services/r07_operation_timeline.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -657,6 +658,15 @@ extension AppsProviderLifecycle on AppsProvider {
     if (singleId == null) {
       await R05OperationJournal.instance.recoverInterruptedOnce();
       unawaited(recoverNativeInstallSessions());
+    }
+    if (singleId == null) {
+      try {
+        await R07OperationTimeline.instance.recoverInterrupted();
+      } catch (_) {
+        // An unreadable timeline cannot qualify a new recovery action.
+        // Do not hide the otherwise readable app library.
+        unawaited(logs.add('Operation timeline recovery remains unresolved'));
+      }
     }
     // Deliberately after the load has been reported as finished, and not awaited:
     // nothing on screen waits for these writes.

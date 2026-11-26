@@ -134,6 +134,8 @@ jobs:
         run: flutter test --no-pub test/r05_operation_journal_test.dart
       - name: R07 Activity Center journal/action and restart tests
         run: flutter test --no-pub test/r07_activity_center_test.dart
+      - name: GAP-03 durable timeline and scoped retention tests
+        run: flutter test --no-pub test/r07_operation_timeline_test.dart test/r03_download_history_test.dart
       - name: R08 source reliability named regressions
         run: flutter test --no-pub test/r08_source_regressions_test.dart
       - name: R09 discovery and artifact selection regressions

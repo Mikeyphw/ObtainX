@@ -8,10 +8,12 @@ ROOT=Path(__file__).resolve().parents[2]
 TOKENS={
  'lib/services/r07_activity_catalog.dart':(
    'class R07ActivityCatalog', 'R05OperationJournal.instance',
-   'R03DownloadRecord.fromJson(decoded)', 'r07UniqueListingForFile(',
+   'R03DownloadHistory.readRecord(entity, archived: archived)', 'r07UniqueListingForFile(',
    'r07AllowedActions(', 'R07ActivityAction', 'transfer.finalDigest',
    'followLinks: false', 'maxDownloadReceiptBytes',
-   'Never guess', 'sourceFingerprint != transfer.jobId'),
+   'Never guess'),
+ 'lib/services/r03_download_history.dart':('R03DownloadRecord.fromJson(value)',
+   'record.sourceFingerprint != record.jobId', 'archiveName(record, bytes)'),
  'lib/widgets/r07_activity_center_page.dart':(
    'class R07ActivityCenterPage', 'WidgetsBindingObserver',
    'reconcileR05OperationReceipts()', 'provider.cancelDownload(key)',
@@ -36,7 +38,8 @@ TOKENS={
    'symlink or oversized journal is refused',
    'opening Activity Center does not convert a live pending install',
    'await tester.runAsync(', 'await initial!.timeout(',
-   'super.load(trackedPackages: trackedPackages)',
+   'super.load(trackedPackages: trackedPackages, historyLimit: historyLimit,',
+   'channel: channel, filter: filter)',
    'Activity Center renders only the requested durable attempt'),
  'docs/R07_ACTIVITY_CENTER.md':('R07', 'R03', 'R05', 'R02', 'CI24', 'NOT_QUALIFIED'),
  '.github/workflows/obtainx-r00-contracts.yml':('scripts/ci/r07_contract.py --check',),

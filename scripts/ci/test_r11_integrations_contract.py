@@ -50,7 +50,7 @@ class R11Contracts(unittest.TestCase):
    ('lib/pages/home.dart', r'!settings\.r11AutomationEnabled \|\| !appsProvider\.isForeground\) \{ return; \}', 2),
    ('lib/providers/apps_provider_updates.dart', r'r11ExactLiveListing\(apps, exactListing\) == null\)\) return null;', 0),
    ('lib/providers/apps_provider_updates.dart', r'r11ExactLiveListing\(apps, exactListing\) == null\)\) \{ return null; \}', 2),
-   ('lib/services/r05_operation_journal.dart', r'!item\.updatedUtc\.isBefore\(cutoff\.toUtc\(\)\)\) \{ continue; \}', 1),
+   ('lib/services/r05_operation_journal.dart', r'item\.updatedUtc\.isBefore\(cutoff\.toUtc\(\)\) &&', 1),
    ('lib/services/r11_automation.dart', r"app\.apkUrls\.isEmpty\) \{ return \{'status': 'refused'\}; \}", 1),
    ('lib/services/r11_external_requests.dart', r"\(uri\.path\.isNotEmpty && uri\.path != '/'\)\) \{ return null; \}", 2),
    ('lib/services/r11_external_requests.dart', r'hasMatch\(request\)\) \{ return null; \}', 1),

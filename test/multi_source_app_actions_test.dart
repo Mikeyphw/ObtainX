@@ -45,6 +45,9 @@ class _Paths extends PathProviderPlatform with MockPlatformInterfaceMixin {
   }
 
   @override
+  Future<String?> getApplicationSupportPath() async => root;
+
+  @override
   Future<String?> getApplicationDocumentsPath() async {
     return root;
   }

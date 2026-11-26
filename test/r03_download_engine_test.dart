@@ -1,3 +1,4 @@
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'dart:io';
 import 'dart:math';
 import 'dart:convert';
@@ -14,6 +15,8 @@ import 'package:obtainium/services/r03_download_engine.dart';
 class _R03RealLoopbackHttpOverrides extends HttpOverrides {}
 
 void main() {
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
   group('R03 source identity and response policy', () {
     test('strict 206 Content-Range including invalid and overflow', () {
       expect(r03ContentRange('bytes 10-19/20'), (start: 10, end: 19, total: 20));
@@ -179,14 +182,15 @@ void main() {
     }
     Future<File> transfer({bool Function()? cancelled,
       void Function(double?, int?, int?)? progress,
-      bool useExisting = true, String? expectedSha256, int maxBytes = r03MaximumBytes}) async {
+      bool useExisting = true, String? expectedSha256, int maxBytes = r03MaximumBytes,
+      R03HistoryBinding? historyBinding, R03DownloadRecord? resumeRecord}) async {
       final first = await fetch(const {});
       return R03DownloadEngine(journalDirectory: engine().journalDirectory, maxBytes: maxBytes).download(
         source: source(), destination: target(),
         headers: const {}, firstResponse: first, fetch: fetch,
         isCancelled: cancelled ?? () => false,
         onProgress: progress, useExisting: useExisting,
-        expectedSha256: expectedSha256,
+        expectedSha256: expectedSha256, historyBinding: historyBinding, resumeRecord: resumeRecord,
       );
     }
 
@@ -264,6 +268,33 @@ void main() {
       expect(await file.readAsBytes(), payload);
       expect(ranges, contains('bytes=$resumeOffset-'));
       expect(ifRanges, contains('"r03-v1"'));
+    });
+    test('explicit resume preserves checkpoint when Range is refused and refuses another owner', () async {
+      const channel = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      const release = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      final owner = R03HistoryBinding('source:one', 'com.example', channel, releaseFingerprint: release);
+      var stop = false;
+      await expectLater(transfer(historyBinding: owner, cancelled: () => stop,
+        progress: (_, received, _) { if ((received ?? 0) >= r03ChunkBytes) stop = true; }),
+        throwsA(isA<R03InvalidEntityException>()));
+      final id = R03DownloadEngine.jobKey(source(), target(), const {}, historyBinding: owner);
+      final journal = File('${sandbox.path}/private-receipts/$id.json');
+      final raw = await journal.readAsString();
+      final paused = R03DownloadRecord.fromJson(Map<String, dynamic>.from(jsonDecode(raw)));
+      expect(paused.explicitlyResumable, isTrue);
+      final part = File('${target().path}.part');
+      final bytes = await part.readAsBytes();
+      ignoresRange = true;
+      await expectLater(transfer(historyBinding: owner, resumeRecord: paused), throwsA(isA<R03InvalidEntityException>()));
+      expect(await journal.readAsString(), raw);
+      expect(await part.readAsBytes(), bytes);
+      final other = R03HistoryBinding('source:two', 'com.example', channel, releaseFingerprint: release);
+      await expectLater(transfer(historyBinding: other), throwsA(isA<R03InvalidEntityException>()));
+      expect(await part.readAsBytes(), bytes);
+      ignoresRange = false;
+      final output = await transfer(historyBinding: owner, resumeRecord: paused);
+      expect(await output.readAsBytes(), payload);
+      expect(ranges, contains('bytes=${paused.validatedBytes}-'));
     });
     test('changed ETag restarts safely; never appends old bytes', () async {
       var stop = false;

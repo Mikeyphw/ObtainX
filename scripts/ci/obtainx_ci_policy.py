@@ -188,7 +188,7 @@ RULES = (
     (('assets/translations/*.json',), DISCOVERY_TESTS + SETTINGS_TESTS, ()),
     (('lib/providers/apps_provider_install.dart', 'lib/installers/**', 'lib/services/install_bundle_plan.dart', 'lib/services/artifact_file_work.dart', 'lib/services/verified_obb_delivery.dart'), ACTIONS_TESTS + DISCOVERY_TESTS + ('test/r02_install_bundle_plan_test.dart','test/r05_operation_receipt_test.dart','test/r05_operation_journal_test.dart','test/archive_extraction_security_test.dart','test/r02f_external_handoff_test.dart'), LANES),
     (('lib/services/r03_*',), ('test/r03_download_engine_test.dart',), ('rt02c',)),
-    (('lib/services/r07_*', 'lib/widgets/r07_*'), ('test/r07_activity_center_test.dart','test/r05_operation_journal_test.dart'), ('api36',)),
+    (('lib/services/r07_*', 'lib/widgets/r07_*'), ('test/r07_activity_center_test.dart','test/r05_operation_journal_test.dart','test/r07_operation_timeline_test.dart','test/r03_download_history_test.dart'), ('api36',)),
     (('lib/version/**', 'lib/services/r08_*', 'lib/http/r08_*'), ('test/r08_source_regressions_test.dart','test/version_engine_test.dart','test/source_provider_test.dart'), ()),
 )
 

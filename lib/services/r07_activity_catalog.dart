@@ -1,14 +1,15 @@
-/// R07 Activity Center is a READ-ONLY projection of the existing R03 and R05
-/// journals. It never records an operation, changes an outcome or assumes that
+/// R07 Activity Center is a READ-ONLY projection of the R03 and R05
+/// journals and the durable R07 operation timeline. It never records an operation, changes an outcome or assumes that
 /// an Android installer handoff succeeded.
 library;
 
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:obtainium/services/r03_download_engine.dart';
+import 'package:obtainium/services/r03_download_history.dart';
 import 'package:obtainium/services/r05_operation_journal.dart';
 import 'package:obtainium/services/r05_operation_receipt.dart';
+import 'package:obtainium/services/r07_operation_timeline.dart';
 import 'package:path_provider/path_provider.dart';
 
 /// A UI row is bound to one particular journal record; download fingerprints
@@ -29,6 +30,8 @@ class R07ActivityRecord {
     this.download,
     this.install,
     this.uniquePendingOwnership = false,
+    this.historyIntegrityKnown = true,
+    this.timeline, this.batchCompleted, this.batchTotal, this.archivedTransfer = false,
   });
 
   final String id, kind, stage, title;
@@ -37,16 +40,18 @@ class R07ActivityRecord {
   final int? verifiedBytes, totalBytes;
   final R03DownloadRecord? download;
   final R05OperationReceipt? install;
-  final bool uniquePendingOwnership;
+  final R07TimelineEntry? timeline;
+  final int? batchCompleted, batchTotal;
+  final bool uniquePendingOwnership, historyIntegrityKnown, archivedTransfer;
 
   bool get needsReview =>
       (kind == 'install' &&
           (stage == 'awaitingApproval' || stage == 'handedOff' ||
               stage == 'pending' || stage == 'unknown')) ||
-      stage == 'failed';
+      stage == 'failed' || (timeline != null && (stage == 'queued' || stage == 'unknown'));
 
-  bool get isFinished => stage == 'confirmed' || stage == 'completed' ||
-      stage == 'ready' || stage == 'cancelled' || stage == 'failed';
+  bool get isFinished => archivedTransfer || timeline?.finished == true || (download?.explicitlyResumable != true && (stage == 'confirmed' || stage == 'completed' ||
+      (stage == 'ready' && timeline == null) || stage == 'cancelled' || stage == 'failed'));
 
   /// Only cryptographically finalized download records may display 100%.
   /// A file transfer finishing is NOT a successful installation.
@@ -77,11 +82,12 @@ Set<R07ActivityAction> r07AllowedActions(
   required bool independentlyInstalled,
 }) {
   final result = <R07ActivityAction>{R07ActivityAction.details};
+  if (!entry.historyIntegrityKnown || entry.kind == 'integrity') return result;
   if (entry.kind == 'install') {
     if (entry.needsReview) result.add(R07ActivityAction.review);
     if (listingMatches && !liveDownload &&
-        (entry.stage == 'unknown' || entry.stage == 'failed' ||
-            entry.stage == 'cancelled')) {
+        (entry.stage == 'failed' || entry.stage == 'cancelled') &&
+        entry.install?.releaseFingerprint != null) {
       result.add(R07ActivityAction.retry);
     }
     if (listingMatches && cancellableInstall && entry.uniquePendingOwnership &&
@@ -91,6 +97,14 @@ Set<R07ActivityAction> r07AllowedActions(
     if (entry.stage == 'confirmed' && independentlyInstalled) {
       result.add(R07ActivityAction.open);
     }
+  } else if (entry.timeline != null) {
+    if (entry.stage == 'queued') {
+      result.add(R07ActivityAction.cancel);
+      if (listingMatches && !liveDownload && entry.timeline!.intent.parentId == null &&
+          const {'install', 'check', 'download'}.contains(entry.timeline!.intent.kind)) {
+        result.add(R07ActivityAction.resume);
+      }
+    }
   } else if (entry.kind == 'live') {
     // Exact provider operation keyed by listing; never cancel by historical R03
     // filename. A different transfer might now own the same listing.
@@ -98,9 +112,7 @@ Set<R07ActivityAction> r07AllowedActions(
       result.add(R07ActivityAction.cancel);
     }
   } else if (entry.kind == 'download') {
-    if (listingMatches && !liveDownload &&
-        (entry.stage == 'paused' || entry.stage == 'failed' ||
-            entry.stage == 'cancelled' || entry.stage == 'retrying')) {
+    if (!entry.archivedTransfer && listingMatches && !liveDownload && entry.download?.explicitlyResumable == true) {
       result.add(R07ActivityAction.resume);
     }
   }
@@ -124,81 +136,132 @@ class R07ActivityCatalog {
 
   final Directory? testingRoot;
   final R05OperationJournal _installJournal;
-  static const int maxDownloadReceipts = 512;
-  static const int maxDownloadReceiptBytes = 128 * 1024;
+  Set<String> availableChannels = const {};
+  // 4,096 legal SHA-256 chunk hashes alone can exceed 128 KiB.
+  static const int maxDownloadReceiptBytes = R03DownloadHistory.maxReceiptBytes;
   static final RegExp _downloadFile = RegExp(r'^[a-f0-9]{64}\.json$');
 
   Future<List<R07ActivityRecord>> load({
     Map<String, String> trackedPackages = const <String, String>{},
+    int? historyLimit, String? packageId, String? listingKey, String? operationId,
+    String channel = 'all', String filter = 'all',
   }) async {
-    // AppsProvider owns one-time startup recovery. A read-only screen MUST
-    // NOT turn an in-flight install pending into unknown while it is active.
-    final installs = await _installJournal.list();
-    final unresolvedCounts = <String,int>{};
-    for (final attempt in installs) {
-      if (attempt.stage == R05InstallStage.pending ||
-          attempt.stage == R05InstallStage.awaitingApproval ||
-          attempt.stage == R05InstallStage.handedOff ||
-          attempt.stage == R05InstallStage.unknown) {
-        unresolvedCounts.update(attempt.listingKey,(n)=>n+1,ifAbsent:()=>1);
+    final channels = <String>{};
+    final active = <R07ActivityRecord>[], finished = <R07ActivityRecord>[];
+    int compare(R07ActivityRecord a, R07ActivityRecord b) {
+      final time = b.updatedUtc.compareTo(a.updatedUtc);
+      return time == 0 ? a.id.compareTo(b.id) : time;
+    }
+    bool inScope(R07ActivityRecord row) =>
+        (packageId == null || row.packageId == packageId) &&
+        (listingKey == null || row.listingKey == listingKey) &&
+        (operationId == null || row.id == operationId);
+    String rowChannel(R07ActivityRecord row) => row.install?.channelFingerprint ??
+        row.download?.historyBinding?.channel ?? row.timeline?.intent.channel ?? 'unknown';
+    bool selected(R07ActivityRecord row) => inScope(row) &&
+        (channel == 'all' || channel == rowChannel(row)) &&
+        (filter == 'all' || (filter == 'review' && row.needsReview) || (filter == 'done' && row.isFinished));
+    void append(R07ActivityRecord row) {
+      if (row.kind == 'integrity') { active.add(row); return; }
+      if (inScope(row)) { channels.add(rowChannel(row)); }
+      if (!selected(row)) return;
+      if (!row.isFinished) { active.add(row); return; }
+      if (historyLimit == 0) return;
+      finished.add(row);
+      if (historyLimit != null) {
+        finished.sort(compare);
+        if (finished.length > historyLimit) { finished.removeLast(); }
       }
     }
-    final records = <R07ActivityRecord>[
-      for (final attempt in installs)
-        R07ActivityRecord(
-          id: 'install:${attempt.id}', kind: 'install',
+    R07ActivityRecord installRow(R05OperationReceipt attempt, {bool integrity = true, bool unique = false}) =>
+        R07ActivityRecord(id: 'install:${attempt.id}', kind: 'install',
           stage: attempt.stage == R05InstallStage.confirmed && !attempt.exactBytesConfirmed
               ? 'unknown' : attempt.stage.name, title: attempt.packageId,
           listingKey: attempt.listingKey, packageId: attempt.packageId,
           sourceHost: attempt.sourceHost, reason: attempt.reason,
           updatedUtc: attempt.updatedUtc, install: attempt,
-          uniquePendingOwnership: unresolvedCounts[attempt.listingKey] == 1,
-        ),
-    ];
-
+          uniquePendingOwnership: unique, historyIntegrityKnown: integrity);
+    // Read-only projection must not change a live attempt into unknown. Limit
+    // terminal metadata before retaining it; live receipt counts are complete.
+    final installRead = await _installJournal.readForActivity(historyLimit: historyLimit,
+      includeFinished: (attempt) => selected(installRow(attempt)),
+      observe: (attempt) {
+        final row = installRow(attempt);
+        if (inScope(row)) { channels.add(rowChannel(row)); }
+      });
+    final unresolvedCounts = <String, int>{};
+    for (final attempt in installRead.receipts) {
+      if (const {R05InstallStage.pending, R05InstallStage.awaitingApproval,
+          R05InstallStage.handedOff, R05InstallStage.unknown}.contains(attempt.stage)) {
+        unresolvedCounts.update(attempt.listingKey, (n) => n + 1, ifAbsent: () => 1);
+      }
+    }
+    for (final attempt in installRead.receipts) {
+      append(installRow(attempt, integrity: installRead.unreadableCount == 0,
+        unique: installRead.unreadableCount == 0 && unresolvedCounts[attempt.listingKey] == 1));
+    }
+    if (installRead.unreadableCount != 0) {
+      append(R07ActivityRecord(id: 'integrity:install', kind: 'integrity',
+        stage: 'unknown', title: 'Unreadable installation history',
+        reason: '${installRead.unreadableCount} receipt(s) could not be read; no evidence was erased.',
+        updatedUtc: DateTime.now().toUtc(), historyIntegrityKnown: false));
+    }
     final root = testingRoot ?? await getApplicationSupportDirectory();
-    final folder = Directory('${root.path}/r03-download-journal');
-    final type = await FileSystemEntity.type(folder.path, followLinks: false);
-    if (type == FileSystemEntityType.notFound) {
-      records.sort((a, b) => b.updatedUtc.compareTo(a.updatedUtc));
-      return List<R07ActivityRecord>.unmodifiable(records);
-    }
-    if (type != FileSystemEntityType.directory) {
-      throw const FileSystemException('Unsafe R03 download journal directory');
-    }
-    final entries = await folder.list(followLinks: false).toList();
-    if (entries.length > maxDownloadReceipts) {
-      throw const FileSystemException('R03 download journal exceeds activity limit');
-    }
-    for (final entity in entries) {
-      final name = entity.uri.pathSegments.last;
-      // R03 writes `<fingerprint>.json.tmp` atomically. Never read its staging
-      // bytes, and never treat a staging file as a completed download.
-      if (name.endsWith('.json.tmp') && _downloadFile.hasMatch(
-          name.substring(0, name.length - 4))) {
-        if (await FileSystemEntity.type(entity.path, followLinks: false) !=
-            FileSystemEntityType.file) {
-          throw const FormatException('Unsafe R03 staging file');
+    try {
+      final timeline = R07OperationTimeline(testingRoot: root);
+      if (operationId == null || operationId.startsWith('timeline:')) {
+        final page = await timeline.readForActivity(historyLimit: historyLimit,
+          packageId: packageId, listingKey: listingKey,
+          operationId: operationId?.substring('timeline:'.length), channel: channel, filter: filter);
+        channels.addAll(page.channels);
+        for (final row in page.rows) {
+          final count = page.batches[row.batchId];
+          append(R07ActivityRecord(id: 'timeline:${row.id}', kind: 'timeline',
+            stage: row.stage, title: row.intent.packageId, listingKey: row.intent.listingKey,
+            packageId: row.intent.packageId, updatedUtc: row.updatedUtc, reason: row.reason,
+            timeline: row, batchCompleted: count?.completed, batchTotal: count?.total));
         }
+        if (page.unreadableCount != 0) {
+          append(R07ActivityRecord(id: 'integrity:timeline', kind: 'integrity',
+            stage: 'unknown', title: 'Unreadable operation history',
+            reason: '${page.unreadableCount} timeline record(s) could not be read.',
+            updatedUtc: DateTime.now().toUtc(), historyIntegrityKnown: false));
+        }
+      }
+    } catch (_) {
+      append(R07ActivityRecord(id: 'integrity:timeline', kind: 'integrity',
+        stage: 'unknown', title: 'Operation timeline could not be read',
+        updatedUtc: DateTime.now().toUtc(), historyIntegrityKnown: false));
+    }
+    final folder = Directory('${root.path}/r03-download-journal');
+    // Recovery and historical namespaces are read independently. Unreadable
+    // history does not remove independently readable live entries.
+    var unreadableDownloads = 0;
+    for (final archived in [false, true]) {
+      final directory = archived ? R03DownloadHistory.archiveOf(folder) : folder;
+      try {
+        await R03DownloadHistory.verifyDirectory(directory);
+      } on FileSystemException {
+        unreadableDownloads++;
         continue;
       }
-      if (!_downloadFile.hasMatch(name) || entity is! File ||
-          await FileSystemEntity.type(entity.path, followLinks: false) !=
-              FileSystemEntityType.file ||
-          await entity.length() > maxDownloadReceiptBytes) {
-        // Invalid/corrupted records are not treated as completed downloads.
-        // The UI surfaces the read failure; data remains on disk for audit.
-        throw const FormatException('Unsafe or corrupt R03 download entry');
-      }
-      final decoded = jsonDecode(await entity.readAsString(encoding: utf8));
-      if (decoded is! Map<String, dynamic>) {
-        throw const FormatException('Malformed R03 download receipt');
-      }
-      final transfer = R03DownloadRecord.fromJson(decoded);
-      if (name != '${transfer.jobId}.json' ||
-          transfer.sourceFingerprint != transfer.jobId) {
-        throw const FormatException('R03 receipt identity mismatch');
-      }
+      if (!await directory.exists()) continue;
+      await for (final entity in directory.list(followLinks: false)) {
+        try {
+          final name = entity.uri.pathSegments.last;
+          if (!archived && name.endsWith('.json.tmp') && _downloadFile.hasMatch(name.substring(0, name.length - 4))) {
+            if (await FileSystemEntity.type(entity.path, followLinks: false) != FileSystemEntityType.file) {
+              throw const FormatException('Unsafe R03 staging file');
+            }
+            continue;
+          }
+          if (entity is! File || !(archived ? R03DownloadHistory.archivedName : _downloadFile).hasMatch(name)) {
+            throw const FormatException('Unknown transfer history entry');
+          }
+          final transfer = await R03DownloadHistory.readRecord(entity, archived: archived);
+          if (archived && !const {R03Stage.ready, R03Stage.completed, R03Stage.failed, R03Stage.cancelled}.contains(transfer.stage)) {
+            throw const FormatException('Unresolved transfer in historical archive');
+          }
       final historicalOwner = transfer.historyBinding;
       final listing = historicalOwner?.listingKey ?? r07UniqueListingForFile(
           transfer.fileName, trackedPackages.keys);
@@ -209,8 +272,9 @@ class R07ActivityCatalog {
               transfer.stage == R03Stage.completed);
       final amount = complete ? transfer.completedBytes : transfer.validatedBytes;
       final stat = await entity.stat();
-      records.add(R07ActivityRecord(
-        id: 'download:${transfer.jobId}', kind: 'download',
+      append(R07ActivityRecord(
+        id: archived ? 'download-history:$name' : 'download:${transfer.jobId}', kind: 'download',
+        archivedTransfer: archived,
         stage: transfer.stage.name,
         title: listing == null ? transfer.fileName :
             (trackedPackages[listing] ?? transfer.fileName),
@@ -221,11 +285,22 @@ class R07ActivityCatalog {
         verifiedBytes: amount, totalBytes: transfer.totalBytes,
         download: transfer,
       ));
+      } on FileSystemException {
+        unreadableDownloads++;
+      } on FormatException {
+        unreadableDownloads++;
+      } on TypeError {
+        unreadableDownloads++;
+      }
     }
-    records.sort((a, b) {
-      final compared = b.updatedUtc.compareTo(a.updatedUtc);
-      return compared == 0 ? a.id.compareTo(b.id) : compared;
-    });
-    return List<R07ActivityRecord>.unmodifiable(records);
+    }
+    if (unreadableDownloads != 0) {
+      append(R07ActivityRecord(id: 'integrity:download', kind: 'integrity',
+        stage: 'unknown', title: 'Unreadable download history',
+        reason: '$unreadableDownloads receipt(s) could not be read; no evidence was erased.',
+        updatedUtc: DateTime.now().toUtc(), historyIntegrityKnown: false));
+    }
+    availableChannels = Set<String>.unmodifiable(channels);
+    return List<R07ActivityRecord>.unmodifiable([...active, ...finished]..sort(compare));
   }
 }

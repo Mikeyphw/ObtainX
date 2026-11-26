@@ -1,7 +1,7 @@
 {
   "schema": "obtainx.r10.locale-review.v1",
   "fallback": "en",
-  "english_leaf_keys": 996,
+  "english_leaf_keys": 998,
   "new_labels": [
     "swipeAction_openSource",
     "r10SourceOpenFailed",

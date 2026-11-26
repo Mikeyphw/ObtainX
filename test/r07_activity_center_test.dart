@@ -1,3 +1,4 @@
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
@@ -32,14 +33,20 @@ class _ObservedActivityCatalog extends R07ActivityCatalog {
   @override
   Future<List<R07ActivityRecord>> load({
     Map<String, String> trackedPackages = const <String, String>{},
+    int? historyLimit, String? packageId, String? listingKey, String? operationId,
+    String channel = 'all', String filter = 'all',
   }) {
-    final result = super.load(trackedPackages: trackedPackages);
+    final result = super.load(trackedPackages: trackedPackages, historyLimit: historyLimit,
+      packageId: packageId, listingKey: listingKey, operationId: operationId,
+      channel: channel, filter: filter);
     initialLoad ??= result;
     return result;
   }
 }
 
 void main() {
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
   late Directory root;
   late R05OperationJournal journal;
   late R07ActivityCatalog catalog;
@@ -56,7 +63,7 @@ void main() {
   Future<R05OperationReceipt> begin(String listing) => journal.begin(
     listingKey: listing, packageId: 'com.example', backend: 'stock',
     kind: 'single', fileNames: const ['example.apk'],
-    downloadSha256: digest,
+    downloadSha256: digest, channelFingerprint: digest, releaseFingerprint: digest,
   );
   Future<void> putDownload({
     R03Stage stage = R03Stage.downloading,
@@ -287,7 +294,9 @@ void main() {
     final suspicious = File('${root.path}/private');
     await suspicious.writeAsString('private');
     await Link('${folder.path}/$digest.json').create(suspicious.path);
-    await expectLater(catalog.load(), throwsFormatException);
+    final entries = await catalog.load();
+    expect(entries.single.kind, 'integrity');
+    expect(entries.single.historyIntegrityKnown, isFalse);
     expect(await suspicious.readAsString(), 'private');
   });
 
@@ -302,6 +311,8 @@ void main() {
       'validatedBytes':0, 'totalBytes':null, 'etag':null,
       'lastModified':null, 'finalDigest':null,'completedBytes':null,
     }));
-    await expectLater(catalog.load(), throwsFormatException);
+    final entries = await catalog.load();
+    expect(entries.single.kind, 'integrity');
+    expect(entries.single.historyIntegrityKnown, isFalse);
   });
 }

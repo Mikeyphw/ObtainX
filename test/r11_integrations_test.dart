@@ -26,6 +26,8 @@ class _NoProvider implements AppsProvider {
 }
 
 void main() {
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
   TestWidgetsFlutterBinding.ensureInitialized();
   test('external links have one bounded exact package and no caller extras', () {
     expect(r11PackageFromLink(Uri.parse('obtainium://open?id=com.example.app')), 'com.example.app');
@@ -104,7 +106,8 @@ void main() {
     addTearDown(() async { await root.delete(recursive: true); });
     final journal = R05OperationJournal(testingRoot: root);
     Future<R05OperationReceipt> start(String key) => journal.begin(listingKey: key,
-      packageId: 'com.example.app', backend: 'system', kind: 'apk', fileNames: ['base.apk']);
+      packageId: 'com.example.app', backend: 'system', kind: 'apk', fileNames: ['base.apk'],
+      channelFingerprint: 'a' * 64);
     final failed = await start('a');
     final pending = await start('a');
     final other = await start('b');
@@ -122,8 +125,6 @@ void main() {
     expect(r11RateLimited(100, 1000, 0), isFalse);
   });
   test('SQLite scheduling claim is durable and rejects duplicate starts', () async {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
     final root = await Directory.systemTemp.createTemp('r11-schedule-');
     addTearDown(() async { await root.delete(recursive: true); });
     final path = '${root.path}/schedule.db';

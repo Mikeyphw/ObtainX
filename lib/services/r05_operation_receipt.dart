@@ -3,6 +3,7 @@
 library;
 
 import 'dart:convert';
+import 'package:obtainium/services/r07_process_owner.dart';
 
 const String r05ExtraApprovalPreference = 'r05ExtraApprovalBeforeHandoff';
 
@@ -60,9 +61,9 @@ class R05DownloadProvenance {
   const R05DownloadProvenance({required this.releaseFingerprint, required this.archiveSha256,
     required this.sourceHost, required this.finalOrigin, required this.channelFingerprint, this.repository,
     this.branch, this.workflowId, this.runId, this.runAttempt, this.artifactId,
-    this.commitSha});
+    this.commitSha, this.parentAttemptId, this.timelineId});
   final String releaseFingerprint, archiveSha256, sourceHost, finalOrigin, channelFingerprint;
-  final String? repository, branch, commitSha;
+  final String? repository, branch, commitSha, parentAttemptId, timelineId;
   final int? workflowId, runId, runAttempt, artifactId;
 }
 
@@ -119,7 +120,7 @@ class R05OperationReceipt {
     this.installedSignerSet = const [],
     this.releaseFingerprint,
     this.containerSha256,
-    this.workflowId, this.sourceRepository, this.finalOrigin,
+    this.workflowId, this.sourceRepository, this.finalOrigin, this.parentAttemptId, this.timelineId, this.processOwner,
   });
 
   final String id, listingKey, packageId, backend, kind;
@@ -135,6 +136,7 @@ class R05OperationReceipt {
   final List<String> selectedApkSha256, archiveSignerSet, installedApkSha256, installedSignerSet;
   final String? releaseFingerprint, containerSha256, sourceRepository, finalOrigin;
   final int? workflowId;
+  final String? parentAttemptId, timelineId, processOwner;
   // Legacy confirmed receipts are historical claims, not byte-qualified evidence.
   bool get exactBytesConfirmed => stage == R05InstallStage.confirmed &&
       _r05SameDigests(selectedApkSha256, installedApkSha256) &&
@@ -162,7 +164,7 @@ class R05OperationReceipt {
     List<String> archiveSignerSet = const [],
     String? releaseFingerprint,
     String? containerSha256,
-    int? workflowId, String? sourceRepository, String? finalOrigin,
+    int? workflowId, String? sourceRepository, String? finalOrigin, String? parentAttemptId, String? timelineId, String? processOwner,
     DateTime? now,
   }) {
     final time = (now ?? DateTime.now()).toUtc();
@@ -179,6 +181,7 @@ class R05OperationReceipt {
       selectedApkSha256: selectedApkSha256, archiveSignerSet: archiveSignerSet,
       releaseFingerprint: releaseFingerprint, containerSha256: containerSha256,
       workflowId: workflowId, sourceRepository: sourceRepository, finalOrigin: finalOrigin,
+      parentAttemptId: parentAttemptId, timelineId: timelineId, processOwner: processOwner,
     );
     return R05OperationReceipt.fromJson(item.toJson());
   }
@@ -247,6 +250,9 @@ class R05OperationReceipt {
     if (workflowId != null) 'workflowId': workflowId,
     if (sourceRepository != null) 'sourceRepository': sourceRepository,
     if (finalOrigin != null) 'finalOrigin': finalOrigin,
+    if (parentAttemptId != null) 'parentAttemptId': parentAttemptId,
+    if (timelineId != null) 'timelineId': timelineId,
+    if (processOwner != null) 'processOwner': processOwner,
   };
 
   factory R05OperationReceipt.fromJson(Map<String, dynamic> raw) {
@@ -256,11 +262,21 @@ class R05OperationReceipt {
       'archiveSignerSha256','installedSignerSha256','androidCode','expectedVersionCode','androidVersionCode',
       'verifiedUtc','reason'};
     if (raw.keys.toSet().difference({...keys, 'channelFingerprint', 'selectedApkSha256', 'archiveSignerSet',
-          'installedApkSha256', 'installedSignerSet', 'releaseFingerprint', 'containerSha256', 'workflowId', 'sourceRepository', 'finalOrigin'}).isNotEmpty ||
+          'installedApkSha256', 'installedSignerSet', 'releaseFingerprint', 'containerSha256', 'workflowId', 'sourceRepository', 'finalOrigin', 'parentAttemptId', 'timelineId', 'processOwner'}).isNotEmpty ||
         keys.difference(raw.keys.toSet()).isNotEmpty || raw['schema'] != 1) {
       throw const FormatException('Unrecognized R05 receipt schema');
     }
     final id = _r05Text(raw['id']);
+    final owner = _r05Text(raw['processOwner']);
+    if (owner != null) { R07ProcessOwner.decode(owner); }
+    final timeline = _r05Text(raw['timelineId']);
+    if (timeline != null && !RegExp(r'^r07_[a-f0-9]{32}$').hasMatch(timeline)) {
+      throw const FormatException('Invalid timeline identity');
+    }
+    final parent = _r05Text(raw['parentAttemptId']);
+    if (parent != null && (!_r05Id.hasMatch(parent) || parent == id)) {
+      throw const FormatException('Invalid parent attempt identity');
+    }
     final listing = _r05Text(raw['listingKey']);
     final package = _r05Text(raw['packageId']);
     final backend = _r05Text(raw['backend']);
@@ -356,7 +372,7 @@ class R05OperationReceipt {
       releaseFingerprint: _r05Digest(raw['releaseFingerprint']),
       containerSha256: _r05Digest(raw['containerSha256']),
       workflowId: _r05Positive(raw['workflowId']),
-      sourceRepository: repository, finalOrigin: finalOrigin,
+      sourceRepository: repository, finalOrigin: finalOrigin, parentAttemptId: parent, timelineId: timeline, processOwner: owner,
     );
   }
 

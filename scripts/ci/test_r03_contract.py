@@ -48,7 +48,7 @@ class R03MutationTests(unittest.TestCase):
     def test_remove_source_fingerprint(self):
         self.mutated(PATHS[0],'sourceFingerprint: jobId','sourceFingerprint: overwritten')
     def test_remove_real_resume_validator(self):
-        self.mutated(PATHS[0],"..['if-range'] = previous.ifRange!", "..['wrong-range'] = previous.ifRange!")
+        self.mutated(PATHS[0],"..['if-range'] = checkpoint.ifRange!", "..['wrong-range'] = checkpoint.ifRange!")
     def test_remove_verified_blocks(self):
         self.mutated(PATHS[0],'eligibleForResume = await _verifyBlocks(part, previous.blocks)', 'eligibleForResume = true')
     def test_remove_active_digest_policy(self):

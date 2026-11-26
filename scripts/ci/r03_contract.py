@@ -31,7 +31,7 @@ def verify(root:Path=ROOT)->int:
         '206 resume must actually parse the strict content range')
     assert_has("eligibleForResume = await _verifyBlocks(part, previous.blocks)" in engine,
         'resume must actually validate block digests')
-    assert_has("..['if-range'] = previous.ifRange!" in engine,
+    assert_has("..['if-range'] = checkpoint.ifRange!" in engine,
         'resume must send actual If-Range header')
     assert_has("if (input['validatedBytes'] != blocks.length * r03ChunkBytes)" in engine,
         'journal must bind validated offset to block inventory')

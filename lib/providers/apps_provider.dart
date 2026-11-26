@@ -25,6 +25,7 @@ import 'package:obtainium/http/response_bytes.dart';
 import 'package:obtainium/services/app_check_store.dart';
 import 'package:obtainium/services/r11_schedule.dart';
 import 'package:obtainium/services/r03_download_engine.dart';
+import 'package:obtainium/services/r03_download_history.dart';
 import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/install_precommit_gate.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
@@ -279,7 +280,10 @@ class DownloadedApk {
   final InstallReleaseSnapshot? release;
   final R05DownloadProvenance? provenance;
   final File? container;
-  DownloadedApk(this.appId, this.file, {this.release, this.provenance, this.container});
+  String? installTimelineId;
+  String? get timelineId => installTimelineId ?? provenance?.timelineId;
+  DownloadedApk(this.appId, this.file, {this.release, this.provenance, this.container,
+    this.installTimelineId});
 }
 
 enum DownloadedDirType { xapk, apks, apkm, zip, tarball }
@@ -292,6 +296,8 @@ class DownloadedDir {
   final InstallReleaseSnapshot? release;
   final R05DownloadProvenance? provenance;
   final InstallBundlePlan? inspectedPlan;
+  String? installTimelineId;
+  String? get timelineId => installTimelineId ?? provenance?.timelineId;
   DownloadedDir(
     this.appId,
     this.file,
@@ -341,6 +347,7 @@ Future<File> downloadFileWithRetry(
   LogsProvider? logs,
   CancellationToken? cancellationToken,
   R03HistoryBinding? historyBinding,
+  R03DownloadRecord? resumeRecord,
   void Function(R03DownloadRecord)? onVerified,
 }) async {
   int remaining = retries;
@@ -351,6 +358,7 @@ Future<File> downloadFileWithRetry(
         url, fileName, fileNameHasExt, onProgress, destDir,
         useExisting: useExisting, headers: headers, allowInsecure: allowInsecure,
         logs: logs, cancellationToken: cancellationToken, historyBinding: historyBinding, onVerified: onVerified,
+        resumeRecord: resumeRecord,
       );
     } catch (error) {
       final int? code = error is ObtainiumError && error.code == 'HTTP_ERROR'
@@ -358,7 +366,7 @@ Future<File> downloadFileWithRetry(
           : null;
       final transient = error is ClientException || error is SocketException ||
           error is TimeoutException || (code != null && r03CanRetryHttpStatus(code));
-      if (!transient || remaining <= 0) rethrow;
+      if (resumeRecord != null || !transient || remaining <= 0) rethrow;
       final int attempt = retries - remaining;
       remaining--;
       final int jitter = Random().nextInt(800);
@@ -602,6 +610,7 @@ Future<File> downloadFile(
   Directory? privateJournalDirectory,
   bool reviewHttpsOnly = false,
   R03HistoryBinding? historyBinding,
+  R03DownloadRecord? resumeRecord,
   void Function(R03DownloadRecord)? onVerified,
 }) async {
   final bool keepAwakeAcquired =
@@ -622,6 +631,7 @@ Future<File> downloadFile(
       privateJournalDirectory: privateJournalDirectory,
       reviewHttpsOnly: reviewHttpsOnly,
       historyBinding: historyBinding, onVerified: onVerified,
+      resumeRecord: resumeRecord,
     );
   } finally {
     if (keepAwakeAcquired) {
@@ -645,6 +655,7 @@ Future<File> _downloadFile(
   Directory? privateJournalDirectory,
   bool reviewHttpsOnly = false,
   R03HistoryBinding? historyBinding,
+  R03DownloadRecord? resumeRecord,
   void Function(R03DownloadRecord)? onVerified,
 }) async {
   final requestHeaders = withDefaultObtainXUserAgent(headers);
@@ -704,7 +715,7 @@ Future<File> _downloadFile(
         isCancelled: () => cancellationToken?.isCancelled ?? false,
         useExisting: useExisting,
         historyBinding: historyBinding, resolvedUri: (response) => resolvedOrigins[response],
-        onVerified: onVerified,
+        onVerified: onVerified, resumeRecord: resumeRecord,
         onProgress: (progress, received, total) {
           onProgress?.call(progress, received, total);
         },
@@ -1311,14 +1322,17 @@ class AppsProvider with ChangeNotifier {
 
   /// Registers a cancellation token for an in-flight download of [appId].
   CancellationToken registerDownloadCancellation(String appId) {
+    if (_downloadCancellations.containsKey(appId)) {
+      throw StateError('Another transfer owns this listing');
+    }
     final token = CancellationToken();
     _downloadCancellations[appId] = token;
     return token;
   }
 
   /// Clears the cancellation token once a download of [appId] finishes.
-  void clearDownloadCancellation(String appId) {
-    _downloadCancellations.remove(appId);
+  void clearDownloadCancellation(String appId, CancellationToken token) {
+    if (identical(_downloadCancellations[appId], token)) _downloadCancellations.remove(appId);
   }
 
   /// Requests cancellation of an ongoing download for [appId], if any.
@@ -1611,15 +1625,12 @@ class AppsProvider with ChangeNotifier {
         // path so it never delays the first app-list render. It also self-skips
         // on later launches via a prefs flag (see the method).
         unawaited(migrateUserIconsFromLegacyCacheDir());
-        final cutoff = DateTime.now().subtract(const Duration(days: 7));
-        await for (var entity in apkDir.list()) {
-          if (entity is File &&
-              entity.path.endsWith('.part') &&
-              (await entity.stat()).modified.isBefore(cutoff)) {
-            if (!areDownloadsRunning()) {
-              await entity.delete();
-            }
-          }
+        // R03 owns resumable partials. Age or an isolate-local progress map
+        // cannot establish that they are disposable after process death.
+        try {
+          await R03DownloadHistory(cache: apkDir).archiveTerminalWithoutBytes();
+        } catch (_) {
+          unawaited(logs.add('Transfer history archival deferred; recovery data preserved'));
         }
       } else {
         await migrateUserIconsFromLegacyCacheDir();

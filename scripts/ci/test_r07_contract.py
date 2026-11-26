@@ -26,6 +26,12 @@ class R07ContractTests(unittest.TestCase):
  def test_reject_missing_existing_journal(self):
   self.mutate('lib/services/r07_activity_catalog.dart','R05OperationJournal.instance')
   self.assertTrue(any('catalog' in x for x in module.verify(self.root)))
+ def test_reject_missing_exact_transfer_parser(self):
+  self.mutate('lib/services/r03_download_history.dart','record.sourceFingerprint != record.jobId')
+  self.assertTrue(any('r03_download_history.dart' in x for x in module.verify(self.root)))
+ def test_reject_catalog_bypassing_verified_parser(self):
+  self.mutate('lib/services/r07_activity_catalog.dart','R03DownloadHistory.readRecord(entity, archived: archived)')
+  self.assertTrue(any('catalog' in x for x in module.verify(self.root)))
  def test_reject_old_competing_page(self):
   p=self.root/'lib/widgets/r05_install_activity_page.dart'
   p.write_text(p.read_text()+'\nclass R05InstallActivityPage {}\n')

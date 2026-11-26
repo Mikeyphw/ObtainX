@@ -12,8 +12,10 @@ import 'package:obtainium/services/r11_external_requests.dart';
 import 'package:flutter/material.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/services/r05_operation_journal.dart';
+import 'package:obtainium/services/r03_download_history.dart';
 import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/r07_activity_catalog.dart';
+import 'package:obtainium/services/r07_operation_timeline.dart';
 import 'package:provider/provider.dart';
 
 class R07ActivityCenterPage extends StatefulWidget {
@@ -37,8 +39,10 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
   bool _busy = false;
   String _filter = 'all';
   String _channel = 'all';
+  static const int _pageSize = 50;
+  int _historyLimit = _pageSize;
   String? _historyChannel(R07ActivityRecord entry) =>
-      entry.install?.channelFingerprint ?? entry.download?.historyBinding?.channel;
+      entry.install?.channelFingerprint ?? entry.download?.historyBinding?.channel ?? entry.timeline?.intent.channel;
 
   @override
   void initState() {
@@ -73,7 +77,9 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
       final durable = await _catalog.load(trackedPackages: {
         for (final listing in provider.apps.values)
           listing.listingKey: listing.app.id,
-      });
+      }, historyLimit: _historyLimit + 1, packageId: widget.packageId,
+        listingKey: widget.listingKey, operationId: widget.operationId,
+        channel: _channel, filter: _filter);
       // Current provider tokens are the only authority for cancel actions.
       // Never associate an old R03 job fingerprint with a newer transfer.
       final live = <R07ActivityRecord>[
@@ -123,10 +129,18 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     if (key == null || !provider.apps.containsListingKey(key)) return false;
     final live = provider.apps[key]!.app;
     if (live.id != entry.packageId) return false;
-    final receipt = entry.install;
     final channel = _historyChannel(entry);
-    if (receipt == null && entry.download == null) return true;
-    return channel == null || channel == r11ChannelFingerprint(live);
+    if (entry.install == null && entry.download == null && entry.timeline == null) return true;
+    // A historical filename association is for display only. An unknown or
+    // stale channel cannot authorize current operations.
+    return entry.historyIntegrityKnown && channel != null &&
+        channel == r11ChannelFingerprint(live) &&
+        (entry.timeline == null || entry.timeline!.intent.release ==
+            downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(live))) &&
+        (entry.download == null || entry.download!.historyBinding?.releaseFingerprint ==
+            downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(live))) &&
+        (entry.install == null ||
+            entry.install!.releaseFingerprint == downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(live)));
   }
 
   Set<R07ActivityAction> _actions(
@@ -178,6 +192,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     final receipt = entry.install;
     if (receipt != null) {
       return 'Attempt: ${receipt.id}\n'
+          'Parent attempt: ${receipt.parentAttemptId ?? '-'}\n'
+          'Operation: ${receipt.timelineId ?? '-'}\n'
           'Listing: ${receipt.listingKey}\n'
           'Historical channel: ${receipt.channelFingerprint ?? tr('r11UnknownChannel')}\n'
           '${tr('r11HistoricalOnly')}\n'
@@ -193,6 +209,16 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
           'Status: ${receipt.stage.name}\n'
           'Verified exact bytes: ${receipt.exactBytesConfirmed ? receipt.verifiedUtc : 'not verified'}\n\n'
           '${_explanation(entry)}';
+    }
+    if (entry.kind == 'integrity') return entry.reason ?? entry.title;
+    final operation = entry.timeline;
+    if (operation != null) {
+      return 'Operation: ${operation.id}\nKind: ${operation.intent.kind}\n'
+          'Listing: ${operation.intent.listingKey}\nRelease: ${operation.intent.release}\n'
+          'Parent: ${operation.intent.parentId ?? '-'}\nTransfer: ${operation.transferId ?? '-'}\n'
+          'Installation receipt: ${operation.attemptId ?? '-'}\nStage: ${operation.stage}\n'
+          'Source checks finished: ${entry.batchCompleted ?? '-'} / ${entry.batchTotal ?? '-'}\n'
+          'Reason: ${operation.reason ?? '-'}\nNo installation is confirmed by this timeline.';
     }
     if (entry.kind == 'live') {
       return 'Current provider operation: ${entry.id}\n'
@@ -223,9 +249,66 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     // A separate retry must be explicitly requested as a fresh attempt.
   }
 
+  Future<void> _resume(R07ActivityRecord entry, AppsProvider provider) async {
+    final queued = entry.timeline;
+    if (queued != null) {
+      if (!_actions(entry, provider).contains(R07ActivityAction.resume)) return;
+      final approved = await showDialog<bool>(context: context, builder: (dialog) => AlertDialog(
+        title: Text('Continue exact queued ${queued.intent.kind}?'),
+        content: const Text('Continue the same persisted operation. Current source identity and all required approval checks still apply.'),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialog, false), child: Text(tr('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(dialog, true), child: Text(tr('continue')))],
+      ));
+      if (!mounted || approved != true || !_actions(entry, provider).contains(R07ActivityAction.resume)) return;
+      setState(() => _busy = true);
+      try {
+        switch (queued.intent.kind) {
+          case 'check':
+            await provider.checkUpdates(specificIds: [queued.intent.listingKey], resumeQueued: queued);
+            break;
+          case 'download':
+            await provider.downloadApp(provider.apps[queued.intent.listingKey]!.app,
+              queuedIntent: queued, allowUserInteraction: true, preserveListingIdentity: true,
+              allowExternalContinuation: () => _matchesListing(entry, provider));
+            break;
+          case 'install':
+            await provider.downloadAndInstallLatestApps([queued.intent.listingKey], context, resumeQueued: queued);
+            break;
+          default:
+            throw StateError('Unknown queue kind');
+        }
+      } catch (_) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Queued operation could not continue. Review its exact status.')));
+      } finally {
+        if (mounted) setState(() { _busy = false; _load(); });
+      }
+      return;
+    }
+    final record = entry.download;
+    if (record == null || !_actions(entry, provider).contains(R07ActivityAction.resume)) return;
+    final approved = await showDialog<bool>(context: context, builder: (dialog) => AlertDialog(
+      title: const Text('Resume verified transfer?'),
+      content: const Text('Continue the same verified bytes and release. If the server or receipt changed, resume stops without starting a new installation.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialog, false), child: Text(tr('cancel'))),
+        FilledButton(onPressed: () => Navigator.pop(dialog, true), child: Text(tr('continue')))],
+    ));
+    if (!mounted || approved != true || !_actions(entry, provider).contains(R07ActivityAction.resume)) return;
+    final app = provider.apps[entry.listingKey]!.app;
+    setState(() => _busy = true);
+    try {
+      await provider.downloadApp(app, allowUserInteraction: true,
+        preserveListingIdentity: true, resumeRecord: record,
+        allowExternalContinuation: () => _matchesListing(entry, provider));
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('The retained transfer could not resume. No new install was authorized.')));
+    } finally {
+      if (mounted) setState(() { _busy = false; _load(); });
+    }
+  }
+
   Future<void> _retry(R07ActivityRecord entry, AppsProvider provider) async {
-    if (!_actions(entry, provider).contains(R07ActivityAction.retry) &&
-        !_actions(entry, provider).contains(R07ActivityAction.resume)) {
+    if (!_actions(entry, provider).contains(R07ActivityAction.retry)) {
       return;
     }
     final key = entry.listingKey;
@@ -256,7 +339,7 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     if (approved != true || !mounted || !_matchesListing(entry, provider)) return;
     setState(() => _busy = true);
     try {
-      await provider.downloadAndInstallLatestApps(<String>[key], context);
+      await provider.downloadAndInstallLatestApps(<String>[key], context, retryParent: entry.install);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -271,7 +354,13 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
   Future<void> _cancel(R07ActivityRecord entry, AppsProvider provider) async {
     if (!_actions(entry, provider).contains(R07ActivityAction.cancel)) return;
     final key = entry.listingKey!;
-    if (entry.kind == 'live') {
+    if (entry.timeline != null) {
+      try {
+        await R07OperationTimeline.instance.cancelQueued(entry.timeline!.id);
+      } catch (_) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Queue ownership changed; no active operation was cancelled.')));
+      }
+    } else if (entry.kind == 'live') {
       provider.cancelDownload(key);
     } else if (entry.kind == 'install') {
       final unique = await R05OperationJournal.instance.uniqueUnresolved(key);
@@ -297,7 +386,9 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     // Live bytes are an estimate. Persisted R03 chunks are authoritative;
     // transfer progress never becomes installer confirmation.
     final fraction = entry.progress;
-    final label = entry.kind == 'download' ? 'Download' :
+    final label = entry.kind == 'integrity' ? 'History warning' :
+        entry.kind == 'download' ? 'Download' :
+        entry.kind == 'timeline' ? 'Operation: ${entry.timeline!.intent.kind}' :
         entry.kind == 'live' ? 'Current operation' : 'Installation';
     final status = entry.stage == 'confirmed' ? 'Confirmed on device' :
         entry.stage == 'handedOff' ? 'Android handoff — not confirmed' :
@@ -324,6 +415,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
               await _review(entry);
               break;
             case R07ActivityAction.resume:
+              await _resume(entry, provider);
+              break;
             case R07ActivityAction.retry:
               await _retry(entry, provider);
               break;
@@ -387,10 +480,17 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     );
   }
 
-  Future<void> _exportHistory(List<R07ActivityRecord> records) async {
+  Future<void> _exportHistory(AppsProvider provider, String channel) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
+      final records = await _catalog.load(trackedPackages: {
+        for (final listing in provider.apps.values) listing.listingKey: listing.app.id,
+      }, packageId: widget.packageId, listingKey: widget.listingKey,
+        operationId: widget.operationId, channel: channel, filter: _filter);
+      if (records.any((entry) => entry.kind == 'integrity')) {
+        throw StateError('History export scope could not be read completely');
+      }
       final data = Uint8List.fromList(utf8.encode(jsonEncode(r11PublicHistory(records))));
       await SharePlus.instance.share(ShareParams(files: [
         XFile.fromData(data, mimeType: 'application/json'),
@@ -402,7 +502,7 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     }
   }
 
-  Future<void> _pruneHistory() async {
+  Future<void> _pruneHistory(String selectedChannel, AppsProvider provider) async {
     if (_busy) return;
     final days = await showDialog<int>(context: context, builder: (dialog) => SimpleDialog(
       title: Text(tr('r11Retention')),
@@ -416,17 +516,37 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
       ],
     ));
     if (!mounted || days == null) return;
-    final approved = await showDialog<bool>(context: context, builder: (dialog) => AlertDialog(
-      title: Text(tr('r11RetentionConfirm')),
-      content: Text(tr('r11RetentionDays', args: ['$days'])),
-      actions: [TextButton(onPressed: () => Navigator.pop(dialog, false), child: Text(tr('cancel'))),
-        FilledButton(onPressed: () => Navigator.pop(dialog, true), child: Text(tr('delete')))],
-    ));
-    if (!mounted || approved != true) return;
+    final cutoff = DateTime.now().toUtc().subtract(Duration(days: days));
+    final channel = selectedChannel == 'all' ? null : selectedChannel;
     setState(() => _busy = true);
     try {
-      final count = await R05OperationJournal.instance.pruneTerminalBefore(
-        DateTime.now().toUtc().subtract(Duration(days: days)), listingKey: widget.listingKey);
+      final preview = await R05OperationJournal.instance.previewTerminalBefore(cutoff,
+        listingKey: widget.listingKey, packageId: widget.packageId, channel: channel);
+      final transfers = R03DownloadHistory(cache: provider.apkDir);
+      final downloadPreview = await transfers.previewTerminalBefore(cutoff,
+        listingKey: widget.listingKey, packageId: widget.packageId, channel: channel);
+      if (!mounted) return;
+      final approved = await showDialog<bool>(context: context, builder: (dialog) => AlertDialog(
+        title: Text(tr('r11RetentionConfirm')),
+        content: Text('${tr('r11RetentionDays', args: ['$days'])}\n'
+          'Package: ${widget.packageId ?? tr('r11AllChannels')}\n'
+          'Listing: ${widget.listingKey ?? tr('r11AllChannels')}\n'
+          '${channel == null ? tr('r11AllChannels') : channel == 'unknown' ? tr('r11UnknownChannel') : channel}\n'
+          '${tr('r11RetentionPreview', args: ['${preview.entries.length}', '${downloadPreview.entries.length}'])}'),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialog, false), child: Text(tr('cancel'))),
+          FilledButton(onPressed: preview.entries.isEmpty && downloadPreview.entries.isEmpty ? null : () => Navigator.pop(dialog, true), child: Text(tr('delete')))],
+      ));
+      if (!mounted || approved != true) return;
+      var count = 0;
+      try {
+        count = await R05OperationJournal.instance.pruneTerminalBefore(cutoff,
+          listingKey: widget.listingKey, packageId: widget.packageId, channel: channel, preview: preview);
+        count += await transfers.prune(downloadPreview);
+      } catch (_) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Retention stopped after a history change or I/O error. At least $count receipts removed; review the refreshed history.')));
+        return;
+      }
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('r11RetentionResult', args: ['$count']))));
     } catch (_) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('r11HistoryFailed'))));
@@ -454,7 +574,9 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
             ]));
           }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          final warnings = snapshot.data!.where((x) => x.kind == 'integrity').toList();
           final scoped = snapshot.data!.where((x) {
+            if (x.kind == 'integrity') return false;
             if (widget.operationId != null && widget.operationId != x.id) return false;
             if (widget.packageId != null && widget.packageId != x.packageId) return false;
             if (widget.listingKey != null && widget.listingKey != x.listingKey) return false;
@@ -464,22 +586,34 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
               _ => true,
             };
           }).toList();
-          final channels = <String>{'all', for (final item in scoped)
-            if (item.install != null || item.download != null) _historyChannel(item) ?? 'unknown'};
+          final channels = <String>{'all', _channel, ..._catalog.availableChannels, for (final item in scoped)
+            if (item.install != null || item.download != null || item.timeline != null) _historyChannel(item) ?? 'unknown'};
           final channel = channels.contains(_channel) ? _channel : 'all';
           final items = scoped.where((x) => channel == 'all' ||
-            ((x.install != null || x.download != null) && (_historyChannel(x) ?? 'unknown') == channel)).toList();
+            ((x.install != null || x.download != null || x.timeline != null) && (_historyChannel(x) ?? 'unknown') == channel)).toList();
+          final ongoing = items.where((entry) => !entry.isFinished).toList();
+          final finished = items.where((entry) => entry.isFinished).toList();
+          final visible = [...ongoing, ...finished.take(_historyLimit)];
           final liveCheck = widget.operationId == null &&
               widget.packageId == null && provider.updateCheckCompleter != null;
           return RefreshIndicator(
             onRefresh: () => _refresh(reconcile: true),
             child: CustomScrollView(slivers: [
               SliverToBoxAdapter(child: Column(children: [
-                if (liveCheck) const ListTile(
-                  key: ValueKey('r07-live-check'),
-                  leading: CircularProgressIndicator(),
-                  title: Text('Checking app sources'),
-                  subtitle: Text('Active check; source counts are unknown until verified.'),
+                for (final warning in warnings) ListTile(
+                  leading: const Icon(Icons.warning_amber_rounded),
+                  title: Text(warning.title), subtitle: Text(warning.reason ?? ''),
+                ),
+                if (liveCheck) ListTile(
+                  key: const ValueKey('r07-live-check'),
+                  leading: const CircularProgressIndicator(),
+                  title: const Text('Checking app sources'),
+                  subtitle: Text(() {
+                    final activeChecks = items.where((x) => x.timeline?.intent.kind == 'check' && !x.isFinished).toList();
+                    if (activeChecks.isEmpty) return 'Preparing durable check queue';
+                    final check = activeChecks.first;
+                    return '${check.batchCompleted ?? 0} / ${check.batchTotal ?? 0} source checks finished';
+                  }()),
                 ),
                 if (widget.operationId == null) ...[
                   Padding(padding: const EdgeInsets.all(12), child: Text(tr('r11HistoricalOnly'))),
@@ -488,13 +622,15 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
                     items: [for (final value in channels) DropdownMenuItem(value: value,
                       child: Text(value == 'all' ? tr('r11AllChannels') : value == 'unknown'
                         ? tr('r11UnknownChannel') : value, overflow: TextOverflow.ellipsis))],
-                    onChanged: _busy ? null : (value) { if (value != null) setState(() => _channel = value); },
+                    onChanged: _busy ? null : (value) { if (value != null) setState(() {
+                      _channel = value; _historyLimit = _pageSize; _load();
+                    }); },
                   )),
                   Wrap(spacing: 8, children: [
-                    TextButton.icon(onPressed: _busy ? null : () => _exportHistory(items),
+                    TextButton.icon(onPressed: _busy ? null : () => _exportHistory(provider, channel),
                       icon: const Icon(Icons.share), label: Text(tr('r11ExportHistory'))),
                     if (widget.packageId == null || widget.listingKey != null)
-                      TextButton.icon(onPressed: _busy ? null : _pruneHistory,
+                      TextButton.icon(onPressed: _busy || warnings.isNotEmpty ? null : () => _pruneHistory(channel, provider),
                         icon: const Icon(Icons.delete_outline), label: Text(tr('r11Retention'))),
                   ]),
                 ],
@@ -507,7 +643,9 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
                       ButtonSegment(value: 'done', label: Text('Finished')),
                     ],
                     selected: {_filter},
-                    onSelectionChanged: (value) => setState(() => _filter = value.first),
+                    onSelectionChanged: (value) => setState(() {
+                      _filter = value.first; _historyLimit = _pageSize; _load();
+                    }),
                   )),
               ])),
               if (items.isEmpty)
@@ -519,9 +657,14 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
                       'This exact operation was not found. No other attempt was substituted.'),
                   )))
               else SliverList.builder(
-                itemCount: items.length,
-                itemBuilder: (context, index) => _entryTile(items[index], provider),
+                itemCount: visible.length,
+                itemBuilder: (context, index) => _entryTile(visible[index], provider),
               ),
+              if (finished.length > _historyLimit)
+                SliverToBoxAdapter(child: TextButton(
+                  onPressed: () => setState(() { _historyLimit += _pageSize; _load(); }),
+                  child: Text(tr('r11HistoryMore')),
+                )),
             ]),
           );
         },

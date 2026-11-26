@@ -34,6 +34,9 @@ import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/r04_actions_archive_integrity.dart';
 import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/r05_operation_journal.dart';
+import 'package:obtainium/services/r07_operation_timeline.dart';
+import 'package:obtainium/services/r07_process_owner.dart';
+import 'package:obtainium/services/r07_journal_guard.dart';
 import 'package:obtainium/services/r11_external_requests.dart';
 import 'package:obtainium/services/r03_download_engine.dart' show R03HistoryBinding, R03DownloadRecord;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -348,6 +351,42 @@ String _r09ReleaseKey(App app) => jsonEncode([
 extension AppsProviderInstall on AppsProvider {
   /// R05 journal is the single durable state authority; Android/release
   /// reconciliation remains independent and cannot be replaced by a timer.
+  Future<String> _ensureInstallTimeline(String listingKey, File original,
+      R05DownloadProvenance? provenance, String? existing) async {
+    final app = apps[listingKey]?.app;
+    if (!apps.containsListingKey(listingKey) || app == null || app.listingKey != listingKey) {
+      throw StateError('Exact tracked installation listing is missing');
+    }
+    final channel = r11ChannelFingerprint(app);
+    if (provenance != null && (provenance.channelFingerprint != channel ||
+        provenance.releaseFingerprint != downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(app)))) {
+      throw StateError('Install source or release changed after download');
+    }
+    final release = provenance?.releaseFingerprint ??
+        r07JournalFingerprint('local-install:${await sha256FileOffIsolate(original.path)}');
+    final timeline = R07OperationTimeline.instance;
+    if (existing != null) {
+      final prior = await timeline.read(existing);
+      if (prior.intent.kind == 'install') {
+        await timeline.validateInstallBinding(existing, listingKey: listingKey,
+          packageId: app.id, channel: channel, release: release);
+        return existing;
+      }
+      if (prior.stage != 'downloadReady' || prior.intent.release != release ||
+          prior.intent.channel != channel ||
+          (prior.resolvedListingKey ?? prior.intent.listingKey) != listingKey ||
+          (prior.resolvedPackageId ?? prior.intent.packageId) != app.id) {
+        throw StateError('Historical download does not belong to this reviewed installation');
+      }
+    }
+    // Local files have their own domain-separated byte identity; this does
+    // not grant remote-release provenance or historical source retry rights.
+    final entry = await timeline.beginPreparation(R07OperationIntent(kind: 'install',
+      listingKey: listingKey, packageId: app.id, channel: channel, release: release,
+      parentId: existing));
+    return entry.id;
+  }
+
   Future<R05OperationReceipt> _r05BeginAttempt(
     String listingKey, File primary, PackageInfo packageInfo, {
     required String kind,
@@ -356,6 +395,7 @@ extension AppsProviderInstall on AppsProvider {
     R05DownloadProvenance? provenance,
     File? container,
     InstallBundlePlan? plan,
+    String? timelineId,
   }) async {
     final app = apps[listingKey]?.app;
     if (app == null || app.listingKey != listingKey || packageInfo.packageName != app.id || packageInfo.versionCode == null ||
@@ -393,7 +433,15 @@ extension AppsProviderInstall on AppsProvider {
     if (provenance != null && provenance.archiveSha256 != (containerDigest ?? digest)) {
       throw StateError('Downloaded artifact bytes no longer match provenance');
     }
-    return R05OperationJournal.instance.begin(
+    final intentId = timelineId ?? provenance?.timelineId;
+    final intentRelease = provenance?.releaseFingerprint ??
+        r07JournalFingerprint('local-install:${containerDigest ?? digest}');
+    if (intentId != null) {
+      await R07OperationTimeline.instance.validateInstallBinding(intentId,
+        listingKey: listingKey, packageId: app.id, channel: r11ChannelFingerprint(app),
+        release: intentRelease);
+    }
+    final receipt = await R05OperationJournal.instance.begin(
       listingKey: listingKey, packageId: app.id,
       backend: getInstaller().modeKey, kind: kind,
       fileNames: <String>[primary.uri.pathSegments.last,
@@ -408,9 +456,28 @@ extension AppsProviderInstall on AppsProvider {
       archiveSignerSha256: signers.first,
       selectedApkSha256: hashes, archiveSignerSet: signers,
       releaseFingerprint: provenance?.releaseFingerprint,
+      parentAttemptId: provenance?.parentAttemptId,
       containerSha256: containerDigest,
       expectedVersionCode: packageInfo.versionCode,
+      timelineId: intentId,
+      processOwner: (await R07ProcessOwner.capture()).encode(),
     );
+    if (intentId != null) {
+      try {
+        await R07OperationTimeline.instance.linkAttempt(intentId, receipt.id,
+          listingKey: listingKey, packageId: app.id,
+          channel: r11ChannelFingerprint(app), release: intentRelease);
+      } catch (_) {
+        // No Android mutation has occurred. Do not leave a fresh receipt
+        // falsely owning a handoff which was refused by the timeline.
+        try {
+          await R05OperationJournal.instance.settleIfOpen(receipt.id,
+            R05InstallStage.failed, reason: 'Operation timeline binding refused before handoff');
+        } catch (_) { /* preserve the primary binding refusal */ }
+        rethrow;
+      }
+    }
+    return receipt;
   }
 
   bool _r05ListingStillBound(R05OperationReceipt attempt) {
@@ -1041,13 +1108,59 @@ extension AppsProviderInstall on AppsProvider {
     NotificationsProvider? notificationsProvider,
     bool useExisting = true,
     bool preserveListingIdentity = false,
+    R03DownloadRecord? resumeRecord,
+    R05OperationReceipt? retryParent,
+    R07TimelineEntry? queuedIntent,
     bool Function()? allowExternalContinuation,
     void Function(double? progress, int? received, int? total)? onProgress,
   }) async {
+    final timeline = R07OperationTimeline.instance;
+    final expected = R07OperationIntent(kind: queuedIntent?.intent.kind ?? 'download',
+      listingKey: app.listingKey, packageId: app.id, channel: r11ChannelFingerprint(app),
+      release: downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(app)),
+      parentId: retryParent?.id ?? resumeRecord?.jobId ?? queuedIntent?.intent.parentId);
+    final operation = queuedIntent ?? (await timeline.enqueue([expected])).single;
+    return timeline.run(operation, expected, 'downloading', () {
+      if (queuedIntent != null) {
+        final live = apps[app.listingKey]?.app;
+        if (!apps.containsListingKey(app.listingKey) || live == null || r11ChannelFingerprint(live) != expected.channel ||
+            downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(live)) != expected.release ||
+            live.id != expected.packageId) throw StateError('Queued release changed before execution');
+      }
+      return _downloadAppOwned(app,
+      allowUserInteraction: allowUserInteraction, notificationsProvider: notificationsProvider,
+      useExisting: useExisting, preserveListingIdentity: preserveListingIdentity,
+      resumeRecord: resumeRecord, retryParent: retryParent,
+      allowExternalContinuation: allowExternalContinuation, onProgress: onProgress,
+      timelineId: operation.id);
+    }, successStage: expected.kind == 'install' ? 'ready' : 'downloadReady',
+      failureReason: (error) => error is CancellationException ? 'cancelled' :
+        error is SocketException || error is HandshakeException || error is TimeoutException ? 'network' : 'operation');
+  }
+
+  Future<Object> _downloadAppOwned(
+    App app, {
+    bool allowUserInteraction = false,
+    NotificationsProvider? notificationsProvider,
+    bool useExisting = true,
+    bool preserveListingIdentity = false,
+    R03DownloadRecord? resumeRecord,
+    R05OperationReceipt? retryParent,
+    bool Function()? allowExternalContinuation,
+    void Function(double? progress, int? received, int? total)? onProgress,
+    required String timelineId,
+  }) async {
+    if (resumeRecord != null && (!preserveListingIdentity ||
+        !resumeRecord.explicitlyResumable || resumeRecord.historyBinding?.listingKey != app.listingKey ||
+        resumeRecord.historyBinding?.packageId != app.id ||
+        resumeRecord.historyBinding?.channel != r11ChannelFingerprint(app) ||
+        resumeRecord.historyBinding?.releaseFingerprint != downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(app)))) {
+      throw StateError('Resume requires the exact retained release and listing');
+    }
     final original = app;
     final originalRelease = preserveListingIdentity ? InstallReleaseSnapshot.fromApp(original) : null;
     bool matchesListing() {
-      if (!preserveListingIdentity) return apps[app.listingKey] != null;
+      if (!preserveListingIdentity) return apps.containsListingKey(app.listingKey);
       if (allowExternalContinuation?.call() != true) return false;
       final live = r11ExactLiveListing(apps, original);
       final expected = originalRelease!;
@@ -1087,6 +1200,11 @@ extension AppsProviderInstall on AppsProvider {
       // after a download or Android approval returns.
       final discoverySettings = Map<String, dynamic>.of(app.additionalSettings);
       final discoveryChannel = r11ChannelFingerprint(app);
+      if (retryParent != null && (retryParent.listingKey != app.listingKey ||
+          retryParent.packageId != app.id || retryParent.channelFingerprint != discoveryChannel ||
+          retryParent.releaseFingerprint != downloadReleaseCacheKey(downloadRelease))) {
+        throw StateError('Retry parent no longer matches selected release');
+      }
       final actionsEvidence = discoverySettings[r04ActionsArchiveEvidenceKey];
       if (actionsEvidence is Map) {
         discoverySettings[r04ActionsArchiveEvidenceKey] = Map<String, dynamic>.from(actionsEvidence);
@@ -1247,7 +1365,9 @@ extension AppsProviderInstall on AppsProvider {
           cancellationToken: cancellationToken,
           onVerified: (receipt) => transferEvidence = receipt,
           historyBinding: r11ValidPackage(app.id) ? R03HistoryBinding(
-            app.listingKey, app.id, r11ChannelFingerprint(app)) : null,
+            app.listingKey, app.id, discoveryChannel,
+            releaseFingerprint: downloadReleaseCacheKey(downloadRelease)) : null,
+          resumeRecord: resumeRecord,
         );
       }
 
@@ -1255,7 +1375,7 @@ extension AppsProviderInstall on AppsProvider {
       try {
         downloadedFile = await runDownload(headers);
       } catch (error) {
-        if (app.additionalSettings[GitHub.r04SourceModeKey] ==
+        if (resumeRecord != null || app.additionalSettings[GitHub.r04SourceModeKey] ==
                 GitHub.r04ModeActions ||
             !shouldRetryGitHubDownloadWithoutAuthorization(
           source: source,
@@ -1275,6 +1395,10 @@ extension AppsProviderInstall on AppsProvider {
         );
         downloadedFile = await runDownload(unauthenticatedHeaders);
       }
+      final observation = transferEvidence;
+      if (observation == null) throw StateError('Verified transfer receipt unavailable');
+      await R07OperationTimeline.instance.advance(timelineId, 'downloaded', transferId: observation.jobId);
+      await R07OperationTimeline.instance.advance(timelineId, 'verifying');
       // R04 P02: verify ZIP bytes before unzipping, APK inspection, UI
       // approval, or any real Android installer session. Also rejects stale
       // saved provenance and poisoned downloads reused from the local cache.
@@ -1302,6 +1426,7 @@ extension AppsProviderInstall on AppsProvider {
         branch: actions['branch'] as String?, workflowId: actions['workflowId'] as int?,
         runId: actions['runId'] as int?, runAttempt: actions['runAttempt'] as int?,
         artifactId: actions['artifactId'] as int?, commitSha: actions['commitSha'] as String?,
+        parentAttemptId: retryParent?.id, timelineId: timelineId,
       );
       if (reviewBinding != null) {
         final actualDigest = archiveDigest;
@@ -1357,6 +1482,7 @@ extension AppsProviderInstall on AppsProvider {
         );
       } else {
         final String apkDirPath = '${downloadedFile.path}-dir';
+        await R07OperationTimeline.instance.advance(timelineId, 'extracting');
         try {
           if (isTarball) {
             await extractTarballFile(downloadedFile.path, apkDirPath, cancellationToken);
@@ -1398,7 +1524,11 @@ extension AppsProviderInstall on AppsProvider {
           ? (downloadedFile, app)
           : await handleAPKIDChange(app, newInfo, downloadedFile, downloadUrl);
       downloadedFile = renamedFile;
-      final String resolvedAppId = resolvedApp.id;
+      final String resolvedAppId = resolvedApp.listingKey;
+      if (resolvedApp.listingKey != app.listingKey || resolvedApp.id != app.id) {
+        await R07OperationTimeline.instance.resolveDownloadedIdentity(timelineId,
+          resolvedApp.listingKey, resolvedApp.id);
+      }
       // handleAPKIDChange renames a bare APK once the real package id is known.
       if (isAPK) {
         parsedArchivePath = downloadedFile.path;
@@ -1410,16 +1540,9 @@ extension AppsProviderInstall on AppsProvider {
           await storeIconFromApkArchive(resolvedAppId, parsedArchivePath);
         }
       }
-      // Delete older versions of the file if any (keyed to the resolved id,
-      // since the id may have changed from a placeholder to the real package).
-      for (var file in preserveListingIdentity ? <FileSystemEntity>[] : downloadedFile.parent.listSync()) {
-        final fn = file.path.split('/').last;
-        if (fn.startsWith('$resolvedAppId-') &&
-            FileSystemEntity.isFileSync(file.path) &&
-            file.path != downloadedFile.path) {
-          unawaited(file.delete(recursive: true));
-        }
-      }
+      // A filename prefix does not prove an older transfer is disposable.
+      // Preserve its cache/partial bytes for explicit, owner-bound recovery.
+
       if (identical(_r09Selections[this]?[app.listingKey], reviewBinding)) {
         _r09Selections[this]?.remove(app.listingKey);
       }
@@ -1451,7 +1574,7 @@ extension AppsProviderInstall on AppsProvider {
         );
       }
     } finally {
-      clearDownloadCancellation(app.listingKey);
+      clearDownloadCancellation(original.listingKey, cancellationToken);
       if (nativeDownloadServiceStarted) {
         await NativeFeatures.stopDownloadForegroundService();
       }
@@ -1581,12 +1704,17 @@ extension AppsProviderInstall on AppsProvider {
     /// once here against the container before any split part is installed.
     bool showMalwareScanDialog = false,
   }) async {
+    final timelineId = await _ensureInstallTimeline(dir.appId, dir.file,
+      dir.provenance, dir.timelineId);
+    dir.installTimelineId = timelineId;
+    try {
     // Verify + scan the container once up front; the split-APK installApk calls
     // below pass skipMalwareScan so it is not repeated per part.
     if (skipPreInstallVerification) {
       _ensureGitHubAttestationPolicy(dir.appId);
     }
     if (!skipPreInstallVerification) {
+      await R07OperationTimeline.instance.observePreparation(timelineId, 'scanning');
       final bool proceedAfterVerification = await _runPreInstallVerification(
         appId: dir.appId,
         primaryFile: dir.file,
@@ -1601,8 +1729,12 @@ extension AppsProviderInstall on AppsProvider {
           } catch (_) {}
         },
       );
-      if (!proceedAfterVerification) return false;
+      if (!proceedAfterVerification) {
+        await R07OperationTimeline.instance.observePreparation(timelineId, 'declined');
+        return false;
+      }
     }
+    await R07OperationTimeline.instance.observePreparation(timelineId, 'preparingInstall');
     // R02: inspect every candidate before the installer is ever invoked.
     // One complete base+config session is required, not an arbitrary first APK.
     var somethingInstalled = false;
@@ -1682,7 +1814,7 @@ extension AppsProviderInstall on AppsProvider {
           final r05Container = await _r05BeginAttempt(
               dir.appId, File(plan.baseApkPath), packageInfo, kind: 'container-handoff',
               selected: plan.configApkPaths.map(File.new).toList(), release: release,
-              provenance: dir.provenance, container: dir.file, plan: plan);
+              provenance: dir.provenance, container: dir.file, plan: plan, timelineId: timelineId);
           await _recordPendingInstall(dir.appId, release);
           if (!await _r05AdditionalApproval(r05Container,
               interactive: showMalwareScanDialog)) {
@@ -1744,7 +1876,7 @@ extension AppsProviderInstall on AppsProvider {
 
       try {
         final wasInstalled = await installApk(
-          DownloadedApk(dir.appId, File(plan.baseApkPath), release: dir.release, provenance: dir.provenance, container: dir.file),
+          DownloadedApk(dir.appId, File(plan.baseApkPath), release: dir.release, provenance: dir.provenance, container: dir.file, installTimelineId: timelineId),
           firstInstallNotificationsProvider,
           needsBGWorkaround: needsBGWorkaround,
           preparationGate: preparationGate,
@@ -1787,6 +1919,15 @@ extension AppsProviderInstall on AppsProvider {
       }
     }
     return somethingInstalled;
+    } on CancellationException {
+      await R07OperationTimeline.instance.settlePreparation(timelineId, 'cancelled');
+      rethrow;
+    } catch (_) {
+      await R07OperationTimeline.instance.settlePreparation(timelineId, 'failed');
+      rethrow;
+    } finally {
+      await R07OperationTimeline.instance.settlePreparation(timelineId, 'unknown');
+    }
   }
 
   /// Installs a downloaded APK file, with optional auxiliary split APKs and Shizuku support.
@@ -1814,6 +1955,10 @@ extension AppsProviderInstall on AppsProvider {
     bool skipApkSaveFolderPersistForPrimaryApk = false,
     InstallBundlePlan? approvedPlan,
   }) async {
+    final timelineId = await _ensureInstallTimeline(file.appId, file.container ?? file.file,
+      file.provenance, file.timelineId);
+    file.installTimelineId = timelineId;
+    try {
     // Resolve the "Save downloaded APK copies" target once, up front (matches
     // main). Only touched when the feature is on and this isn't the extracted
     // primary of a bundle install; feature-off leaves this null (no behavior
@@ -1828,6 +1973,7 @@ extension AppsProviderInstall on AppsProvider {
       _ensureGitHubAttestationPolicy(file.appId);
     }
     if (!skipMalwareScan) {
+      await R07OperationTimeline.instance.observePreparation(timelineId, 'scanning');
       final bool proceed = await _runPreInstallVerification(
         appId: file.appId,
         primaryFile: file.file,
@@ -1842,8 +1988,12 @@ extension AppsProviderInstall on AppsProvider {
           } catch (_) {}
         },
       );
-      if (!proceed) return false;
+      if (!proceed) {
+        await R07OperationTimeline.instance.observePreparation(timelineId, 'declined');
+        return false;
+      }
     }
+    await R07OperationTimeline.instance.observePreparation(timelineId, 'preparingInstall');
     if (firstInstallNotificationsProvider != null) {
       await _shareWithVerifiedApps(
         file,
@@ -1912,7 +2062,7 @@ extension AppsProviderInstall on AppsProvider {
     final r05 = await _r05BeginAttempt(file.appId, file.file, newInfo,
         kind: additionalAPKs.isEmpty ? 'apk' : 'split-session',
         selected: additionalAPKs.map((x) => x.file).toList(),
-        release: installedRelease, provenance: file.provenance, container: file.container, plan: manifestPlan);
+        release: installedRelease, provenance: file.provenance, container: file.container, plan: manifestPlan, timelineId: timelineId);
     await _recordPendingInstall(file.appId, installedRelease);
     if (!await _r05AdditionalApproval(r05,
         interactive: showMalwareScanDialog)) {
@@ -2009,6 +2159,15 @@ extension AppsProviderInstall on AppsProvider {
       await _r05PersistBoundConfirmation(r05, installedRelease, newInfo);
     }
     return installed;
+    } on CancellationException {
+      await R07OperationTimeline.instance.settlePreparation(timelineId, 'cancelled');
+      rethrow;
+    } catch (_) {
+      await R07OperationTimeline.instance.settlePreparation(timelineId, 'failed');
+      rethrow;
+    } finally {
+      await R07OperationTimeline.instance.settlePreparation(timelineId, 'unknown');
+    }
   }
 
   Future<void> _shareWithVerifiedApps(
@@ -2288,7 +2447,26 @@ extension AppsProviderInstall on AppsProvider {
     bool forceParallelDownloads = false,
     bool useExisting = true,
     ThemeData? dialogTheme,
+    R05OperationReceipt? retryParent,
+    R07TimelineEntry? resumeQueued,
   }) async {
+    if (resumeQueued != null && (retryParent != null || context == null || appIds.length != 1 ||
+        appIds.single != resumeQueued.intent.listingKey || resumeQueued.intent.kind != 'install' ||
+        resumeQueued.stage != 'queued' || resumeQueued.intent.parentId != null)) {
+      throw StateError('Queued install requires exact explicit consent');
+    }
+    if (retryParent != null) {
+      if (context == null || appIds.length != 1 || appIds.single != retryParent.listingKey ||
+          !const {R05InstallStage.failed, R05InstallStage.cancelled}.contains(retryParent.stage)) {
+        throw StateError('Historical retry requires one explicitly selected failed attempt');
+      }
+      final records = await R05OperationJournal.instance.list();
+      if (!records.any((item) => item.encode() == retryParent.encode()) ||
+          records.any((item) => item.listingKey == retryParent.listingKey &&
+              !const {R05InstallStage.confirmed, R05InstallStage.failed, R05InstallStage.cancelled}.contains(item.stage))) {
+        throw StateError('Historical retry ownership changed');
+      }
+    }
     final bool allowUserInteraction = context != null;
     if (notificationsProvider == null && allowUserInteraction) {
       final BuildContext? appContext = globalNavigatorKey.currentContext;
@@ -2362,6 +2540,17 @@ extension AppsProviderInstall on AppsProvider {
       }
     }
 
+    if (resumeQueued != null && (appsToInstall.length != 1 || appsToInstall.single != resumeQueued.intent.listingKey)) {
+      throw StateError('Queued install selection changed');
+    }
+    final queued = resumeQueued == null ? await R07OperationTimeline.instance.enqueue([
+      for (final id in appsToInstall) R07OperationIntent(kind: 'install',
+        listingKey: id, packageId: apps[id]!.app.id, channel: r11ChannelFingerprint(apps[id]!.app),
+        release: downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(apps[id]!.app)),
+        parentId: retryParent?.id),
+    ]) : [resumeQueued];
+    final queuedByListing = {for (final entry in queued) entry.intent.listingKey: entry};
+
     Future<void> installDownloadResult(_InstallResult result) async {
       if ((result.downloadedFile == null && result.downloadedDir == null) ||
           errors.appIdNames.containsKey(result.id)) {
@@ -2401,6 +2590,8 @@ extension AppsProviderInstall on AppsProvider {
               useExisting,
               errors,
               dialogTheme,
+              retryParent: retryParent,
+              queuedIntent: queuedByListing[id]!,
             ),
           );
         }
@@ -2416,6 +2607,8 @@ extension AppsProviderInstall on AppsProvider {
                 useExisting,
                 errors,
                 dialogTheme,
+                retryParent: retryParent,
+                queuedIntent: queuedByListing[id]!,
               ),
             ),
         ];
@@ -2651,6 +2844,7 @@ extension AppsProviderInstall on AppsProvider {
           appEntry.app.settings.getBool('shizukuPretendToBeGooglePlay');
       if (downloadedFile != null) {
         if (needBGWorkaround) {
+          await R07OperationTimeline.instance.observePreparation(downloadedFile.timelineId, 'scanning');
           final bool proceedAfterVerification =
               await _runPreInstallVerification(
                 appId: id,
@@ -2664,7 +2858,11 @@ extension AppsProviderInstall on AppsProvider {
                   } catch (_) {}
                 },
               );
-          if (!proceedAfterVerification) return;
+          if (!proceedAfterVerification) {
+            await R07OperationTimeline.instance.observePreparation(
+              downloadedFile?.timelineId ?? downloadedDir?.timelineId, 'declined');
+            return;
+          }
           final baseline = await captureInstallBaseline(id);
           unawaited(_r05TrackBackgroundInstall(id,
             installApk(
@@ -2719,6 +2917,7 @@ extension AppsProviderInstall on AppsProvider {
         }
       } else {
         if (needBGWorkaround) {
+          await R07OperationTimeline.instance.observePreparation(downloadedDir?.timelineId, 'scanning');
           final bool proceedAfterVerification =
               await _runPreInstallVerification(
                 appId: id,
@@ -2735,7 +2934,11 @@ extension AppsProviderInstall on AppsProvider {
                   } catch (_) {}
                 },
               );
-          if (!proceedAfterVerification) return;
+          if (!proceedAfterVerification) {
+            await R07OperationTimeline.instance.observePreparation(
+              downloadedFile?.timelineId ?? downloadedDir?.timelineId, 'declined');
+            return;
+          }
           final baseline = await captureInstallBaseline(id);
           unawaited(_r05TrackBackgroundInstall(id,
             installApkDir(
@@ -2813,8 +3016,14 @@ extension AppsProviderInstall on AppsProvider {
         unawaited(notificationsProvider?.cancel(updateNotificationId));
       }
     } on CancellationException {
+      await R07OperationTimeline.instance.observePreparation(
+        downloadedFile?.timelineId ?? downloadedDir?.timelineId, 'cancelled');
       // The platform handoff was refused before dispatch, not installed.
       unawaited(logs.add('R02F P03 precommit user cancellation: $id'));
+    } catch (_) {
+      await R07OperationTimeline.instance.settlePreparation(
+        downloadedFile?.timelineId ?? downloadedDir?.timelineId, 'failed');
+      rethrow;
     } finally {
       if (installPreparationGate != null) {
         endInstallPreparation(id, installPreparationGate);
@@ -2836,8 +3045,10 @@ extension AppsProviderInstall on AppsProvider {
     NotificationsProvider? notificationsProvider,
     bool useExisting,
     MultiAppMultiError errors,
-    ThemeData? toastTheme,
-  ) async {
+    ThemeData? toastTheme, {
+    R05OperationReceipt? retryParent,
+    required R07TimelineEntry queuedIntent,
+  }) async {
     bool willBeSilent = false;
     DownloadedApk? downloadedFile;
     DownloadedDir? downloadedDir;
@@ -2846,7 +3057,8 @@ extension AppsProviderInstall on AppsProvider {
         apps[id]!.app,
         allowUserInteraction: allowUserInteraction,
         notificationsProvider: notificationsProvider,
-        useExisting: useExisting,
+        useExisting: retryParent == null && useExisting,
+        retryParent: retryParent, queuedIntent: queuedIntent,
       );
       if (downloadedArtifact is DownloadedApk) {
         downloadedFile = downloadedArtifact;

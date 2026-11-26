@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:android_intent_plus/flag.dart';
@@ -466,7 +465,9 @@ extension AppsProviderInstall on AppsProvider {
       final raw = await bridge.invokeMapMethod<String, dynamic>('installedEvidence',
         {'package': attempt.packageId});
       if (raw == null || raw['package'] != attempt.packageId || raw['version'] is! int ||
-          raw['hashes'] is! List || raw['signers'] is! List) return null;
+          raw['hashes'] is! List || raw['signers'] is! List) {
+        return null;
+      }
       final hashes = List<String>.from(raw['hashes'] as List);
       final signers = List<String>.from(raw['signers'] as List);
       if (signers.isEmpty || hashes.isEmpty) return null;

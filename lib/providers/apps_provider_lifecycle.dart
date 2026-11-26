@@ -1403,7 +1403,9 @@ extension AppsProviderLifecycle on AppsProvider {
                 checkpointApps.add(app);
               } else {
                 if (!await _writeAppRecord(appsDirectory, app, checks,
-                    commitGuard: commitGuard)) return;
+                    commitGuard: commitGuard)) {
+                  return;
+                }
               }
             }
             if (commitGuard != null && !commitGuard()) return;

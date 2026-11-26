@@ -1,6 +1,7 @@
 """RT02F P02 negative tests: do not silently weaken real session-abandon proof."""
 from __future__ import annotations
 import importlib.util
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -44,6 +45,19 @@ class RT02FP02Contracts(unittest.TestCase):
             cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
             check=False,text=True,timeout=30)
         self.assertEqual(p.returncode,0,p.stdout+'\n'+p.stderr)
+
+    def test_actual_cli_safe_path_and_shadowing(self):
+        # Reproduce the native Devtool environment, including child processes.
+        with tempfile.TemporaryDirectory(prefix='ox-rt02f-shadow-') as shadow:
+            for name in ('r02_rt02_hosted', 'r02_rt02c_hosted', 'r02_rt02c_fixture'):
+                (Path(shadow) / (name + '.py')).write_text(
+                    'raise RuntimeError("untrusted import root selected")\n', encoding='utf8')
+            env = dict(os.environ, PYTHONSAFEPATH='1', PYTHONPATH=shadow)
+            p = subprocess.run([sys.executable, '-B', '-P', str(ROOT/C.HOST), '--help'],
+                cwd=shadow, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                check=False, text=True, timeout=30)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertIn('usage:', p.stdout)
 
     def test_cancel_session_parsing_negative(self):
         # Evaluate the pure regex without importing production Android helpers.

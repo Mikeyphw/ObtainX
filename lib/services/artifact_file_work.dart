@@ -173,7 +173,7 @@ Future<void> _runExtraction(String path, String destination, {
     try {
       if (work.existsSync()) work.deleteSync(recursive: true);
     } finally {
-      ownership?.closeSync();
+      ownership.closeSync();
     }
   }
 }
@@ -529,8 +529,8 @@ void _decodeZlibRange(RandomAccessFile source, int offset, int length,
 // boundary: every physical overread throws, and success requires consumption
 // through the actual end marker and combined CRC. No synthetic zero bytes.
 class _StrictBzipInput extends archive.InputFileStream {
-  _StrictBzipInput(archive.InputFileStream source, int offset, int count)
-      : super.fromFileStream(source, position: offset, length: count, bufferSize: 65536);
+  _StrictBzipInput(super.source, int offset, int count)
+      : super.fromFileStream(position: offset, length: count, bufferSize: 65536);
 
   @override
   bool get isEOS => false;

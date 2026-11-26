@@ -15,6 +15,10 @@ from pathlib import Path
 import re
 import sys
 
+# Devtool deliberately runs Python with safe-path enabled. Resolve sibling
+# helpers from this tracked entrypoint, not cwd or inherited PYTHONPATH.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import r02_rt02_hosted as base
 import r02_rt02c_hosted as rt02c
 

@@ -553,7 +553,9 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('GAP-04 comparison is explicit, bounded and retains exact rows', (tester) async {
+  testWidgets('GAP-04 comparison is explicit, bounded and retains exact rows', (
+    tester,
+  ) async {
     final app = _listing(trackOnly: false).copyWith(apkUrls: const [
       MapEntry('first.apk', 'https://example.org/first.apk'),
       MapEntry('second.apk', 'https://example.org/second.apk'),
@@ -564,36 +566,71 @@ void main() {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(750, 1800);
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(ChangeNotifierProvider<SettingsProvider>.value(value: settings,
-      child: MaterialApp(home: Scaffold(body: AppFilePicker(app: app,
-        archs: const ['arm64-v8a'], inspectCandidate: (asset, token, progress) async {
-          calls.add(asset.key);
-          final fact = R09ApkFacts(path: '/private/${asset.key}', name: asset.key,
-            sha256: digest, packageName: _packageId, versionCode: calls.length,
-            signers: [digest]);
-          return R09ArtifactInspection(artifactSha256: digest, bytes: 1024,
-            members: [fact], selectedPaths: [fact.path],
-            refusals: asset.key == 'second.apk' ? ['r09ReviewAbiMismatch'] : [],
-            signerStatus: 'r09ReviewSignerMatches', actionsDigestVerified: false);
-        }))));
+    await tester.pumpWidget(
+      ChangeNotifierProvider<SettingsProvider>.value(
+        value: settings,
+        child: MaterialApp(
+          home: Scaffold(
+            body: AppFilePicker(
+              app: app,
+              archs: const ['arm64-v8a'],
+              inspectCandidate: (asset, token, progress) async {
+                calls.add(asset.key);
+                final fact = R09ApkFacts(
+                  path: '/private/${asset.key}',
+                  name: asset.key,
+                  sha256: digest,
+                  packageName: _packageId,
+                  versionCode: calls.length,
+                  signers: [digest],
+                );
+                return R09ArtifactInspection(
+                  artifactSha256: digest,
+                  bytes: 1024,
+                  members: [fact],
+                  selectedPaths: [fact.path],
+                  refusals: asset.key == 'second.apk'
+                      ? ['r09ReviewAbiMismatch']
+                      : [],
+                  signerStatus: 'r09ReviewSignerMatches',
+                  actionsDigestVerified: false,
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
     expect(calls, isEmpty);
-    final compare = find.widgetWithText(OutlinedButton, 'Inspect next candidates (up to 2)');
+    final compare = find.widgetWithText(
+      OutlinedButton,
+      'Inspect next candidates (up to 2)',
+    );
     await tester.ensureVisible(compare);
     await tester.tap(compare);
     await tester.pumpAndSettle();
     expect(calls, ['first.apk', 'second.apk']);
-    expect(find.text('Compared 2 of 3 inspectable candidates · 0 failed · 0 unavailable'), findsOneWidget);
+    expect(
+      find.text('Compared 2 of 3 inspectable candidates · 0 failed · 0 unavailable'),
+      findsOneWidget,
+    );
     await tester.ensureVisible(compare);
     await tester.tap(compare);
     await tester.pumpAndSettle();
     expect(calls, ['first.apk', 'second.apk', 'third.apk']);
-    expect(find.text('Compared 3 of 3 inspectable candidates · 0 failed · 0 unavailable'), findsOneWidget);
+    expect(
+      find.text('Compared 3 of 3 inspectable candidates · 0 failed · 0 unavailable'),
+      findsOneWidget,
+    );
     expect(tester.widget<OutlinedButton>(compare).onPressed, isNull);
     expect(find.textContaining('Inspected: selection refused'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('GAP-04 cancel comparison never starts a later candidate', (tester) async {
+  testWidgets('GAP-04 cancel comparison never starts a later candidate', (
+    tester,
+  ) async {
     final app = _listing(trackOnly: false).copyWith(apkUrls: const [
       MapEntry('first.apk', 'https://example.org/first.apk'),
       MapEntry('second.apk', 'https://example.org/second.apk'),
@@ -602,21 +639,43 @@ void main() {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(750, 1500);
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(ChangeNotifierProvider<SettingsProvider>.value(value: settings,
-      child: MaterialApp(home: Scaffold(body: AppFilePicker(app: app,
-        archs: const ['arm64-v8a'], inspectCandidate: (asset, token, progress) async {
-          calls.add(asset.key);
-          await token.whenCancelled;
-          token.throwIfCancelled();
-          throw StateError('Cancellation failed');
-        }))));
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Inspect next candidates (up to 2)'));
+    await tester.pumpWidget(
+      ChangeNotifierProvider<SettingsProvider>.value(
+        value: settings,
+        child: MaterialApp(
+          home: Scaffold(
+            body: AppFilePicker(
+              app: app,
+              archs: const ['arm64-v8a'],
+              inspectCandidate: (asset, token, progress) async {
+                calls.add(asset.key);
+                await token.whenCancelled;
+                token.throwIfCancelled();
+                throw StateError('Cancellation failed');
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final compare = find.widgetWithText(
+      OutlinedButton,
+      'Inspect next candidates (up to 2)',
+    );
+    await tester.ensureVisible(compare);
+    await tester.tap(compare);
     await tester.pump();
     expect(calls, ['first.apk']);
-    await tester.tap(find.widgetWithText(TextButton, 'Cancel inspection'));
+    final cancel = find.widgetWithText(TextButton, 'Cancel inspection');
+    await tester.ensureVisible(cancel);
+    await tester.tap(cancel);
     await tester.pumpAndSettle();
     expect(calls, ['first.apk']);
-    expect(find.text('Compared 0 of 2 inspectable candidates · 0 failed · 0 unavailable'), findsOneWidget);
+    expect(
+      find.text('Compared 0 of 2 inspectable candidates · 0 failed · 0 unavailable'),
+      findsOneWidget,
+    );
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

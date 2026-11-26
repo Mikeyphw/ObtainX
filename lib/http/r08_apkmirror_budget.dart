@@ -24,10 +24,9 @@ class ApkMirrorRequestBudget {
     this.maxQueued = 32,
     DateTime Function()? clock,
     Future<void> Function(Duration)? wait,
-    Future<Directory> Function()? privateRoot,
+    this._privateRoot,
   }) : _clock = clock ?? DateTime.now,
-       _wait = wait ?? ((duration) => Future<void>.delayed(duration)),
-       _privateRoot = privateRoot;
+       _wait = wait ?? ((duration) => Future<void>.delayed(duration));
 
   static final shared = ApkMirrorRequestBudget(
     privateRoot: getApplicationSupportDirectory,

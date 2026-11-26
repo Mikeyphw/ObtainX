@@ -2,7 +2,7 @@
   "created_utc": "2026-11-10T15:16:14.684444+00:00",
   "fork_main_sha": "aea18592413de992e813bd063cb9ad453259582b",
   "fork_repo": "Mikeyphw/ObtainX",
-  "prior_roadmap_sha256": "91007686ed4f217703f170020c76532b426243d31426433f522ca03b2fed82a0",
+  "prior_roadmap_sha256": "5cd86fff2591743e6e4cf01b87e6abab5a5506793922344a59ee588c8dd0059e",
   "release_authorized": false,
   "roadmap_reconciliation": {
     "accepted_main_sha": "bde1f1234c88a939477b988c5b5fd6fbcb6696a8",
@@ -10,7 +10,7 @@
     "date_utc": "2026-11-23",
     "previous_roadmap_sha256": "0d7aecd24f18d662395b01493ad10f1db5750be3b9513268bb1cac535489a51a"
   },
-  "roadmap_sha256": "5cd86fff2591743e6e4cf01b87e6abab5a5506793922344a59ee588c8dd0059e",
+  "roadmap_sha256": "f05186e0a7dd4f9250cb03fffae7332f05e3781ee6aacb1613373c819d1213a2",
   "runtime_qualified": false,
   "schema_version": 1,
   "upstream_default_branch": "main",

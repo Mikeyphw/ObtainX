@@ -81,7 +81,7 @@ class Farsroid extends AppSource {
       } catch (e) {
         unawaited(
           LogsProvider().add(
-            'Failed to decode Farsroid JSON: $e',
+            'Failed to decode Farsroid JSON (${e.runtimeType})',
             level: LogLevel.error,
           ),
         );

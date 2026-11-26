@@ -126,36 +126,82 @@ class _AppFilePickerState extends State<AppFilePicker> {
     super.dispose();
   }
 
-  Future<void> inspect(MapEntry<String, String> asset) async {
+  @override
+  void didUpdateWidget(covariant AppFilePicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The review cache belongs to this exact immutable listing/release, not
+    // a reused widget or a filename. Cancel stale work before clearing it.
+    if (!identical(oldWidget.app, widget.app) ||
+        oldWidget.pickAnyAsset != widget.pickAnyAsset) {
+      token?.cancel();
+      reviews.clear();
+      failures.clear();
+      initialized = false;
+      fileUrl = null;
+    }
+  }
+
+  bool inspectionAllowed(MapEntry<String, String> asset) =>
+      !widget.pickAnyAsset && widget.app.apkUrls.where((entry) =>
+        keyOf(entry) == keyOf(asset)).length == 1 &&
+      r09ActionsEligible(asset, widget.app.additionalSettings,
+        widget.app.url, DateTime.now());
+
+  Future<void> inspect(MapEntry<String, String> asset) =>
+      inspectBatch([asset], selectIfEmpty: true);
+
+  /// Explicit batches only. Each candidate runs through the same real
+  /// download/manifest/signer review, in sequence and under one cancellation
+  /// token. A new batch is a separate user action; no surprise downloads.
+  Future<void> inspectBatch(List<MapEntry<String, String>> requested,
+      {bool selectIfEmpty = false}) async {
     final callback = widget.inspectCandidate;
-    if (callback == null || busy) return;
+    if (callback == null || busy || requested.isEmpty ||
+        requested.length > r09ComparisonBatchLimit) {
+      return;
+    }
+    final listing = widget.app;
     final active = CancellationToken();
-    final key = keyOf(asset);
     setState(() {
       token = active;
       progress = null;
-      reviews.remove(key);
-      failures.remove(key);
     });
+    bool current() => mounted && identical(token, active) &&
+        identical(widget.app, listing) && !active.isCancelled;
     try {
-      final result = await callback(asset, active, (_, received, total) {
-        if (!mounted || active.isCancelled) return;
-        setState(() => progress = received != null && total != null && total > 0
-            ? (received / total).clamp(0.0, 1.0).toDouble() : null);
-      });
-      if (!mounted || active.isCancelled) return;
-      setState(() {
-        reviews[key] = result;
-        if (result.eligible && fileUrl == null) {
-          fileUrl = asset;
+      for (final asset in requested) {
+        if (!current()) break;
+        if (!inspectionAllowed(asset)) continue;
+        final key = keyOf(asset);
+        setState(() {
+          progress = null;
+          reviews.remove(key);
+          failures.remove(key);
+        });
+        try {
+          final result = await callback(asset, active, (_, received, total) {
+            if (!current()) return;
+            setState(() => progress = received != null && total != null && total > 0
+                ? (received / total).clamp(0.0, 1.0).toDouble() : null);
+          });
+          if (!current()) break;
+          if (!inspectionAllowed(asset)) continue;
+          setState(() {
+            reviews[key] = result;
+            if (selectIfEmpty && result.eligible && fileUrl == null) {
+              fileUrl = asset;
+            }
+          });
+        } catch (_) {
+          if (current()) {
+            setState(() => failures.add(key));
+          }
         }
-      });
-    } catch (_) {
-      if (mounted && !active.isCancelled) {
-        setState(() => failures.add(key));
       }
     } finally {
-      if (mounted) setState(() { token = null; progress = null; });
+      if (mounted && identical(token, active)) {
+        setState(() { token = null; progress = null; });
+      }
     }
   }
 
@@ -193,7 +239,7 @@ class _AppFilePickerState extends State<AppFilePicker> {
     }
     final archs = widget.archs ?? const <String>[];
     bool allowed(MapEntry<String, String> asset) => widget.pickAnyAsset ||
-        r09ActionsEligible(asset, widget.app.additionalSettings, widget.app.url, DateTime.now());
+        inspectionAllowed(asset);
     R09ArtifactChoice choice(MapEntry<String, String> asset) {
       final result = r09ArtifactChoice(asset.key, archs, downloadOnly: widget.pickAnyAsset);
       if (!allowed(asset)) return R09ArtifactChoice(false, result.abiHints, result.role, 'r09ExpiredOrUnbound');
@@ -232,6 +278,11 @@ class _AppFilePickerState extends State<AppFilePicker> {
           '${tr('r09AbiHint')}: ${info.abiHints.isEmpty ? tr('unknown') : info.abiHints.join(', ')}\n'
           '${tr('r09ArtifactSize')}: ${knownSize == null ? tr('unknown') : '$knownSize B'}$trust';
     }
+    final inspectable = urlsToSelectFrom.where(inspectionAllowed).toList();
+    final pending = inspectable.where((asset) =>
+        !reviews.containsKey(keyOf(asset)) && !failures.contains(keyOf(asset))).toList();
+    final compared = inspectable.where((asset) => reviews.containsKey(keyOf(asset))).length;
+    final failed = inspectable.where((asset) => failures.contains(keyOf(asset))).length;
     Widget row(MapEntry<int, MapEntry<String, String>> entry) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -249,7 +300,7 @@ class _AppFilePickerState extends State<AppFilePicker> {
             enabled: choice(entry.value).eligible && !busy, value: entry.key),
         if (widget.inspectCandidate != null)
           Padding(padding: const EdgeInsets.only(left: 16, bottom: 8), child: OutlinedButton(
-            onPressed: !busy && allowed(entry.value) ? () => inspect(entry.value) : null,
+            onPressed: !busy && inspectionAllowed(entry.value) ? () => inspect(entry.value) : null,
             child: Text(tr('r09ReviewInspect')),
           )),
       ],
@@ -284,7 +335,21 @@ class _AppFilePickerState extends State<AppFilePicker> {
                       : const SizedBox.shrink(),
                   Text('${tr('r09TrackedPackage')}: ${widget.app.id} · ${widget.app.latestVersion}\n${tr('r09MetadataPending')}'),
                   const SizedBox(height: 16),
-                  if (widget.inspectCandidate != null) Text(tr('r09ReviewExplanation')),
+                  if (widget.inspectCandidate != null) ...[
+                    Text(tr('r09ReviewExplanation')),
+                    if (urlsToSelectFrom.length > 1) ...[
+                      Text(tr('r09ComparisonSummary', args: [
+                        '$compared', '${inspectable.length}', '$failed',
+                        '${urlsToSelectFrom.length - inspectable.length}',
+                      ])),
+                      Text(tr('r09ComparisonExplanation')),
+                      OutlinedButton(
+                        onPressed: busy || pending.isEmpty ? null : () => inspectBatch(
+                          pending.take(r09ComparisonBatchLimit).toList()),
+                        child: Text(tr('r09ComparisonNext')),
+                      ),
+                    ],
+                  ],
                   if (busy) LinearProgressIndicator(value: progress),
                   ...urlsToSelectFrom.asMap().entries.map(row),
                   if (widget.archs != null) const SizedBox(height: 16),

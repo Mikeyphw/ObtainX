@@ -22,39 +22,11 @@ import 'package:obtainium/services/html_parse_isolate.dart';
 const bool apkMirrorSizeDebug = false;
 const String _apkMirrorSizeDebugPrefix = 'OBTAINX-APK-SIZE-DEBUG';
 
-/// The user-agent token APKMirror's Cloudflare rule allowlists.
-///
-/// Every APKMirror *HTML* page (app listing, release page, `-apk-download/`
-/// page) is served only to this allowlist. Anything else — including a
-/// convincingly spoofed mobile-browser UA, which is what this source used to
-/// send — gets a 403 carrying `Cf-Mitigated: challenge` and a "Just a moment…"
-/// interstitial body. The `/feed/` RSS endpoint is the sole exception, which is
-/// why version detection kept working while everything that scrapes HTML (icon
-/// resolution in [APKMirror.getLatestAPKDetails], the lazy size walk in
-/// [APKMirror.resolveLatestApkSizeBytes], the changelog fetch, and
-/// [APKMirror.tryInferringAppId]) silently returned nothing: each of those
-/// treats a failed request as "unavailable" rather than an error.
-///
-/// Measured 2026-08-18, holding every other header constant and varying only
-/// the UA: the rule is a plain substring test on `APKUpdater` — bare
-/// `APKUpdater`, `APKUpdater-v9.9.9` and `APKUpdater-v3.5.9 ObtainX/x.y.z` all
-/// return 200, while `ObtainX-v1.0.0`, `Obtainium`, `okhttp/4.12.0` and the old
-/// browser UA all return 403. Because the match tolerates extra text, ObtainX
-/// keeps its own name and version in the string instead of impersonating
-/// APKUpdater outright, so APKMirror can still attribute (and, if they want,
-/// block) this traffic.
-///
-/// Do NOT "fix" this back to a browser user-agent — that is precisely what
-/// disabled the features above.
-const String apkMirrorAllowlistedUserAgentToken = 'APKUpdater-v3.5.9';
-
-/// [apkMirrorAllowlistedUserAgentToken], with ObtainX's own identification
-/// appended when the running version is known.
+/// Identify ObtainX truthfully. Provider refusals remain refusals; do not
+/// impersonate other clients or send their credentials.
 String apkMirrorUserAgent([String? obtainXVersion]) {
-  final String version = obtainXVersion?.trim() ?? '';
-  return version.isEmpty
-      ? apkMirrorAllowlistedUserAgentToken
-      : '$apkMirrorAllowlistedUserAgentToken ObtainX/$version';
+  final version = obtainXVersion?.trim() ?? '';
+  return version.isEmpty ? 'ObtainX' : 'ObtainX/$version';
 }
 
 class _ApkMirrorSizeCandidate {
@@ -605,7 +577,7 @@ class APKMirror extends AppSource {
       includeOwnDebugBuild: true,
     );
     return {
-      // See [apkMirrorAllowlistedUserAgentToken] — a browser UA is refused.
+      // Honest identity, including when the provider refuses HTML access.
       'user-agent': apkMirrorUserAgent(packageInfo?.versionName),
       'Accept':
           'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',

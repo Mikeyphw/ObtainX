@@ -1020,33 +1020,18 @@ void main() {
   // success rate was abysmal. The lazy size resolver now only walks the
   // actual download links found on the release page HTML.
 
-  // APKMirror's Cloudflare rule allowlists HTML pages by a substring match on
-  // `APKUpdater`; a browser-style UA is answered with a 403 challenge, which
-  // silently disables icon/size/changelog/app-id scraping. Pin both the token
-  // and the ObtainX attribution so a future header cleanup can't quietly undo
-  // it.
-  test('apk mirror user agent carries the allowlisted token', () async {
-    expect(apkMirrorAllowlistedUserAgentToken.contains('APKUpdater'), true);
-    expect(apkMirrorUserAgent('2.9.9'), contains('APKUpdater'));
-    expect(apkMirrorUserAgent('2.9.9'), contains('ObtainX/2.9.9'));
-    // Unknown version: still allowlisted, just without attribution.
-    expect(apkMirrorUserAgent(), apkMirrorAllowlistedUserAgentToken);
-    expect(apkMirrorUserAgent('  '), apkMirrorAllowlistedUserAgentToken);
-    // Whatever the UA ends up being, it must not read as a browser.
-    final String ua = apkMirrorUserAgent('2.9.9');
-    expect(ua.contains('Mozilla'), false);
-    expect(ua.contains('Safari'), false);
-
-    final Map<String, String>? headers = await APKMirror().getRequestHeaders(
+  test('apk mirror user agent identifies ObtainX without another client', () async {
+    expect(apkMirrorUserAgent('2.9.9'), 'ObtainX/2.9.9');
+    expect(apkMirrorUserAgent(), 'ObtainX');
+    expect(apkMirrorUserAgent('  '), 'ObtainX');
+    final headers = await APKMirror().getRequestHeaders(
       const <String, dynamic>{},
       'https://www.apkmirror.com/apk/signal-foundation/signal-private-messenger/',
     );
-    // Lowercase key on purpose: sourceRequest injects a default ObtainX UA
-    // unless a case-insensitive 'user-agent' is already present.
-    final String? sentUserAgent = headers?.entries
-        .firstWhere((e) => e.key.toLowerCase() == 'user-agent')
-        .value;
-    expect(sentUserAgent, contains('APKUpdater'));
+    final sentUserAgent = headers?.entries
+        .firstWhere((e) => e.key.toLowerCase() == 'user-agent').value;
+    expect(sentUserAgent, startsWith('ObtainX'));
+    expect(sentUserAgent, isNot(contains('APKUpdater')));
   });
 
   test('apk mirror app slug aliases standardize to canonical app slug', () {

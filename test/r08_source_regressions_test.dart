@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:obtainium/app_sources/apkcombo.dart';
@@ -7,6 +11,8 @@ import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/http/r08_apkmirror_budget.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/services/r08_source_policy.dart';
+import 'package:obtainium/services/r08_apkmirror_discovery.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:obtainium/version/app_version.dart';
 
 class _ComboFixture extends APKCombo {
@@ -28,7 +34,113 @@ class _RuStoreRejected extends RuStore {
       http.Response('<html>expired</html>', 419);
 }
 
+class _FarsroidFixture extends Farsroid {
+  final seen = <Uri>[];
+  @override
+  Future<http.Response> sourceRequest(String url, Map<String, dynamic> settings,
+      {bool followRedirects = true, Object? postBody}) async {
+    final uri = Uri.parse(url);
+    seen.add(uri);
+    return http.Response(seen.length == 1
+      ? '<div class="download-links" data-post-id="12" data-post-version="1+2&amp;β"></div>'
+      : jsonEncode({'data': {'content': '<a href="https://example.org/app.apk">APK</a>'}}),
+      200, request: http.Request('GET', uri), headers: {'content-type': 'text/html; charset=utf-8'});
+  }
+}
+
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
+  test('GAP-04 independent owners persist server cooldown and pacing', () async {
+    final root = await Directory.systemTemp.createTemp('mirror-budget-');
+    addTearDown(() => root.delete(recursive: true));
+    var now = DateTime.utc(2026, 11, 26);
+    ApkMirrorRequestBudget makeBudget() => ApkMirrorRequestBudget(
+      clock: () => now, wait: (duration) async { now = now.add(duration); },
+      privateRoot: () async => root);
+    final first = makeBudget();
+    final starts = <DateTime>[];
+    Future<http.Response> load() async {
+      expect(ApkMirrorRequestBudget.ownsRequest, isTrue);
+      starts.add(now);
+      return http.Response('', 200);
+    }
+    final entered = Completer<void>();
+    final finish = Completer<void>();
+    final pending = first.request(() async {
+      entered.complete();
+      await finish.future;
+      return load();
+    });
+    await entered.future;
+    final other = makeBudget().request(load);
+    expect(starts, isEmpty);
+    finish.complete();
+    await Future.wait([pending, other]);
+    expect(starts.last.difference(starts.first), const Duration(seconds: 2));
+    await makeBudget().request(() async => http.Response('', 429,
+      headers: {'retry-after': '120'}));
+    await expectLater(makeBudget().request(load), throwsA(isA<ApkMirrorRequestDeferred>()));
+    now = now.add(const Duration(seconds: 120));
+    await makeBudget().request(load);
+    await expectLater(makeBudget().request(() async => throw StateError('connection lost')),
+      throwsStateError);
+    await expectLater(makeBudget().request(load), throwsA(isA<ApkMirrorRequestDeferred>()));
+    expect(starts.length, 3);
+    now = now.add(const Duration(minutes: 5));
+    await File('${root.path}/apkmirror-budget-v1/state.json').writeAsString('{broken');
+    await expectLater(makeBudget().request(load), throwsFormatException);
+    expect(starts.length, 3);
+  });
+  test('GAP-04 mirror discovery verifies exact listing and rejects unrelated origin', () async {
+    final seen = <Uri>[];
+    final icons = <String, String>{};
+    final result = await r08DiscoverApkMirror(['com.example.app'], (uri) async {
+      seen.add(uri);
+      if (uri.path == '/') {
+        expect(uri.queryParameters['s'], 'com.example.app');
+        return http.Response('<a href="https://evil.test/apk/a/b/">bad</a>'
+          '<a href="/apk/company/app/release/">app</a>', 200);
+      }
+      expect(uri.toString(), 'https://www.apkmirror.com/apk/company/app/');
+      return http.Response('<meta property="og:image" content="https://downloadr2.apkmirror.com/app.png">'
+        '<a title="View on Play Store" href="https://play.google.com/store/apps/details?id=com.example.app">Play</a>', 200);
+    }, resolvedIconUrls: icons);
+    expect(seen.length, 2);
+    expect(result, {'com.example.app': 'https://www.apkmirror.com/apk/company/app/'});
+    expect(icons['com.example.app'], 'https://downloadr2.apkmirror.com/app.png');
+  });
+  test('GAP-04 blocked or ambiguous mirror pages remain unknown', () async {
+    var calls = 0;
+    final refused = await r08DiscoverApkMirror(['com.example.app', 'com.example.other'], (uri) async {
+      calls++;
+      return http.Response('', 403);
+    }, hints: {'com.example.app': 'https://www.apkmirror.com/apk/company/app/'});
+    expect(refused, isEmpty);
+    expect(calls, 1);
+    final ambiguous = await r08DiscoverApkMirror(['com.example.app'], (uri) async =>
+      http.Response(uri.path == '/' ? '<a href="/apk/a/b/">1</a><a href="/apk/a/c/">2</a>' :
+        '<a title="View on Play Store" href="https://play.google.com/store/apps/details?id=com.example.app">Play</a>', 200));
+    expect(ambiguous, isEmpty);
+    final bounded = <Uri>[];
+    await r08DiscoverApkMirror(List.generate(50, (i) => 'com.example.p$i'), (uri) async {
+      bounded.add(uri);
+      return http.Response('', 200);
+    });
+    expect(bounded.length, r08MirrorDiscoveryMaxRequests);
+  });
+  test('GAP-04 Farsroid actual metadata path parses fixture and preserves query', () async {
+    final source = _FarsroidFixture();
+    final details = await source.getLatestAPKDetails('https://farsroid.com/example/', {
+      'apkFilterRegEx': '', 'invertAPKFilter': false, 'autoApkFilterByArch': false,
+      'useFirstApkOfVersion': true,
+    });
+    expect(source.seen.length, 2);
+    expect(source.seen.last.queryParameters, {'post_id': '12', 'post_version': '1+2&β'});
+    expect(details.version, '1+2&β');
+    expect(details.apkUrls.single.value, 'https://example.org/app.apk');
+  });
   test('#336 Mozilla beta and alpha have numeric prerelease order', () {
     expect(compareVersionStrings('158.0b3', '158.0b4').relation,
         VersionRelation.older);

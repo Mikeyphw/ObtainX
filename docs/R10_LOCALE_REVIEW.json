@@ -1,7 +1,7 @@
 {
   "schema": "obtainx.r10.locale-review.v1",
   "fallback": "en",
-  "english_leaf_keys": 998,
+  "english_leaf_keys": 1001,
   "new_labels": [
     "swipeAction_openSource",
     "r10SourceOpenFailed",
@@ -11,7 +11,7 @@
   ],
   "locales": {
     "fr": {
-      "leaf_keys": 903,
+      "leaf_keys": 905,
       "missing": [
         "appURLListAccepts",
         "appURLListAcceptsJson",
@@ -49,6 +49,9 @@
         "r09ArtifactSize",
         "r09CheckVisible",
         "r09Compact",
+        "r09ComparisonExplanation",
+        "r09ComparisonNext",
+        "r09ComparisonSummary",
         "r09ConflictingListings",
         "r09Current",
         "r09Detailed",
@@ -119,7 +122,7 @@
       "blank": []
     },
     "tr": {
-      "leaf_keys": 892,
+      "leaf_keys": 894,
       "missing": [
         "appURLListAccepts",
         "appURLListAcceptsJson",
@@ -165,6 +168,9 @@
         "r09ArtifactSize",
         "r09CheckVisible",
         "r09Compact",
+        "r09ComparisonExplanation",
+        "r09ComparisonNext",
+        "r09ComparisonSummary",
         "r09ConflictingListings",
         "r09Current",
         "r09Detailed",
@@ -238,7 +244,7 @@
       "blank": []
     },
     "ja": {
-      "leaf_keys": 892,
+      "leaf_keys": 894,
       "missing": [
         "appURLListAccepts",
         "appURLListAcceptsJson",
@@ -284,6 +290,9 @@
         "r09ArtifactSize",
         "r09CheckVisible",
         "r09Compact",
+        "r09ComparisonExplanation",
+        "r09ComparisonNext",
+        "r09ComparisonSummary",
         "r09ConflictingListings",
         "r09Current",
         "r09Detailed",

@@ -10,6 +10,7 @@ import 'package:obtainium/services/artifact_file_work.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
 
 const r09InspectionMaxBytes = 512 * 1024 * 1024;
+const r09ComparisonBatchLimit = 2;
 const r09InspectionMaxApks = 64;
 const r09InspectionLimits = ArchiveExtractionLimits(
   maxArchiveBytes: r09InspectionMaxBytes,

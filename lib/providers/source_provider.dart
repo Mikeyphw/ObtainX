@@ -1068,32 +1068,35 @@ abstract class AppSource {
       additionalSettingsPlusSourceConfig,
       url,
     );
+    final uri = Uri.parse(url);
+    final mirrorRequest = ApkMirrorRequestBudget.isMirrorHost(uri);
+    if (mirrorRequest &&
+        (!ApkMirrorRequestBudget.appliesTo(uri) || method != 'GET')) {
+      throw ObtainiumError('APKMirror requires verified public HTTPS GET access.');
+    }
     final session = SourceRequestSession.current;
     final allowInsecure =
-        additionalSettingsPlusSourceConfig['allowInsecure'] == true;
+        !mirrorRequest && additionalSettingsPlusSourceConfig['allowInsecure'] == true;
     Future<http.Response> loadResponse() async {
       final service = HttpService();
       final streamed = await service.sourceRequestStreamResponse(
         method,
         url,
-        requestHeaders,
-        additionalSettingsPlusSourceConfig,
-        followRedirects: followRedirects,
+        mirrorRequest ? {'User-Agent': apkMirrorUserAgent()} : requestHeaders,
+        mirrorRequest ? {...additionalSettingsPlusSourceConfig, 'allowInsecure': false} : additionalSettingsPlusSourceConfig,
+        followRedirects: followRedirects && !mirrorRequest,
         postBody: postBody,
-        sharedClient: session?.clientFor(allowInsecure),
+        sharedClient: mirrorRequest ? null : session?.clientFor(allowInsecure),
       );
       return service.httpClientResponseStreamToFinalResponse(
         streamed.value.key,
         method,
         streamed.key.toString(),
         streamed.value.value,
-        closeClient: session == null,
+        closeClient: mirrorRequest || session == null,
       );
     }
 
-    final uri = Uri.parse(url);
-    final mirrorRequest = this is APKMirror && method == 'GET' &&
-        ApkMirrorRequestBudget.appliesTo(uri);
     Future<http.Response> loadWithBudget() async {
       if (!mirrorRequest) return loadResponse();
       try {
@@ -2302,6 +2305,13 @@ class HttpService {
     final httpClient = sharedClient ?? createHttpClient(insecureTls);
     try {
       while (redirectCount < maxRedirects) {
+        if (ApkMirrorRequestBudget.isMirrorHost(currentUrl) &&
+            (!ApkMirrorRequestBudget.ownsRequest ||
+             !ApkMirrorRequestBudget.appliesTo(currentUrl) || crossedOrigin ||
+             redirectCount != 0 || method != 'GET' || postBody != null ||
+             insecureTls || sharedClient != null || followRedirects)) {
+          throw ObtainiumError('APKMirror requires an owned public HTTPS request.');
+        }
         if (reviewHttpsOnly && (currentUrl.scheme != 'https' || currentUrl.host.isEmpty || currentUrl.userInfo.isNotEmpty)) {
           throw const FormatException('Review requires HTTPS on every hop');
         }
@@ -2394,10 +2404,19 @@ class HttpService {
     Object? postBody,
     HttpClient? sharedClient,
   }) async {
-    final streamed = await sourceRequestStreamResponse(method, uri.toString(), headers, {},
-      followRedirects: followRedirects, postBody: postBody, sharedClient: sharedClient);
-    return httpClientResponseStreamToFinalResponse(streamed.value.key, method,
-      streamed.key.toString(), streamed.value.value, closeClient: sharedClient == null);
+    final mirror = ApkMirrorRequestBudget.isMirrorHost(uri);
+    if (mirror && (!ApkMirrorRequestBudget.appliesTo(uri) || method != 'GET' || postBody != null)) {
+      throw ObtainiumError('APKMirror requires verified public HTTPS GET access.');
+    }
+    Future<http.Response> load() async {
+      final client = mirror ? null : sharedClient;
+      final streamed = await sourceRequestStreamResponse(method, uri.toString(),
+        mirror ? {'User-Agent': apkMirrorUserAgent()} : headers, {},
+        followRedirects: followRedirects && !mirror, postBody: postBody, sharedClient: client);
+      return httpClientResponseStreamToFinalResponse(streamed.value.key, method,
+        streamed.key.toString(), streamed.value.value, closeClient: client == null);
+    }
+    return mirror ? ApkMirrorRequestBudget.shared.request(load) : load();
   }
 
   Future<http.Response> httpClientResponseStreamToFinalResponse(

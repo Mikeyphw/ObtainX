@@ -1,8 +1,7 @@
 import 'dart:io';
 
 /// Default User-Agent for source HTTP. Sources that already set a User-Agent
-/// (APKMirror's allowlisted token, a browser impersonation, curl, F-Droid, …)
-/// keep theirs; this is only the fallback for everyone else.
+/// keep their explicitly configured identity; this is the default.
 const String obtainXUserAgent = 'ObtainX';
 
 bool headersSpecifyUserAgent(Map<String, String>? headers) {

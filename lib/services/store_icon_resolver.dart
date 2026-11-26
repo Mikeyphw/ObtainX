@@ -2,6 +2,8 @@ import 'package:html/dom.dart';
 import 'package:html/parser.dart' show parse;
 import 'package:http/http.dart' as http;
 import 'package:obtainium/services/html_parse_isolate.dart';
+import 'package:obtainium/http/r08_apkmirror_budget.dart';
+import 'package:obtainium/providers/source_provider.dart' show HttpService;
 
 const Duration _storeListingIconFetchTimeout = Duration(seconds: 10);
 
@@ -75,9 +77,10 @@ Future<String?> iconUrlFromStoreListingHtmlOffIsolate(
 Future<String?> fetchIconUrlFromStoreListingPage(String listingUrl) async {
   try {
     final Uri uri = normalizeApkPureHost(Uri.parse(listingUrl));
-    final http.Response response = await http
-        .get(uri, headers: {'User-Agent': _storeListingUserAgent})
-        .timeout(_storeListingIconFetchTimeout);
+    final http.Response response = ApkMirrorRequestBudget.isMirrorHost(uri)
+        ? await HttpService().request('GET', uri, null, followRedirects: false)
+        : await http.get(uri, headers: {'User-Agent': _storeListingUserAgent})
+            .timeout(_storeListingIconFetchTimeout);
     if (response.statusCode != 200) {
       return null;
     }

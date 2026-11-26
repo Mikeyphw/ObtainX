@@ -9,7 +9,6 @@ import 'package:crypto/crypto.dart';
 import 'package:obtainium/services/r03_download_engine.dart';
 import 'package:obtainium/services/r07_journal_guard.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:sqflite/sqflite.dart' show DatabaseException;
 
 class R03RetentionPreview {
   R03RetentionPreview._(this.cutoff, this.listingKey, this.packageId, this.channel,
@@ -143,14 +142,14 @@ class R03DownloadHistory {
           if (await FileSystemEntity.type(target.path, followLinks: false) != FileSystemEntityType.notFound) return;
           await entity.rename(target.path);
           moved++;
-        });
+        }, acquisitionTimeout: const Duration(milliseconds: 100));
       } on FileSystemException {
         // Preserve unreadable/racing records for explicit review.
       } on FormatException {
         // Corrupt records cannot authorize archival or deletion.
       } on TypeError {
         // Preserve malformed metadata.
-      } on DatabaseException {
+      } on R07JournalBusy {
         // A live owner may still hold the destination lock.
       }
     }

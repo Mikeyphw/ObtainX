@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:obtainium/services/r05_operation_journal.dart';
 import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/r07_process_owner.dart';
+import 'package:obtainium/services/r07_journal_guard.dart';
 
 void main() {
   sqfliteFfiInit();
@@ -127,7 +128,8 @@ void main() {
     final outcomes = await Future.wait([for (final owner in [journal, R05OperationJournal(testingRoot: temp)])
       () async {
         try { return await owner.pruneTerminalBefore(cutoff, channel: channel, preview: preview); }
-        catch (_) { return -1; }
+        on StateError { return -1; }
+        on R07JournalBusy { return -1; }
       }(),
     ]);
     expect(outcomes.toSet(), {1, -1});

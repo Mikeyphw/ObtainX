@@ -89,18 +89,23 @@ class R07OperationTimeline {
     'checked', 'unknown', 'failed', 'cancelled', 'declined'};
   static const _reasons = {'network', 'cancelled', 'interrupted', 'source', 'ownership', 'operation', 'verificationDeclined'};
 
-  Future<T> _use<T>(Future<T> Function(Database) action) async {
+  Future<T> _use<T>(Future<T> Function(Transaction) action) async {
     final root = await _root();
     await root.create(recursive: true);
     final path = '${root.path}/r07-operation-timeline.sqlite';
-    for (final suffix in ['', '-wal', '-shm', '-journal']) {
-      final type = await FileSystemEntity.type('$path$suffix', followLinks: false);
-      if (type != FileSystemEntityType.notFound && type != FileSystemEntityType.file) {
-        throw const FileSystemException('Unsafe operation timeline');
+    return withR07SqliteTransaction(path, () async {
+      if (await FileSystemEntity.type(root.path, followLinks: false) !=
+          FileSystemEntityType.directory) {
+        throw const FileSystemException('Unsafe operation timeline root');
       }
-    }
-    final db = await openDatabase(path, version: 1, singleInstance: false,
-      onConfigure: (db) async { await db.rawQuery('PRAGMA busy_timeout=1000'); },
+      for (final suffix in ['', '-wal', '-shm', '-journal']) {
+        final type = await FileSystemEntity.type('$path$suffix', followLinks: false);
+        if (type != FileSystemEntityType.notFound && type != FileSystemEntityType.file) {
+          throw const FileSystemException('Unsafe operation timeline');
+        }
+      }
+      return openDatabase(path, version: 1, singleInstance: false,
+      onConfigure: (db) async { await db.rawQuery('PRAGMA busy_timeout=0'); },
       onCreate: (db, _) async {
         await db.execute('CREATE TABLE operations (id TEXT PRIMARY KEY, batchId TEXT NOT NULL, '
           'kind TEXT NOT NULL, listingKey TEXT NOT NULL, packageId TEXT NOT NULL, channel TEXT NOT NULL, '
@@ -112,14 +117,14 @@ class R07OperationTimeline {
         await db.execute('CREATE TABLE events (operationId TEXT NOT NULL, revision INTEGER NOT NULL, '
           'stage TEXT NOT NULL, updated INTEGER NOT NULL, reason TEXT, PRIMARY KEY(operationId, revision))');
       });
-    try { return await action(db); } finally { await db.close(); }
+    }, action, exclusive: true);
   }
 
   Future<List<R07TimelineEntry>> enqueue(List<R07OperationIntent> intents) async {
     if (intents.isEmpty) return [];
     for (final intent in intents) { intent.validate(); }
     final batch = _id();
-    return _use((db) => db.transaction((txn) async {
+    return _use((txn) async {
       final result = <R07TimelineEntry>[];
       for (final intent in intents) {
         final id = _id();
@@ -132,7 +137,7 @@ class R07OperationTimeline {
         result.add(R07TimelineEntry.fromRow(row));
       }
       return result;
-    }));
+    });
   }
 
   Future<R07TimelineEntry> read(String id) => _use((db) async {
@@ -168,7 +173,7 @@ class R07OperationTimeline {
         (attemptId != null && !RegExp(r'^[A-Za-z0-9_-]{16,90}$').hasMatch(attemptId))) {
       throw const FormatException('Untrusted operation observation');
     }
-    return _use((db) => db.transaction((txn) async {
+    return _use((txn) async {
       final rows = await txn.query('operations', where: 'id = ?', whereArgs: [id]);
       if (rows.length != 1) throw StateError('Operation no longer exists');
       final previous = R07TimelineEntry.fromRow(rows.single);
@@ -196,7 +201,7 @@ class R07OperationTimeline {
       await txn.insert('events', {'operationId': id, 'revision': update['revision'], 'stage': stage,
         'updated': update['updated'], 'reason': reason});
       return R07TimelineEntry.fromRow({...rows.single, ...update});
-    }));
+    });
   }
 
   /// Serialize actual owners, not just progress rows. Failure before acquiring
@@ -291,17 +296,17 @@ class R07OperationTimeline {
 
   /// Active/recoverable records are never excluded by history size. Terminal
   /// history has a stable, indexed page boundary. No state change on reads.
-  Future<List<R07TimelineEntry>> readActivity({int? historyLimit}) => _use((db) => db.transaction((txn) async {
+  Future<List<R07TimelineEntry>> readActivity({int? historyLimit}) => _use((txn) async {
     final active = await txn.query('operations', where: 'finished = 0', orderBy: 'updated DESC, id');
     final history = historyLimit == 0 ? <Map<String, Object?>>[] : await txn.query('operations',
       where: 'finished = 1', orderBy: 'updated DESC, id', limit: historyLimit);
     return [...active, ...history].map(R07TimelineEntry.fromRow).toList(growable: false);
-  }));
+  });
 
   Future<({List<R07TimelineEntry> rows, int unreadableCount,
       Set<String> channels, Map<String, ({int completed, int total})> batches})> readForActivity({
       int? historyLimit, String? packageId, String? listingKey, String? operationId,
-      String channel = 'all', String filter = 'all'}) => _use((db) => db.transaction((txn) async {
+      String channel = 'all', String filter = 'all'}) => _use((txn) async {
     final scope = <String>[], args = <Object?>[];
     if (packageId != null) { scope.add('packageId = ?'); args.add(packageId); }
     if (listingKey != null) { scope.add('listingKey = ?'); args.add(listingKey); }
@@ -335,7 +340,7 @@ class R07OperationTimeline {
       }
     }
     return (rows: rows, unreadableCount: unreadableCount, channels: channels, batches: batches);
-  }));
+  });
 
   Future<List<Map<String, Object?>>> events(String id) => _use((db) =>
     db.query('events', where: 'operationId = ?', whereArgs: [id], orderBy: 'revision'));
@@ -359,16 +364,20 @@ class R07OperationTimeline {
           await R07ProcessOwner.decode(entry.processOwner!).inspect() != R07ProcessState.dead)) {
         continue;
       }
+      var entered = false;
       try {
         await withR07JournalGuard(Directory('${root.path}/r07-operation-timeline'),
           'listing:${entry.intent.kind == 'check' ? 'check' : 'transfer'}:${entry.intent.listingKey}', () async {
+          entered = true;
           final current = await read(entry.id);
           if (current.revision == entry.revision && current.stage == entry.stage) {
             await advance(entry.id, 'unknown', expectedStage: entry.stage, reason: 'interrupted');
           }
-        });
-      } on DatabaseException {
-        // Contended or unreadable ownership is not evidence of interruption.
+        }, acquisitionTimeout: const Duration(milliseconds: 100));
+      } on R07JournalBusy {
+        // Only acquisition contention proves nothing about the existing owner.
+        // A timeline failure inside the guard remains observable.
+        if (entered) { rethrow; }
       }
     }
   }

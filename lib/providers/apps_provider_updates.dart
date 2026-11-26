@@ -981,6 +981,11 @@ extension AppsProviderUpdates on AppsProvider {
       return updateCheckCompleter!.future;
     }
     final completer = updateCheckCompleter = Completer<List<App>>();
+    // The initiating call reports its error directly; a joining caller awaits
+    // the shared future. Observe the shared error even when nobody joins so
+    // a database/ownership refusal cannot also become an unhandled error.
+    unawaited(completer.future.then<void>((_) {},
+      onError: (Object error, StackTrace stack) {}));
     var completed = 0;
     var total = 0;
     DateTime lastProgressNotification = DateTime.fromMillisecondsSinceEpoch(0);
@@ -1176,14 +1181,13 @@ extension AppsProviderUpdates on AppsProvider {
       await flushFetchedResults(force: true);
       if (errors.idsByErrorString.isNotEmpty) {
         final ex = CheckUpdatesException(updates, errors);
-        completer.completeError(ex);
         throw ex;
       }
       completer.complete(updates);
       return updates;
-    } catch (e) {
+    } catch (error, stack) {
       if (!completer.isCompleted) {
-        completer.completeError(e);
+        completer.completeError(error, stack);
       }
       rethrow;
     } finally {

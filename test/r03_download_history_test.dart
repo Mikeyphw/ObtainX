@@ -73,9 +73,11 @@ void main() {
     expect(await recovery.exists(), isTrue);
     final rival = R03DownloadHistory(cache: cache, testingRoot: root);
     final outcomes = await Future.wait([for (final owner in [history, rival]) () async {
-      try { return await owner.prune(preview); } catch (_) { return -1; }
+      try { return await owner.prune(preview); }
+      on StateError { return -1; }
+      on R07JournalBusy { return -1; }
     }()]);
-    expect(outcomes.any((value) => value > 0), isTrue);
+    expect(outcomes.toSet(), {260, -1});
     expect((await history.previewTerminalBefore(cutoff, channel: channel)).entries, isEmpty);
     expect((await history.previewTerminalBefore(cutoff, channel: other)).entries.length, 260);
     expect(await recovery.exists(), isTrue);

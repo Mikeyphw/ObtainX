@@ -30,7 +30,7 @@ REQUIRED_STEPS = {
     'obtainx-r00-flutter.yml': {
         'R05 persisted journal and restart regression': 'flutter test --no-pub test/r05_operation_journal_test.dart',
         'R07 Activity Center journal/action and restart tests': 'flutter test --no-pub test/r07_activity_center_test.dart',
-        'GAP-03 durable timeline and scoped retention tests': 'flutter test --no-pub test/r07_operation_timeline_test.dart test/r03_download_history_test.dart',
+        'GAP-03 durable timeline and scoped retention tests': 'flutter test --no-pub test/r07_operation_timeline_test.dart test/r03_download_history_test.dart test/multi_source_app_actions_test.dart',
     },
 }
 RISK_PATHS = {'lib/services/r07_*', 'lib/widgets/r07_*', 'test/r07_*', 'scripts/ci/r07_*'}

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:obtainium/services/r07_operation_timeline.dart';
+import 'package:obtainium/services/r07_journal_guard.dart';
 import 'package:obtainium/services/r07_process_owner.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -22,6 +23,137 @@ void main() {
     timeline = R07OperationTimeline(testingRoot: root);
   });
   tearDown(() async { await root.delete(recursive: true); });
+
+  test('parallel first-open and bulk workers retain each exact timeline revision', () async {
+    final intents = List.generate(12, (i) => R07OperationIntent(kind: 'check',
+      listingKey: 'source:$i', packageId: 'com.example', channel: channel, release: release));
+    final entries = await Future.wait(intents.map((value) async =>
+      (await R07OperationTimeline(testingRoot: root).enqueue([value])).single));
+    final entered = Completer<void>();
+    var running = 0;
+    await Future.wait(entries.map((entry) => R07OperationTimeline(testingRoot: root).run(
+      entry, entry.intent, 'checking', () async {
+        running++;
+        if (running == 2) { entered.complete(); }
+        await entered.future.timeout(const Duration(seconds: 5));
+      }, successStage: 'checked')));
+    expect(running, 12);
+    for (final entry in entries) {
+      final row = await timeline.read(entry.id);
+      expect(row.stage, 'checked');
+      expect(row.revision, 2);
+      expect((await timeline.events(entry.id)).map((event) => event['revision']), [0, 1, 2]);
+    }
+  });
+
+  Future<Database> openProbe(String path) => openDatabase(path, version: 1,
+    singleInstance: false,
+    onConfigure: (db) async { await db.rawQuery('PRAGMA busy_timeout=0'); },
+    onCreate: (db, _) => db.execute('CREATE TABLE probe (id INTEGER PRIMARY KEY)'));
+
+  test('independent SQLite writer retries acquisition without replaying callback', () async {
+    final path = '${root.path}/contended.sqlite';
+    final owner = await openProbe(path);
+    final acquired = Completer<void>(), releaseOwner = Completer<void>();
+    final holder = owner.transaction((txn) async {
+      await txn.insert('probe', {'id': 1});
+      acquired.complete();
+      await releaseOwner.future;
+    });
+    await acquired.future;
+    var opens = 0, callbacks = 0;
+    final retried = Completer<void>();
+    final contender = withR07SqliteTransaction(path, () async {
+      if (++opens == 2) { retried.complete(); }
+      return openProbe(path);
+    }, (txn) async {
+      callbacks++;
+      await txn.insert('probe', {'id': 2});
+    }, exclusive: true);
+    try {
+      await retried.future.timeout(const Duration(seconds: 3));
+      expect(callbacks, 0);
+    } finally {
+      releaseOwner.complete();
+      await holder;
+      await owner.close();
+      await contender;
+    }
+    expect(opens, greaterThanOrEqualTo(2));
+    expect(callbacks, 1);
+    final reopened = await openProbe(path);
+    try {
+      expect((await reopened.query('probe', orderBy: 'id')).map((row) => row['id']), [1, 2]);
+    } finally { await reopened.close(); }
+  });
+
+  test('independent writer timeout never enters or cancels its owner', () async {
+    final path = '${root.path}/deadline.sqlite';
+    final owner = await openProbe(path);
+    final acquired = Completer<void>(), releaseOwner = Completer<void>();
+    final holder = owner.transaction((txn) async {
+      await txn.insert('probe', {'id': 1});
+      acquired.complete();
+      await releaseOwner.future;
+      await txn.insert('probe', {'id': 2});
+    }, exclusive: true);
+    await acquired.future;
+    var callbacks = 0;
+    try {
+      await expectLater(withR07SqliteTransaction(path, () => openProbe(path), (txn) async {
+        callbacks++;
+      }, exclusive: true, acquisitionTimeout: const Duration(milliseconds: 180)),
+        throwsA(isA<R07JournalBusy>()));
+      expect(callbacks, 0);
+    } finally {
+      releaseOwner.complete();
+      await holder;
+      await owner.close();
+    }
+    final rows = await withR07SqliteTransaction(path, () => openProbe(path),
+      (txn) => txn.query('probe', orderBy: 'id'));
+    expect(rows.map((row) => row['id']), [1, 2]);
+  });
+
+  test('callback errors roll back and never replay, including SQLite busy', () async {
+    final path = '${root.path}/rollback.sqlite';
+    var callbacks = 0;
+    for (final busy in [false, true]) {
+      await expectLater(withR07SqliteTransaction(path, () => openProbe(path), (txn) async {
+        callbacks++;
+        await txn.insert('probe', {'id': 1});
+        if (busy) { throw _CallbackBusy(); }
+        await txn.insert('probe', {'id': 1}); // actual constraint violation
+      }), throwsA(isA<DatabaseException>()));
+      final rows = await withR07SqliteTransaction(path, () => openProbe(path),
+        (txn) => txn.query('probe'));
+      expect(rows, isEmpty);
+    }
+    expect(callbacks, 2);
+  });
+
+  test('local per-identity guard times out without affecting a different identity', () async {
+    final directory = Directory('${root.path}/shared');
+    final acquired = Completer<void>(), releaseOwner = Completer<void>();
+    final owner = withR07JournalGuard(directory, 'one', () async {
+      acquired.complete();
+      await releaseOwner.future;
+    });
+    await acquired.future;
+    var callbacks = 0;
+    try {
+      await expectLater(withR07JournalGuard(directory, 'one', () async {
+        callbacks++;
+      }, acquisitionTimeout: const Duration(milliseconds: 80)), throwsA(isA<R07JournalBusy>()));
+      await withR07JournalGuard(directory, 'two', () async { callbacks++; });
+      expect(callbacks, 1);
+    } finally {
+      releaseOwner.complete();
+      await owner;
+    }
+    await withR07JournalGuard(directory, 'one', () async { callbacks++; });
+    expect(callbacks, 2);
+  });
 
   test('durable queue and actual stage events survive reopening', () async {
     final entry = (await timeline.enqueue([intent])).single;
@@ -151,4 +283,14 @@ void main() {
     expect(await owner.inspect(), isNot(R07ProcessState.dead));
     expect(() => R07ProcessOwner.decode('invalid'), throwsFormatException);
   });
+}
+
+// Inject a classified database error after callback entry; the other tests
+// independently induce actual contention on separate SQLite connections.
+class _CallbackBusy extends DatabaseException {
+  _CallbackBusy() : super('database is locked');
+  @override
+  int getResultCode() => 5;
+  @override
+  Object? get result => null;
 }

@@ -14,6 +14,7 @@ import 'package:expressive_refresh/expressive_refresh.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:obtainium/services/r07_operation_timeline.dart';
 import 'package:obtainium/components/app_detail_widgets.dart';
 import 'package:obtainium/main.dart';
 import 'package:obtainium/pages/app.dart';
@@ -415,8 +416,30 @@ void main() {
     });
     expect(provider.apps[first.listingKey]!.app.latestVersion, '2.0');
     expect(provider.apps[second.listingKey]!.app.latestVersion, '3.0');
+    final rows = (await R07OperationTimeline.instance.readActivity())
+        .where((row) => row.intent.kind == 'check').toList();
+    expect(rows.map((row) => row.intent.listingKey).toSet(),
+      {first.listingKey, second.listingKey});
+    expect(rows.every((row) => row.stage == 'checked' && row.finished), isTrue);
+    expect(rows.map((row) => row.batchId).toSet(), hasLength(1));
+    for (final row in rows) {
+      final events = await R07OperationTimeline.instance.events(row.id);
+      expect(events.map((event) => event['stage']), ['queued', 'checking', 'checked']);
+    }
     expect(provider.refreshProgress, isNull);
     expect(provider.updateCheckCompleter, isNull);
+  });
+
+  test('a durable journal refusal reaches the caller without duplicate async errors', () async {
+    final app = _listing(trackOnly: true);
+    provider.apps[app.listingKey] = AppInMemory(app, null, null, icon);
+    final path = '${directory.path}/r07-operation-timeline.sqlite';
+    await Directory(path).create(); // deliberately unsafe DB path, no network dispatch
+    final initial = provider.checkUpdates(specificIds: [app.listingKey]);
+    await expectLater(initial, throwsA(isA<FileSystemException>()));
+    expect(provider.updateCheckCompleter, isNull);
+    expect(provider.refreshProgress, isNull);
+    expect(await Directory(path).exists(), isTrue);
   });
 
   test('reset install status clears an accidental source acknowledgement', () {

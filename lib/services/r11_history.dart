@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:crypto/crypto.dart';
+import 'package:obtainium/services/artifact_resource_budget.dart';
 import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/r07_activity_catalog.dart';
 import 'package:obtainium/services/r11_external_requests.dart';
@@ -32,12 +34,9 @@ Map<String, Object?> r11PublicReceipt(R05OperationReceipt receipt) => {
   'installedSignerSha256': receipt.installedSignerSha256,
 };
 
-Map<String, Object?> r11PublicHistory(List<R07ActivityRecord> records) => {
-  'schema': 'obtainx.history.v1',
-  'historicalOnly': true,
-  'records': [for (final record in records)
-    if (record.install != null) r11PublicReceipt(record.install!)
-    else if (record.download != null) {
+Map<String, Object?>? r11PublicRecord(R07ActivityRecord record) {
+  if (record.install != null) return r11PublicReceipt(record.install!);
+  if (record.download != null) return {
       'kind': 'download',
       'id': r11HistoryKey(record.id),
       'listing': record.listingKey == null ? null : r11HistoryKey(record.listingKey!),
@@ -49,10 +48,11 @@ Map<String, Object?> r11PublicHistory(List<R07ActivityRecord> records) => {
       'verifiedBytes': record.verifiedBytes,
       'totalBytes': record.totalBytes,
       'digest': record.download!.finalDigest,
-    } else if (record.timeline != null) {
+    };
+    if (record.timeline != null) return {
       'kind': record.timeline!.intent.kind,
       'id': record.timeline!.id,
-      'listing': r11HistoryKey(record.timeline!.intent.listingKey),
+      'listing': record.timeline!.intent.channel == 'unknown' ? null : r11HistoryKey(record.timeline!.intent.listingKey),
       'package': r11ValidPackage(record.timeline!.intent.packageId) ? record.timeline!.intent.packageId : null,
       'channel': record.timeline!.intent.channel,
       'releaseFingerprint': record.timeline!.intent.release,
@@ -61,6 +61,65 @@ Map<String, Object?> r11PublicHistory(List<R07ActivityRecord> records) => {
       'transfer': record.timeline!.transferId,
       'attempt': record.timeline!.attemptId,
       'updatedUtc': record.updatedUtc.toIso8601String(),
-    }
-  ],
+    };
+    return null;
+}
+
+Map<String, Object?> r11PublicHistory(List<R07ActivityRecord> records) => {
+  'schema': 'obtainx.history.v1', 'historicalOnly': true,
+  'records': records.map(r11PublicRecord).whereType<Map<String, Object?>>().toList(),
 };
+
+/// Write incrementally to an exclusive private staging file, then atomically
+/// publish only the completed document. Size is bounded independently of
+/// history row count; callers may narrow scope if the export exceeds budget.
+Future<File> writeR11PublicHistory(File destination,
+    Future<void> Function(Future<void> Function(R07ActivityRecord)) visit,
+    {int maxBytes = 256 * 1024 * 1024, void Function()? checkCancellation}) async {
+  if (maxBytes < 1 || maxBytes > 256 * 1024 * 1024 ||
+      await FileSystemEntity.type(destination.path, followLinks: false) != FileSystemEntityType.notFound) {
+    throw const FileSystemException('Invalid history export destination or limit');
+  }
+  final part = File('${destination.path}.part');
+  await part.create(exclusive: true);
+  RandomAccessFile? output;
+  var written = 0;
+  var first = true;
+  var published = false;
+  try {
+    final file = await part.open(mode: FileMode.write);
+    output = file;
+    var capacityCheckedAt = -1024 * 1024;
+    Future<void> append(String text) async {
+      checkCancellation?.call();
+      final bytes = utf8.encode(text);
+      if (bytes.length > maxBytes - written) throw const FileSystemException('History export exceeds limit');
+      if (written - capacityCheckedAt >= 1024 * 1024) {
+        await ensureArtifactStorageCapacity(destination.parent.path, 2 * 1024 * 1024);
+        capacityCheckedAt = written;
+      }
+      await file.writeFrom(bytes);
+      written += bytes.length;
+    }
+    await append('{"schema":"obtainx.history.v1","historicalOnly":true,"records":[');
+    await visit((record) async {
+      if (record.kind == 'integrity') throw const FormatException('Unreadable history');
+      final value = r11PublicRecord(record);
+      if (value == null) return;
+      await append('${first ? '' : ','}${jsonEncode(value)}');
+      first = false;
+    });
+    await append(']}');
+    await file.flush();
+    await file.close();
+    output = null;
+    checkCancellation?.call();
+    await part.rename(destination.path);
+    published = true;
+    return destination;
+  } finally {
+    try { await output?.close(); } finally {
+      if (!published && await part.exists()) await part.delete();
+    }
+  }
+}

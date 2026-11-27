@@ -183,14 +183,17 @@ void main() {
     Future<File> transfer({bool Function()? cancelled,
       void Function(double?, int?, int?)? progress,
       bool useExisting = true, String? expectedSha256, int maxBytes = r03MaximumBytes,
-      R03HistoryBinding? historyBinding, R03DownloadRecord? resumeRecord}) async {
+      R03HistoryBinding? historyBinding, R03DownloadRecord? resumeRecord,
+      bool Function()? paused, void Function(bool)? pauseAvailable,
+      Future<void> Function(String, int)? capacity}) async {
       final first = await fetch(const {});
-      return R03DownloadEngine(journalDirectory: engine().journalDirectory, maxBytes: maxBytes).download(
+      return R03DownloadEngine(journalDirectory: engine().journalDirectory, maxBytes: maxBytes, ensureCapacity: capacity).download(
         source: source(), destination: target(),
         headers: const {}, firstResponse: first, fetch: fetch,
         isCancelled: cancelled ?? () => false,
         onProgress: progress, useExisting: useExisting,
         expectedSha256: expectedSha256, historyBinding: historyBinding, resumeRecord: resumeRecord,
+        isPauseRequested: paused, onPauseAvailable: pauseAvailable,
       );
     }
 
@@ -295,6 +298,42 @@ void main() {
       final output = await transfer(historyBinding: owner, resumeRecord: paused);
       expect(await output.readAsBytes(), payload);
       expect(ranges, contains('bytes=${paused.validatedBytes}-'));
+    });
+    test('explicit pause retains exact committed bytes and resumes with digest', () async {
+      const channel = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      const release = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      final owner = R03HistoryBinding('source:one', 'com.example', channel, releaseFingerprint: release);
+      final expected = sha256.convert(payload).toString();
+      var pause = false;
+      await expectLater(transfer(historyBinding: owner, expectedSha256: expected,
+        paused: () => pause, pauseAvailable: (available) { if (available) pause = true; }),
+        throwsA(isA<R03PausedException>()));
+      expect(pause, isTrue);
+      expect(target().existsSync(), isFalse);
+      final id = R03DownloadEngine.jobKey(source(), target(), const {}, historyBinding: owner);
+      final journal = File('${sandbox.path}/private-receipts/$id.json');
+      final saved = R03DownloadRecord.fromJson(Map<String, dynamic>.from(jsonDecode(await journal.readAsString())));
+      expect(saved.stage, R03Stage.paused);
+      expect(saved.explicitlyResumable, isTrue);
+      expect(File('${target().path}.part').lengthSync(), saved.validatedBytes);
+      final output = await transfer(historyBinding: owner, expectedSha256: expected, resumeRecord: saved);
+      expect(await output.readAsBytes(), payload);
+      expect(ranges, contains('bytes=${saved.validatedBytes}-'));
+      expect(ifRanges, contains(etag));
+    });
+    test('unbounded length never advertises explicit pause', () async {
+      omitLength = true;
+      final owner = R03HistoryBinding('source:one', 'com.example', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', releaseFingerprint: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+      await transfer(historyBinding: owner, pauseAvailable: (available) => expect(available, isFalse));
+    });
+    test('storage refusal cannot publish even a valid expected digest', () async {
+      var inspected = 0;
+      await expectLater(transfer(expectedSha256: sha256.convert(payload).toString(), capacity: (_, bytes) async {
+        inspected = bytes;
+        throw const FileSystemException('Insufficient capacity');
+      }), throwsA(isA<FileSystemException>()));
+      expect(inspected, payload.length);
+      expect(target().existsSync(), isFalse);
     });
     test('changed ETag restarts safely; never appends old bytes', () async {
       var stop = false;

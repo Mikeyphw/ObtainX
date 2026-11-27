@@ -24,6 +24,49 @@ void main() {
   });
   tearDown(() async { await root.delete(recursive: true); });
 
+  test('local archive has a durable owner before manifest binding', () async {
+    final local = await timeline.beginLocalArchive();
+    expect(local.stage, 'copying');
+    expect(local.intent.packageId, 'unknown');
+    expect(local.processOwner, isNotNull);
+    expect((await timeline.events(local.id)).map((event) => event['stage']), ['queued', 'copying']);
+    await expectLater(timeline.bindLocalArchive(local.id, listingKey: intent.listingKey,
+      packageId: intent.packageId, channel: channel, archiveSha256: release), throwsStateError);
+    await timeline.advance(local.id, 'verifying');
+    final bound = await timeline.bindLocalArchive(local.id, listingKey: intent.listingKey,
+      packageId: intent.packageId, channel: channel, archiveSha256: release);
+    expect(bound.id, local.id);
+    expect(bound.intent.packageId, intent.packageId);
+    await expectLater(timeline.bindLocalArchive(local.id, listingKey: 'source:other',
+      packageId: intent.packageId, channel: channel, archiveSha256: release), throwsStateError);
+    await timeline.linkAttempt(bound.id, attempt, listingKey: intent.listingKey,
+      packageId: intent.packageId, channel: channel, release: bound.intent.release);
+    await timeline.settlePreparation(bound.id, 'cancelled');
+    expect((await timeline.read(bound.id)).stage, 'installLinked');
+  });
+  test('reviewed compaction preserves endpoints, unknown and linked rows', () async {
+    const check = R07OperationIntent(kind: 'check', listingKey: 'source:one',
+      packageId: 'com.example', channel: channel, release: release);
+    final done = (await timeline.enqueue([check])).single;
+    await timeline.advance(done.id, 'checking');
+    await timeline.advance(done.id, 'checked');
+    final unknown = await timeline.beginLocalArchive();
+    await timeline.settlePreparation(unknown.id, 'unknown');
+    final linked = await timeline.beginPreparation(intent);
+    await timeline.linkAttempt(linked.id, attempt, listingKey: intent.listingKey,
+      packageId: intent.packageId, channel: channel, release: release);
+    final preview = await timeline.previewTerminalEvents(DateTime.now().toUtc().add(const Duration(days: 1)));
+    expect(preview.entries.keys, [done.id]);
+    expect(await timeline.compactTerminalEvents(preview), 1);
+    expect((await timeline.events(done.id)).map((event) => event['revision']), [0, 2]);
+    expect((await timeline.read(done.id)).stage, 'checked');
+    expect((await timeline.events(unknown.id)).length, 3);
+    expect((await timeline.events(linked.id)).length, 3);
+    await expectLater(timeline.compactTerminalEvents(preview), throwsStateError);
+    final visited = <String>[];
+    await timeline.visitForExport((entry) async { visited.add(entry.id); });
+    expect(visited, unorderedEquals([done.id, unknown.id, linked.id]));
+  });
   test('parallel first-open and bulk workers retain each exact timeline revision', () async {
     final intents = List.generate(12, (i) => R07OperationIntent(kind: 'check',
       listingKey: 'source:$i', packageId: 'com.example', channel: channel, release: release));

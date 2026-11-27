@@ -106,6 +106,15 @@ void main() {
       },
     );
 
+    test('only labeled artifact SHA-256 rows bind a digest', () {
+      final digest = List.filled(64, 'a').join();
+      expect(parseUptodownAdvertisedSha256([['Certificate', digest]]), isNull);
+      expect(parseUptodownAdvertisedSha256([['SHA-256', digest.toUpperCase()]]), digest);
+      expect(() => parseUptodownAdvertisedSha256([['SHA-256', 'invalid']]), throwsFormatException);
+      expect(() => parseUptodownAdvertisedSha256([['SHA-256', digest],
+        ['SHA256', List.filled(64, 'b').join()]]), throwsFormatException);
+    });
+
     test('uptodownDirectApkUrl expands paths and passes absolute URLs', () {
       expect(
         uptodownDirectApkUrl(dataUrl: 'abc123/vlc.apk'),

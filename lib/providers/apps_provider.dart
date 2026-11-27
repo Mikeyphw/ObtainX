@@ -23,6 +23,7 @@ import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/http/obtainx_user_agent.dart';
 import 'package:obtainium/http/response_bytes.dart';
 import 'package:obtainium/services/app_check_store.dart';
+import 'package:obtainium/services/artifact_resource_budget.dart';
 import 'package:obtainium/services/r11_schedule.dart';
 import 'package:obtainium/services/r03_download_engine.dart';
 import 'package:obtainium/services/r03_download_history.dart';
@@ -303,7 +304,7 @@ class DownloadedDir {
     this.file,
     this.extracted,
     this.type, {
-    this.release, this.provenance, this.inspectedPlan,
+    this.release, this.provenance, this.inspectedPlan, this.installTimelineId,
   });
 }
 
@@ -348,6 +349,8 @@ Future<File> downloadFileWithRetry(
   CancellationToken? cancellationToken,
   R03HistoryBinding? historyBinding,
   R03DownloadRecord? resumeRecord,
+  String? expectedSha256,
+  void Function(bool)? onPauseAvailable,
   void Function(R03DownloadRecord)? onVerified,
 }) async {
   int remaining = retries;
@@ -358,7 +361,8 @@ Future<File> downloadFileWithRetry(
         url, fileName, fileNameHasExt, onProgress, destDir,
         useExisting: useExisting, headers: headers, allowInsecure: allowInsecure,
         logs: logs, cancellationToken: cancellationToken, historyBinding: historyBinding, onVerified: onVerified,
-        resumeRecord: resumeRecord,
+        resumeRecord: resumeRecord, expectedSha256: expectedSha256,
+        onPauseAvailable: onPauseAvailable,
       );
     } catch (error) {
       final int? code = error is ObtainiumError && error.code == 'HTTP_ERROR'
@@ -366,7 +370,7 @@ Future<File> downloadFileWithRetry(
           : null;
       final transient = error is ClientException || error is SocketException ||
           error is TimeoutException || (code != null && r03CanRetryHttpStatus(code));
-      if (resumeRecord != null || !transient || remaining <= 0) rethrow;
+      if (resumeRecord != null || cancellationToken?.isPauseRequested == true || !transient || remaining <= 0) rethrow;
       final int attempt = retries - remaining;
       remaining--;
       final int jitter = Random().nextInt(800);
@@ -611,6 +615,8 @@ Future<File> downloadFile(
   bool reviewHttpsOnly = false,
   R03HistoryBinding? historyBinding,
   R03DownloadRecord? resumeRecord,
+  String? expectedSha256,
+  void Function(bool)? onPauseAvailable,
   void Function(R03DownloadRecord)? onVerified,
 }) async {
   final bool keepAwakeAcquired =
@@ -631,7 +637,8 @@ Future<File> downloadFile(
       privateJournalDirectory: privateJournalDirectory,
       reviewHttpsOnly: reviewHttpsOnly,
       historyBinding: historyBinding, onVerified: onVerified,
-      resumeRecord: resumeRecord,
+      resumeRecord: resumeRecord, expectedSha256: expectedSha256,
+        onPauseAvailable: onPauseAvailable,
     );
   } finally {
     if (keepAwakeAcquired) {
@@ -656,6 +663,8 @@ Future<File> _downloadFile(
   bool reviewHttpsOnly = false,
   R03HistoryBinding? historyBinding,
   R03DownloadRecord? resumeRecord,
+  String? expectedSha256,
+  void Function(bool)? onPauseAvailable,
   void Function(R03DownloadRecord)? onVerified,
 }) async {
   final requestHeaders = withDefaultObtainXUserAgent(headers);
@@ -706,20 +715,28 @@ Future<File> _downloadFile(
     final privateSupport = await getApplicationSupportDirectory();
     final engine = R03DownloadEngine(
       journalDirectory: privateJournalDirectory ?? Directory('${privateSupport.path}/r03-download-journal'),
-      maxBytes: maxBytes,
+      maxBytes: maxBytes, ensureCapacity: ensureArtifactStorageCapacity,
     );
     try {
       return await engine.download(
         source: Uri.parse(url), destination: downloadedFile,
         headers: requestHeaders, firstResponse: firstResponse, fetch: fetch,
         isCancelled: () => cancellationToken?.isCancelled ?? false,
-        useExisting: useExisting,
+        useExisting: useExisting, expectedSha256: expectedSha256,
+        isPauseRequested: cancellationToken == null ? null : () => cancellationToken.isPauseRequested,
+        onPauseAvailable: (available) {
+          if (cancellationToken?.setPauseAvailable(available) == true) {
+            onPauseAvailable?.call(available);
+          }
+        },
         historyBinding: historyBinding, resolvedUri: (response) => resolvedOrigins[response],
         onVerified: onVerified, resumeRecord: resumeRecord,
         onProgress: (progress, received, total) {
           onProgress?.call(progress, received, total);
         },
       );
+    } on R03PausedException catch (error) {
+      throw DownloadPausedException(error.jobId);
     } on R03DownloadHttpException catch (error) {
       throw ObtainiumError('HTTP ${error.statusCode}', code: 'HTTP_ERROR',
         data: <String, dynamic>{
@@ -1335,8 +1352,18 @@ class AppsProvider with ChangeNotifier {
     if (identical(_downloadCancellations[appId], token)) _downloadCancellations.remove(appId);
   }
 
+  /// Only the live owner with a durable, validator-bound checkpoint can pause.
+  bool canPauseDownload(String listingKey) => _downloadCancellations[listingKey]?.canPause == true;
+
+  bool pauseDownload(String listingKey) {
+    final accepted = _downloadCancellations[listingKey]?.requestPause() == true;
+    if (accepted) notify();
+    return accepted;
+  }
+
   /// Requests cancellation of an ongoing download for [appId], if any.
   void cancelDownload(String appId) {
+    if (_downloadCancellations[appId]?.isPauseRequested == true) return;
     _downloadCancellations[appId]?.cancel();
     final entry = apps[appId];
     if (entry != null && entry.downloadProgress != null) {
@@ -2247,13 +2274,33 @@ _bgRunUpdateCheck(
 
 class CancellationToken {
   bool _cancelled = false;
+  bool _pauseRequested = false;
+  bool _pauseAvailable = false;
   bool get isCancelled => _cancelled;
+  bool get isPauseRequested => _pauseRequested;
+  bool get canPause => _pauseAvailable && !_cancelled && !_pauseRequested;
+
+  bool setPauseAvailable(bool available) {
+    final previous = _pauseAvailable;
+    _pauseAvailable = available && !_cancelled && !_pauseRequested;
+    return previous != _pauseAvailable;
+  }
+
+  bool requestPause() {
+    if (!canPause) return false;
+    _pauseRequested = true;
+    _pauseAvailable = false;
+    for (final listener in _listeners.toList()) {
+      listener();
+    }
+    return true;
+  }
   final Set<VoidCallback> _listeners = {};
   final _cancellation = Completer<void>();
   Future<void> get whenCancelled => _cancellation.future;
 
   void cancel() {
-    if (_cancelled) return;
+    if (_cancelled || _pauseRequested) return;
     _cancelled = true;
     _cancellation.complete();
     for (final listener in _listeners.toList()) {
@@ -2263,7 +2310,7 @@ class CancellationToken {
   }
 
   void addListener(VoidCallback listener) {
-    if (_cancelled) {
+    if (_cancelled || _pauseRequested) {
       listener();
     } else {
       _listeners.add(listener);

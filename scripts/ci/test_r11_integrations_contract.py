@@ -26,7 +26,7 @@ class R11Contracts(unittest.TestCase):
   source=read('lib/providers/apps_provider_install.dart');self.assertIn('newInfo.packageName != original.id',source);self.assertIn('preserveListingIdentity',source);self.assertIn('historyBinding: r11ValidPackage(app.id)',source);self.assertIn('channelFingerprint: r11ChannelFingerprint(app)',source)
   engine=read('lib/services/r03_download_engine.dart');self.assertIn('R03HistoryBinding.decode',engine);self.assertIn('_activeHistory[key] != historyBinding',engine)
   catalog=read('lib/services/r07_activity_catalog.dart');self.assertIn('historicalOwner?.listingKey',catalog);self.assertIn('historicalOwner?.packageId',catalog)
-  ui=read('lib/widgets/r07_activity_center_page.dart');self.assertIn('widget.listingKey != x.listingKey',ui);self.assertIn('r11PublicHistory(records)',ui);self.assertIn('pruneTerminalBefore',ui)
+  ui=read('lib/widgets/r07_activity_center_page.dart');self.assertIn('widget.listingKey != x.listingKey',ui);self.assertIn('writeR11PublicHistory(',ui);self.assertIn('_catalog.visitForExport(visit',ui);self.assertNotIn('r11PublicHistory(records)',ui);self.assertIn('pruneTerminalBefore',ui)
   receipt=read('lib/services/r11_history.dart');self.assertIn("'historicalOnly': true",receipt)
   for secret in ('receipt.fileNames','receipt.sourceHost','receipt.sourceBranch','receipt.reason','record.download!.fileName','record.download!.origin'):self.assertNotIn(secret,receipt)
  def test_app_manager_exact_package(self):

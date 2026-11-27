@@ -367,7 +367,7 @@ extension AppsProviderInstall on AppsProvider {
     final timeline = R07OperationTimeline.instance;
     if (existing != null) {
       final prior = await timeline.read(existing);
-      if (prior.intent.kind == 'install') {
+      if (const {'install', 'localArchive'}.contains(prior.intent.kind)) {
         await timeline.validateInstallBinding(existing, listingKey: listingKey,
           packageId: app.id, channel: channel, release: release);
         return existing;
@@ -992,7 +992,8 @@ extension AppsProviderInstall on AppsProvider {
       Future<File> fetch(Map<String, String>? requestHeaders) => downloadFile(url, fileName,
         advertised != null, progress, stage.path, useExisting: false, headers: requestHeaders,
         allowInsecure: false, cancellationToken: token, maxBytes: r09InspectionMaxBytes,
-        privateJournalDirectory: Directory('${stage.path}/journal'), reviewHttpsOnly: true);
+        privateJournalDirectory: Directory('${stage.path}/journal'), reviewHttpsOnly: true,
+        expectedSha256: sourceAssetSha256(app, asset));
       File artifact;
       try {
         artifact = await fetch(headers);
@@ -1136,7 +1137,9 @@ extension AppsProviderInstall on AppsProvider {
       allowExternalContinuation: allowExternalContinuation, onProgress: onProgress,
       timelineId: operation.id);
     }, successStage: expected.kind == 'install' ? 'ready' : 'downloadReady',
-      failureReason: (error) => error is CancellationException ? 'cancelled' :
+      failureTransferId: (error) => error is DownloadPausedException ? error.transferId : null,
+      failureReason: (error) => error is DownloadPausedException ? 'paused' :
+        error is CancellationException ? 'cancelled' :
         error is SocketException || error is HandshakeException || error is TimeoutException ? 'network' : 'operation');
   }
 
@@ -1170,7 +1173,8 @@ extension AppsProviderInstall on AppsProvider {
       final release = InstallReleaseSnapshot.fromApp(live);
       return release.version == expected.version &&
           release.assetName == expected.assetName &&
-          release.assetUrl == expected.assetUrl;
+          release.assetUrl == expected.assetUrl &&
+          release.expectedSha256 == expected.expectedSha256;
     }
     if (preserveListingIdentity && (!matchesListing() || isTempId(app) ||
         app.allowIdChange || app.settings.getBool('trackOnly') ||
@@ -1369,7 +1373,8 @@ extension AppsProviderInstall on AppsProvider {
           historyBinding: r11ValidPackage(app.id) ? R03HistoryBinding(
             app.listingKey, app.id, discoveryChannel,
             releaseFingerprint: downloadReleaseCacheKey(downloadRelease)) : null,
-          resumeRecord: resumeRecord,
+          resumeRecord: resumeRecord, expectedSha256: downloadRelease.expectedSha256,
+          onPauseAvailable: (_) => notify(),
         );
       }
 
@@ -3131,6 +3136,7 @@ extension AppsProviderInstall on AppsProvider {
           );
         },
         downloadPath,
+        expectedSha256: sourceAssetSha256(app, fileUrl),
         headers: await SourceProvider()
             .getSource(app.url, overrideSource: app.overrideSource)
             .getAssetRequestHeaders(

@@ -132,7 +132,8 @@ class R05OperationJournal {
 
   Future<R05JournalRead> _scan({required bool strict, bool includeHistory = true,
       int? historyLimit, bool Function(R05OperationReceipt)? includeFinished,
-      void Function(R05OperationReceipt)? observe}) async {
+      void Function(R05OperationReceipt)? observe,
+      Future<void> Function(R05OperationReceipt)? visit}) async {
     final root = await _root();
     final receipts = <R05OperationReceipt>[];
     final finished = <R05OperationReceipt>[];
@@ -167,6 +168,17 @@ class R05OperationJournal {
         final item = await _read(entity);
         if (directory.path != root.path && !_terminal(item)) {
           throw const FormatException('Unresolved receipt in historical archive');
+        }
+        if (visit != null) {
+          // Under the exclusive journal guard, an exact counterpart path is
+          // sufficient to detect duplicate identities without an O(n) set.
+          final counterpart = directory.path == root.path ? await _archive(root) : root;
+          if (await FileSystemEntity.type(_file(counterpart, item.id).path, followLinks: false) !=
+              FileSystemEntityType.notFound) {
+            throw const FormatException('Duplicate R05 receipt identity');
+          }
+          await visit(item);
+          continue;
         }
         if (!ids.add(item.id)) throw const FormatException('Duplicate R05 receipt identity');
         observe?.call(item);
@@ -204,6 +216,9 @@ class R05OperationJournal {
     });
     return R05JournalRead(List.unmodifiable(receipts), unreadable);
   }
+
+  Future<void> visitForExport(Future<void> Function(R05OperationReceipt) visit) =>
+    _exclusive(() async { await _scan(strict: true, visit: visit); });
 
   Future<List<R05OperationReceipt>> _readAll() async =>
       (await _scan(strict: true)).receipts;

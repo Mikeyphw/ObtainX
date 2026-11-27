@@ -45,6 +45,29 @@ App _app({
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('provider digest is exact-release and asset scoped', () {
+    final app = _app();
+    final first = List.filled(64, 'a').join();
+    final second = List.filled(64, 'b').join();
+    App bind(String digest, {String? version, List<Map<String, String>>? assets}) =>
+      app.copyWith(additionalSettings: {...app.additionalSettings,
+        sourceAssetDigestsKey: {'sourceUrl': app.url,
+          'overrideSource': app.overrideSource, 'version': version ?? app.latestVersion,
+          'assets': assets ?? [SourceAssetDigest(app.apkUrls.single.key,
+            app.apkUrls.single.value, digest).toJson()]}});
+    final one = InstallReleaseSnapshot.fromApp(bind(first));
+    final two = InstallReleaseSnapshot.fromApp(bind(second));
+    expect(one.expectedSha256, first);
+    expect(downloadReleaseCacheKey(one), isNot(downloadReleaseCacheKey(two)));
+    expect(InstallReleaseSnapshot.fromApp(bind(first, version: 'older')).expectedSha256, isNull);
+    expect(InstallReleaseSnapshot.fromApp(bind(first, assets: [
+      SourceAssetDigest(app.apkUrls.single.key, 'https://example.com/other.apk', first).toJson(),
+    ])).expectedSha256, isNull);
+    expect(() => InstallReleaseSnapshot.fromApp(bind(first, assets: [
+      for (final value in [first, second]) SourceAssetDigest(app.apkUrls.single.key,
+        app.apkUrls.single.value, value).toJson(),
+    ])), throwsFormatException);
+  });
   final provider = _Provider();
   for (final mode in ['auto', 'standard']) {
     for (final (device, latest, relation) in [

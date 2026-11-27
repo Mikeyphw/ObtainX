@@ -3,6 +3,7 @@
 /// Android approvals or confirmed installation evidence.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -24,11 +25,13 @@ class R07OperationIntent {
 
   void validate() {
     final hash = RegExp(r'^[a-f0-9]{64}$');
-    if (!const {'check', 'download', 'install'}.contains(kind) ||
+    final unboundLocal = kind == 'localArchive' && listingKey == 'local-archive' &&
+        packageId == 'unknown' && channel == 'unknown';
+    if (!const {'check', 'download', 'install', 'localArchive'}.contains(kind) ||
         listingKey.isEmpty || listingKey.length > 1000 || packageId.isEmpty ||
         packageId.length > 1000 || RegExp(r'[\x00-\x1f/\\]').hasMatch(listingKey) ||
         RegExp(r'[\x00-\x1f/\\]').hasMatch(packageId) ||
-        !hash.hasMatch(channel) || !hash.hasMatch(release) ||
+        (!unboundLocal && !hash.hasMatch(channel)) || !hash.hasMatch(release) ||
         (parentId != null && !RegExp(r'^[A-Za-z0-9_-]{16,90}$').hasMatch(parentId!))) {
       throw const FormatException('Invalid operation identity');
     }
@@ -74,6 +77,15 @@ class R07TimelineEntry {
   }
 }
 
+class R07EventRetentionPreview {
+  const R07EventRetentionPreview._(this.cutoff, this.listingKey, this.packageId,
+    this.channel, this.entries);
+  final DateTime cutoff;
+  final String? listingKey, packageId, channel;
+  final Map<String, ({int revision, int events, String fingerprint})> entries;
+  int get removableEvents => entries.values.fold(0, (count, item) => count + item.events);
+}
+
 class R07OperationTimeline {
   R07OperationTimeline({this.testingRoot});
   final Directory? testingRoot;
@@ -83,11 +95,11 @@ class R07OperationTimeline {
     final random = Random.secure();
     return 'r07_${List.generate(16, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join()}';
   }
-  static const _terminal = {'checked', 'downloadReady', 'failed', 'cancelled', 'declined', 'installLinked'};
+  static const _terminal = {'checked', 'downloadReady', 'failed', 'cancelled', 'declined', 'installLinked', 'paused'};
   static const _stages = {'queued', 'checking', 'downloading', 'downloaded', 'verifying',
     'extracting', 'downloadReady', 'ready', 'scanning', 'preparingInstall', 'installLinked',
-    'checked', 'unknown', 'failed', 'cancelled', 'declined'};
-  static const _reasons = {'network', 'cancelled', 'interrupted', 'source', 'ownership', 'operation', 'verificationDeclined'};
+    'checked', 'unknown', 'failed', 'cancelled', 'declined', 'paused', 'copying'};
+  static const _reasons = {'network', 'cancelled', 'interrupted', 'source', 'ownership', 'operation', 'verificationDeclined', 'paused'};
 
   Future<T> _use<T>(Future<T> Function(Transaction) action) async {
     final root = await _root();
@@ -104,7 +116,16 @@ class R07OperationTimeline {
           throw const FileSystemException('Unsafe operation timeline');
         }
       }
-      return openDatabase(path, version: 1, singleInstance: false,
+      Future<void> createScopeIndexes(Database db) async {
+        await db.execute('CREATE INDEX IF NOT EXISTS operations_listing_history ON operations(listingKey, finished, updated DESC, id)');
+        await db.execute('CREATE INDEX IF NOT EXISTS operations_package_history ON operations(packageId, finished, updated DESC, id)');
+        await db.execute('CREATE INDEX IF NOT EXISTS operations_channel_history ON operations(channel, finished, updated DESC, id)');
+        await db.execute('CREATE INDEX IF NOT EXISTS operations_parent ON operations(parentId)');
+      }
+      return openDatabase(path, version: 2, singleInstance: false,
+      onUpgrade: (db, oldVersion, _) async {
+        if (oldVersion == 1) await createScopeIndexes(db);
+      },
       onConfigure: (db) async { await db.rawQuery('PRAGMA busy_timeout=0'); },
       onCreate: (db, _) async {
         await db.execute('CREATE TABLE operations (id TEXT PRIMARY KEY, batchId TEXT NOT NULL, '
@@ -116,6 +137,7 @@ class R07OperationTimeline {
         await db.execute('CREATE INDEX operations_batch ON operations(batchId, kind, finished)');
         await db.execute('CREATE TABLE events (operationId TEXT NOT NULL, revision INTEGER NOT NULL, '
           'stage TEXT NOT NULL, updated INTEGER NOT NULL, reason TEXT, PRIMARY KEY(operationId, revision))');
+        await createScopeIndexes(db);
       });
     }, action, exclusive: true);
   }
@@ -148,12 +170,13 @@ class R07OperationTimeline {
 
   static bool _allowedTransition(String before, String after) {
     if (before == 'queued') {
-      return const {'checking', 'downloading', 'preparingInstall', 'cancelled'}.contains(after);
+      return const {'checking', 'downloading', 'preparingInstall', 'cancelled', 'copying'}.contains(after);
     }
     if (const {'failed', 'cancelled', 'unknown'}.contains(after)) return !_terminal.contains(before);
     return switch (before) {
       'checking' => after == 'checked',
-      'downloading' => after == 'downloaded',
+      'copying' => after == 'verifying',
+      'downloading' => after == 'downloaded' || after == 'paused',
       'downloaded' => after == 'verifying',
       'verifying' => const {'verifying', 'extracting', 'ready', 'downloadReady'}.contains(after),
       'extracting' => const {'extracting', 'ready', 'downloadReady'}.contains(after),
@@ -183,10 +206,12 @@ class R07OperationTimeline {
           previous.revision >= 64 || !_allowedTransition(previous.stage, stage) ||
           (resolvedListingKey != null && (previous.resolvedListingKey != null ||
               previous.transferId == null || !const {'verifying', 'extracting'}.contains(previous.stage))) ||
-          (stage == 'installLinked' && attemptId == null)) {
+          (stage == 'installLinked' && attemptId == null) ||
+          (stage == 'copying' && previous.intent.kind != 'localArchive') ||
+          (previous.intent.channel == 'unknown' && stage == 'ready')) {
         throw StateError('Operation changed or has already finished');
       }
-      final owner = previous.stage == 'queued' && const {'checking', 'downloading', 'preparingInstall'}.contains(stage)
+      final owner = previous.stage == 'queued' && const {'checking', 'downloading', 'preparingInstall', 'copying'}.contains(stage)
           ? (await R07ProcessOwner.capture()).encode() : previous.processOwner;
       final update = <String, Object?>{'processOwner': owner, 'stage': stage, 'revision': previous.revision + 1,
         'updated': DateTime.now().toUtc().microsecondsSinceEpoch, 'reason': reason,
@@ -208,7 +233,7 @@ class R07OperationTimeline {
   /// the guard must not overwrite another owner's running receipt.
   Future<T> run<T>(R07TimelineEntry entry, R07OperationIntent expected,
       String startStage, Future<T> Function() action,
-      {required String successStage, String Function(Object)? failureReason}) async {
+      {required String successStage, String Function(Object)? failureReason, String? Function(Object)? failureTransferId}) async {
     final root = await _root();
     return withR07JournalGuard(Directory('${root.path}/r07-operation-timeline'),
       'listing:${expected.kind == 'check' ? 'check' : 'transfer'}:${expected.listingKey}', () async {
@@ -226,10 +251,61 @@ class R07OperationTimeline {
         // an unresolved observation, never a fabricated terminal result.
         try {
           final reason = failureReason?.call(error) ?? 'operation';
-          await advance(entry.id, reason == 'cancelled' ? 'cancelled' : 'failed', reason: reason);
+          await advance(entry.id, reason == 'cancelled' ? 'cancelled' : reason == 'paused' ? 'paused' : 'failed', reason: reason, transferId: failureTransferId?.call(error));
         } catch (_) { /* primary failure remains authoritative */ }
         rethrow;
       }
+    });
+  }
+
+  Future<R07TimelineEntry> beginLocalArchive() async {
+    final id = _id(), batch = _id();
+    final intent = R07OperationIntent(kind: 'localArchive', listingKey: 'local-archive',
+      packageId: 'unknown', channel: 'unknown', release: r07JournalFingerprint('local-archive:$id'));
+    intent.validate();
+    final owner = (await R07ProcessOwner.capture()).encode();
+    return _use((txn) async {
+      final now = DateTime.now().toUtc().microsecondsSinceEpoch;
+      final row = <String, Object?>{'id': id, 'batchId': batch, 'kind': intent.kind,
+        'listingKey': intent.listingKey, 'packageId': intent.packageId, 'channel': intent.channel,
+        'release': intent.release, 'stage': 'copying', 'revision': 1, 'updated': now,
+        'finished': 0, 'processOwner': owner};
+      await txn.insert('operations', row);
+      await txn.insert('events', {'operationId': id, 'revision': 0, 'stage': 'queued', 'updated': now});
+      await txn.insert('events', {'operationId': id, 'revision': 1, 'stage': 'copying', 'updated': now});
+      return R07TimelineEntry.fromRow(row);
+    });
+  }
+
+  Future<R07TimelineEntry> bindLocalArchive(String id, {required String listingKey,
+      required String packageId, required String channel, required String archiveSha256}) async {
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(archiveSha256) ||
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(channel) ||
+        !RegExp(r'^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$').hasMatch(packageId)) {
+      throw const FormatException('Invalid manifest-bound local archive identity');
+    }
+    final bound = R07OperationIntent(kind: 'localArchive', listingKey: listingKey,
+      packageId: packageId, channel: channel,
+      release: r07JournalFingerprint('local-install:$archiveSha256'));
+    bound.validate();
+    return _use((txn) async {
+      final rows = await txn.query('operations', where: 'id = ?', whereArgs: [id]);
+      if (rows.length != 1) throw StateError('Local archive operation missing');
+      final previous = R07TimelineEntry.fromRow(rows.single);
+      if (previous.intent.kind != 'localArchive' || previous.intent.channel != 'unknown' ||
+          previous.finished || previous.revision >= 64 || !const {'verifying', 'extracting'}.contains(previous.stage)) {
+        throw StateError('Local archive has already been bound or settled');
+      }
+      final update = <String, Object?>{'listingKey': bound.listingKey, 'packageId': bound.packageId,
+        'channel': bound.channel, 'release': bound.release, 'stage': 'ready',
+        'revision': previous.revision + 1, 'updated': DateTime.now().toUtc().microsecondsSinceEpoch};
+      if (await txn.update('operations', update, where: 'id = ? AND revision = ?',
+          whereArgs: [id, previous.revision]) != 1) {
+        throw StateError('Local archive identity changed');
+      }
+      await txn.insert('events', {'operationId': id, 'revision': update['revision'],
+        'stage': 'ready', 'updated': update['updated']});
+      return R07TimelineEntry.fromRow({...rows.single, ...update});
     });
   }
 
@@ -243,7 +319,7 @@ class R07OperationTimeline {
     if (id == null) { return; }
     try {
       final current = await read(id);
-      if (!current.finished && current.intent.kind == 'install' && current.stage != 'unknown') {
+      if (!current.finished && const {'install', 'localArchive'}.contains(current.intent.kind) && current.stage != 'unknown') {
         await advance(id, stage, expectedStage: current.stage,
           reason: stage == 'cancelled' ? 'cancelled' : stage == 'unknown' ? 'ownership' : 'operation');
       }
@@ -254,7 +330,7 @@ class R07OperationTimeline {
     if (id == null) return;
     final current = await read(id);
     if (current.finished) return; // Never replace the linked R05 outcome.
-    if (current.intent.kind != 'install') return;
+    if (!const {'install', 'localArchive'}.contains(current.intent.kind)) return;
     if (current.stage == stage) return;
     await advance(id, stage, expectedStage: current.stage,
       reason: stage == 'declined' ? 'verificationDeclined' : stage == 'cancelled' ? 'cancelled' : null);
@@ -276,7 +352,7 @@ class R07OperationTimeline {
     if (current.intent.channel != channel || current.intent.release != release ||
         (current.resolvedListingKey ?? current.intent.listingKey) != listingKey ||
         (current.resolvedPackageId ?? current.intent.packageId) != packageId ||
-        current.intent.kind != 'install' ||
+        !const {'install', 'localArchive'}.contains(current.intent.kind) ||
         !const {'ready', 'scanning', 'preparingInstall'}.contains(current.stage)) {
       throw StateError('Timeline listing/release does not match install receipt');
     }
@@ -314,7 +390,7 @@ class R07OperationTimeline {
     final channelRows = await txn.query('operations', distinct: true, columns: ['channel'],
       where: scope.isEmpty ? null : scope.join(' AND '), whereArgs: scope.isEmpty ? null : args);
     final channels = channelRows.map((row) => row['channel']).whereType<String>()
-        .where((value) => RegExp(r'^[a-f0-9]{64}$').hasMatch(value)).toSet();
+        .where((value) => value == 'unknown' || RegExp(r'^[a-f0-9]{64}$').hasMatch(value)).toSet();
     if (channel != 'all') { scope.add('channel = ?'); args.add(channel); }
     final activeConditions = [...scope, 'finished = 0', if (filter == 'review') "stage IN ('queued','unknown')"];
     final historyConditions = [...scope, 'finished = 1', if (filter == 'review') "stage = 'failed'"];
@@ -342,6 +418,89 @@ class R07OperationTimeline {
     return (rows: rows, unreadableCount: unreadableCount, channels: channels, batches: batches);
   });
 
+  Future<void> visitForExport(Future<void> Function(R07TimelineEntry) visit, {
+      String? packageId, String? listingKey, String? operationId,
+      String channel = 'all', String filter = 'all'}) => _use((txn) async {
+    final conditions = <String>[], args = <Object?>[];
+    if (packageId != null) { conditions.add('packageId = ?'); args.add(packageId); }
+    if (listingKey != null) { conditions.add('listingKey = ?'); args.add(listingKey); }
+    if (operationId != null) { conditions.add('id = ?'); args.add(operationId); }
+    if (channel != 'all') { conditions.add('channel = ?'); args.add(channel); }
+    if (filter == 'done') conditions.add('finished = 1');
+    if (filter == 'review') conditions.add("stage IN ('queued', 'unknown', 'failed')");
+    var after = '';
+    while (true) {
+      final page = await txn.query('operations', where: [...conditions, 'id > ?'].join(' AND '),
+        whereArgs: [...args, after], orderBy: 'id', limit: 100);
+      if (page.isEmpty) break;
+      for (final row in page) {
+        final record = R07TimelineEntry.fromRow(row);
+        await visit(record);
+        after = record.id;
+      }
+    }
+  });
+
+  // Compact only unlinked, terminal, known-channel, childless operations.
+  // Retain the complete summary, first event and final event. Never delete
+  // recovery bytes, unknown/paused operations or linked attempts/transfers.
+  // Bounded review batches avoid an unbounded in-memory deletion manifest.
+  Future<R07EventRetentionPreview> _previewEvents(Transaction txn, DateTime cutoff,
+      String? listingKey, String? packageId, String? channel) async {
+    final where = <String>["o.finished = 1", "o.stage IN ('checked','downloadReady','failed','cancelled','declined')",
+      "o.channel != 'unknown'", 'o.parentId IS NULL', 'o.transferId IS NULL', 'o.attemptId IS NULL',
+      'o.updated < ?', 'o.revision > 1',
+      'NOT EXISTS (SELECT 1 FROM operations child WHERE child.parentId = o.id)',
+      'EXISTS (SELECT 1 FROM events middle WHERE middle.operationId = o.id AND middle.revision > 0 AND middle.revision < o.revision)'];
+    final args = <Object?>[cutoff.toUtc().microsecondsSinceEpoch];
+    if (listingKey != null) { where.add('o.listingKey = ?'); args.add(listingKey); }
+    if (packageId != null) { where.add('o.packageId = ?'); args.add(packageId); }
+    if (channel != null) { where.add('o.channel = ?'); args.add(channel); }
+    final rows = await txn.rawQuery('SELECT o.*, (SELECT COUNT(*) FROM events e WHERE e.operationId = o.id '
+      'AND e.revision > 0 AND e.revision < o.revision) AS removable FROM operations o '
+      'WHERE ${where.join(' AND ')} ORDER BY o.updated, o.id LIMIT 256', args);
+    final entries = <String, ({int revision, int events, String fingerprint})>{};
+    for (final row in rows) {
+      final operation = R07TimelineEntry.fromRow(row);
+      if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(operation.intent.channel)) {
+        throw const FormatException('Invalid timeline retention channel');
+      }
+      final events = await txn.query('events', where: 'operationId = ?',
+        whereArgs: [operation.id], orderBy: 'revision', limit: 66);
+      if (events.length != operation.revision + 1 || events.first['stage'] != 'queued' ||
+          events.last['stage'] != operation.stage || events.last['updated'] != row['updated'] ||
+          events.indexed.any((pair) => pair.$2['revision'] != pair.$1 ||
+            !_stages.contains(pair.$2['stage']) || pair.$2['updated'] is! int ||
+            (pair.$2['reason'] != null && !_reasons.contains(pair.$2['reason'])))) {
+        throw const FormatException('Timeline retention endpoint mismatch');
+      }
+      entries[operation.id] = (revision: operation.revision, events: row['removable'] as int,
+        fingerprint: r07JournalFingerprint(jsonEncode([row, events])));
+    }
+    return R07EventRetentionPreview._(cutoff.toUtc(), listingKey, packageId, channel, Map.unmodifiable(entries));
+  }
+
+  Future<R07EventRetentionPreview> previewTerminalEvents(DateTime cutoff, {
+      String? listingKey, String? packageId, String? channel}) => _use((txn) =>
+    _previewEvents(txn, cutoff, listingKey, packageId, channel));
+
+  Future<int> compactTerminalEvents(R07EventRetentionPreview preview) => _use((txn) async {
+    final current = await _previewEvents(txn, preview.cutoff, preview.listingKey,
+      preview.packageId, preview.channel);
+    if (current.entries.length != preview.entries.length || current.entries.entries.any(
+        (entry) => preview.entries[entry.key] != entry.value)) {
+      throw StateError('Timeline retention changed; review again');
+    }
+    var removed = 0;
+    for (final entry in current.entries.entries) {
+      final count = await txn.delete('events', where: 'operationId = ? AND revision > 0 AND revision < ?',
+        whereArgs: [entry.key, entry.value.revision]);
+      if (count != entry.value.events) throw StateError('Timeline retention changed');
+      removed += count;
+    }
+    return removed;
+  });
+
   Future<List<Map<String, Object?>>> events(String id) => _use((db) =>
     db.query('events', where: 'operationId = ?', whereArgs: [id], orderBy: 'revision'));
 
@@ -357,10 +516,10 @@ class R07OperationTimeline {
   Future<void> recoverInterrupted() async {
     final root = await _root();
     for (final entry in await readActivity(historyLimit: 0)) {
-      final transferStage = const {'checking', 'downloading', 'downloaded', 'verifying', 'extracting'}.contains(entry.stage);
+      final transferStage = const {'checking', 'downloading', 'downloaded', 'verifying', 'extracting', 'copying'}.contains(entry.stage);
       final preparationStage = const {'ready', 'scanning', 'preparingInstall'}.contains(entry.stage);
       if (!transferStage && !preparationStage) { continue; }
-      if (preparationStage && (entry.processOwner == null ||
+      if ((preparationStage || entry.intent.kind == 'localArchive') && (entry.processOwner == null ||
           await R07ProcessOwner.decode(entry.processOwner!).inspect() != R07ProcessState.dead)) {
         continue;
       }

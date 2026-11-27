@@ -1,7 +1,7 @@
 {
   "schema": "obtainx.r10.locale-review.v1",
   "fallback": "en",
-  "english_leaf_keys": 1110,
+  "english_leaf_keys": 1115,
   "new_labels": [
     "filtered",
     "gap01AttestationAbsent",
@@ -33,6 +33,8 @@
     "r07Download",
     "r07DownloadEvidence",
     "r07Empty",
+    "r07EventRetentionPreview",
+    "r07EventRetentionResult",
     "r07ExactMissing",
     "r07Files",
     "r07Finished",
@@ -43,10 +45,12 @@
     "r07Kind",
     "r07Listing",
     "r07LiveEvidence",
+    "r07LocalArchive",
     "r07Open",
     "r07Operation",
     "r07PackageActivity",
     "r07Parent",
+    "r07Pause",
     "r07PreparingQueue",
     "r07QueueConsent",
     "r07QueueFailed",
@@ -84,6 +88,7 @@
     "r07Stage_completed",
     "r07Stage_confirmed",
     "r07Stage_confirming",
+    "r07Stage_copying",
     "r07Stage_declined",
     "r07Stage_downloadReady",
     "r07Stage_downloaded",
@@ -200,7 +205,7 @@
   ],
   "locales": {
     "fr": {
-      "leaf_keys": 1113,
+      "leaf_keys": 1118,
       "missing": [],
       "extra": [
         "aboutLetMeDowngradeUrl",
@@ -211,7 +216,7 @@
       "blank": []
     },
     "tr": {
-      "leaf_keys": 1113,
+      "leaf_keys": 1118,
       "missing": [],
       "extra": [
         "aboutLetMeDowngradeUrl",
@@ -222,7 +227,7 @@
       "blank": []
     },
     "ja": {
-      "leaf_keys": 1113,
+      "leaf_keys": 1118,
       "missing": [],
       "extra": [
         "aboutLetMeDowngradeUrl",
@@ -233,7 +238,7 @@
       "blank": []
     },
     "pt": {
-      "leaf_keys": 1115,
+      "leaf_keys": 1120,
       "missing": [],
       "extra": [
         "aboutLetMeDowngradeUrl",
@@ -246,7 +251,7 @@
       "blank": []
     },
     "pt-BR": {
-      "leaf_keys": 1115,
+      "leaf_keys": 1120,
       "missing": [],
       "extra": [
         "aboutLetMeDowngradeUrl",

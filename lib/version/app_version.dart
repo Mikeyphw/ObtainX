@@ -200,6 +200,7 @@ App appWithNoMatchingRelease(App app, DateTime checkedAt) {
     latestMalwareScanReportUrl: null,
     additionalSettings: Map<String, dynamic>.from(app.additionalSettings)
       ..remove(sourceVersionCodesKey)
+      ..remove(sourceAssetDigestsKey)
       ..remove(sourceBuildComparisonKey)
       ..[noMatchingReleaseKey] = true,
   );
@@ -333,6 +334,7 @@ class InstallReleaseSnapshot {
   final String? versionName;
   final int? versionCode;
   final String versionSettings;
+  final String? expectedSha256;
 
   const InstallReleaseSnapshot({
     required this.appId,
@@ -344,6 +346,7 @@ class InstallReleaseSnapshot {
     this.versionName,
     this.versionCode,
     required this.versionSettings,
+    this.expectedSha256,
   });
 
   factory InstallReleaseSnapshot.fromApp(App app) {
@@ -359,6 +362,7 @@ class InstallReleaseSnapshot {
       assetName: asset?.key ?? '',
       assetUrl: asset?.value ?? '',
       versionSettings: _versionSettingsIdentity(app),
+      expectedSha256: asset == null ? null : sourceAssetSha256(app, asset),
     );
   }
 
@@ -373,6 +377,7 @@ class InstallReleaseSnapshot {
       versionName: info.versionName,
       versionCode: info.versionCode,
       versionSettings: versionSettings,
+      expectedSha256: expectedSha256,
     );
   }
 
@@ -409,6 +414,7 @@ class InstallReleaseSnapshot {
       'versionName': versionName,
       'versionCode': versionCode,
       'versionSettings': versionSettings,
+      if (expectedSha256 != null) 'expectedSha256': expectedSha256,
     };
   }
 
@@ -420,6 +426,7 @@ class InstallReleaseSnapshot {
         value['assetName'] is! String ||
         value['assetUrl'] is! String ||
         value['versionSettings'] is! String ||
+        (value['expectedSha256'] != null && SourceAssetDigest.normalize(value['expectedSha256']) == null) ||
         (value['overrideSource'] != null &&
             value['overrideSource'] is! String) ||
         (value['versionName'] != null && value['versionName'] is! String)) {
@@ -435,6 +442,7 @@ class InstallReleaseSnapshot {
       versionName: value['versionName'] as String?,
       versionCode: int.tryParse(value['versionCode']?.toString() ?? ''),
       versionSettings: value['versionSettings'],
+      expectedSha256: SourceAssetDigest.normalize(value['expectedSha256']),
     );
   }
 }
@@ -451,6 +459,7 @@ String downloadReleaseCacheKey(InstallReleaseSnapshot release) {
             release.assetName,
             release.assetUrl,
             release.versionSettings,
+            if (release.expectedSha256 != null) release.expectedSha256,
           ]),
         ),
       )
@@ -509,12 +518,15 @@ App normalizeSelectedSourceVersion(App app) {
       app.latestVersion == code.toString()) {
     return app;
   }
-  return app.copyWith(
-    latestVersion: code.toString(),
-    additionalSettings: Map<String, dynamic>.from(app.additionalSettings)
-      ..[sourceVersionCodesKey] = (Map<String, dynamic>.from(metadata)
-        ..['version'] = code.toString()),
-  );
+  final digestMetadata = app.additionalSettings[sourceAssetDigestsKey];
+  final settings = Map<String, dynamic>.from(app.additionalSettings)
+    ..[sourceVersionCodesKey] = (Map<String, dynamic>.from(metadata)..['version'] = code.toString())
+    ..remove(sourceAssetDigestsKey);
+  if (digestMetadata is Map && digestMetadata['version'] == app.latestVersion &&
+      digestMetadata['sourceUrl'] == app.url && digestMetadata['overrideSource'] == app.overrideSource) {
+    settings[sourceAssetDigestsKey] = (Map<String, dynamic>.from(digestMetadata)..['version'] = code.toString());
+  }
+  return app.copyWith(latestVersion: code.toString(), additionalSettings: settings);
 }
 
 /// One decision for labels, filters, skips, notifications, and automatic updates.

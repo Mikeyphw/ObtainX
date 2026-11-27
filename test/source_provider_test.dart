@@ -342,7 +342,7 @@ class _StubGitHub extends GitHub {
                 'url':
                     'https://api.github.com/repos/example/app/releases/assets/2',
                 'size': 124,
-                'digest': 'sha256:preview123',
+                'digest': 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
               },
             ],
           },

@@ -2,8 +2,8 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:obtainium/services/r11_history.dart';
@@ -153,7 +153,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
         provider.apps[entry.listingKey]!.installedInfo?.packageName == entry.packageId;
     final actions = r07AllowedActions(entry, listingMatches: matching,
         liveDownload: live, cancellableInstall: prep,
-        independentlyInstalled: installed);
+        independentlyInstalled: installed,
+        pauseAvailable: entry.kind == 'live' && live && provider.canPauseDownload(entry.listingKey!));
     if (matching && provider.apps[entry.listingKey]!.app.settings.getBool('trackOnly') &&
         (entry.download != null || entry.timeline?.intent.kind == 'download' ||
             entry.timeline?.intent.kind == 'install')) {
@@ -198,6 +199,7 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     'check' => tr('r07CheckingSources'),
     'download' => tr('r07Download'),
     'install' => tr('r07Installation'),
+    'localArchive' => tr('r07LocalArchive'),
     _ => tr('r07CurrentOperation'),
   };
 
@@ -422,6 +424,7 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
         R07ActivityAction.review => tr('r07Review'),
         R07ActivityAction.resume => tr('r07Resume'),
         R07ActivityAction.retry => tr('retry'),
+        R07ActivityAction.pause => tr('r07Pause'),
         R07ActivityAction.cancel => tr('cancel'),
         R07ActivityAction.open => tr('r07Open'),
         R07ActivityAction.details => tr('details'),
@@ -441,6 +444,11 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
               break;
             case R07ActivityAction.retry:
               await _retry(entry, provider);
+              break;
+            case R07ActivityAction.pause:
+              if (provider.pauseDownload(entry.listingKey!)) {
+                await _refresh();
+              }
               break;
             case R07ActivityAction.cancel:
               await _cancel(entry, provider);
@@ -503,17 +511,21 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      final records = await _catalog.load(trackedPackages: {
-        for (final listing in provider.apps.values) listing.listingKey: listing.app.id,
-      }, packageId: widget.packageId, listingKey: widget.listingKey,
-        operationId: widget.operationId, channel: channel, filter: _filter);
-      if (records.any((entry) => entry.kind == 'integrity')) {
-        throw StateError('History export scope could not be read completely');
+      final cache = await getTemporaryDirectory();
+      final stage = await cache.createTemp('obtainx-history-');
+      try {
+        final file = await writeR11PublicHistory(File('${stage.path}/obtainx-history.json'),
+          (visit) => _catalog.visitForExport(visit, trackedPackages: {
+            for (final listing in provider.apps.values) listing.listingKey: listing.app.id,
+          }, packageId: widget.packageId, listingKey: widget.listingKey,
+            operationId: widget.operationId, channel: channel, filter: _filter),
+          checkCancellation: () { if (!mounted) throw StateError('History export interrupted'); });
+        if (!mounted) return;
+        await SharePlus.instance.share(ShareParams(files: [XFile(file.path, mimeType: 'application/json')],
+          fileNameOverrides: ['obtainx-history.json']));
+      } finally {
+        if (await stage.exists()) await stage.delete(recursive: true);
       }
-      final data = Uint8List.fromList(utf8.encode(jsonEncode(r11PublicHistory(records))));
-      await SharePlus.instance.share(ShareParams(files: [
-        XFile.fromData(data, mimeType: 'application/json'),
-      ], fileNameOverrides: ['obtainx-history.json']));
     } catch (_) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('r11HistoryFailed'))));
     } finally {
@@ -544,6 +556,8 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
       final transfers = R03DownloadHistory(cache: provider.apkDir);
       final downloadPreview = await transfers.previewTerminalBefore(cutoff,
         listingKey: widget.listingKey, packageId: widget.packageId, channel: channel);
+      final eventPreview = await R07OperationTimeline.instance.previewTerminalEvents(cutoff,
+        listingKey: widget.listingKey, packageId: widget.packageId, channel: channel);
       if (!mounted) return;
       final approved = await showDialog<bool>(context: context, builder: (dialog) => AlertDialog(
         title: Text(tr('r11RetentionConfirm')),
@@ -551,16 +565,19 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
           '${tr('package')}: ${widget.packageId ?? tr('r11AllChannels')}\n'
           '${tr('r07Listing')}: ${widget.listingKey ?? tr('r11AllChannels')}\n'
           '${channel == null ? tr('r11AllChannels') : channel == 'unknown' ? tr('r11UnknownChannel') : channel}\n'
-          '${tr('r11RetentionPreview', args: ['${preview.entries.length}', '${downloadPreview.entries.length}'])}'),
+          '${tr('r11RetentionPreview', args: ['${preview.entries.length}', '${downloadPreview.entries.length}'])}\n'
+          '${tr('r07EventRetentionPreview', args: ['${eventPreview.removableEvents}'])}'),
         actions: [TextButton(onPressed: () => Navigator.pop(dialog, false), child: Text(tr('cancel'))),
-          FilledButton(onPressed: preview.entries.isEmpty && downloadPreview.entries.isEmpty ? null : () => Navigator.pop(dialog, true), child: Text(tr('delete')))],
+          FilledButton(onPressed: preview.entries.isEmpty && downloadPreview.entries.isEmpty && eventPreview.entries.isEmpty ? null : () => Navigator.pop(dialog, true), child: Text(tr('delete')))],
       ));
       if (!mounted || approved != true) return;
       var count = 0;
+      var compacted = 0;
       try {
         count = await R05OperationJournal.instance.pruneTerminalBefore(cutoff,
           listingKey: widget.listingKey, packageId: widget.packageId, channel: channel, preview: preview);
         count += await transfers.prune(downloadPreview);
+        compacted = await R07OperationTimeline.instance.compactTerminalEvents(eventPreview);
       } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -568,7 +585,7 @@ class _R07ActivityCenterPageState extends State<R07ActivityCenterPage>
         }
         return;
       }
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('r11RetentionResult', args: ['$count']))));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('r11RetentionResult', args: ['$count'])}\n${tr('r07EventRetentionResult', args: ['$compacted'])}')));
     } catch (_) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('r11HistoryFailed'))));
     } finally {

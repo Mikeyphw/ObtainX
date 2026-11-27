@@ -289,6 +289,54 @@ String? encodeRawAssistLines(Iterable<String> lines) {
   return out.join('\n');
 }
 
+/// Provider-advertised byte identity, not a signature or attestation.
+/// Bind both the exact asset name and exact URL; a reused name is not identity.
+const sourceAssetDigestsKey = 'sourceAssetDigests';
+
+class SourceAssetDigest {
+  const SourceAssetDigest(this.name, this.url, this.sha256);
+  final String name, url, sha256;
+
+  static String? normalize(Object? raw, {bool prefixed = false}) {
+    if (raw is! String) return null;
+    final value = raw.trim();
+    final digest = prefixed
+        ? (value.startsWith('sha256:') ? value.substring(7) : '')
+        : value;
+    return RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(digest)
+        ? digest.toLowerCase() : null;
+  }
+
+  Map<String, String> toJson() => {'name': name, 'url': url, 'sha256': sha256};
+}
+
+/// Fail closed for ambiguous/malformed evidence of the selected asset. Missing
+/// evidence for a source which does not advertise digests is not an error.
+String? sourceAssetSha256(App app, MapEntry<String, String> asset) {
+  final metadata = app.additionalSettings[sourceAssetDigestsKey];
+  if (metadata is! Map || metadata['sourceUrl'] != app.url ||
+      metadata['overrideSource'] != app.overrideSource ||
+      metadata['version'] != app.latestVersion) {
+    return null;
+  }
+  final rows = metadata['assets'];
+  if (rows is! List || rows.length > 4096) {
+    throw const FormatException('Invalid source digest inventory');
+  }
+  String? digest;
+  for (final row in rows) {
+    if (row is! Map || row['name'] != asset.key || row['url'] != asset.value) {
+      continue;
+    }
+    final value = SourceAssetDigest.normalize(row['sha256']);
+    if (value == null || (digest != null && digest != value)) {
+      throw const FormatException('Conflicting source digest for selected asset');
+    }
+    digest = value;
+  }
+  return digest;
+}
+
 class APKDetails {
   String version;
 
@@ -302,6 +350,7 @@ class APKDetails {
   final DateTime? releaseDate;
   String? changeLog;
   final List<MapEntry<String, String>> allAssetUrls;
+  final List<SourceAssetDigest> assetDigests;
 
   /// Optional absolute URL to a raster app icon from the source (for non-installed apps).
   String? iconUrl;
@@ -325,6 +374,7 @@ class APKDetails {
     this.releaseDate,
     this.changeLog,
     this.allAssetUrls = const [],
+    this.assetDigests = const [],
     this.iconUrl,
     this.rawReleaseTitleCandidates = const [],
     this.releaseTitle,
@@ -2064,6 +2114,28 @@ class SourceProvider {
             if (codesByAsset.containsKey(asset.key))
               asset.key: codesByAsset[asset.key],
         },
+      };
+    }
+    // Never carry a previous answer's digest across checks, even for an
+    // identical version label. Other downloadable assets retain their own
+    // identity, independently of the preferred APK filter.
+    additionalSettings.remove(sourceAssetDigestsKey);
+    if (apk.assetDigests.length > 4096) {
+      throw const FormatException('Source digest inventory exceeds limit');
+    }
+    final digestAssets = {...apk.apkUrls.map((asset) => (asset.key, asset.value)),
+      ...apk.allAssetUrls.map((asset) => (asset.key, asset.value))};
+    final digests = apk.assetDigests.where((digest) => digestAssets.contains((digest.name, digest.url))).toList();
+    if (digests.length > 4096) {
+      throw const FormatException('Source digest inventory exceeds limit');
+    }
+    if (digests.isNotEmpty) {
+      additionalSettings[sourceAssetDigestsKey] = {
+        'sourceUrl': standardUrl,
+        'overrideSource': sourceIsOverriden
+            ? source.sourceIdentifier : currentApp?.overrideSource,
+        'version': apk.version,
+        'assets': digests.map((entry) => entry.toJson()).toList(),
       };
     }
     // Replace the stored name with the source's readable name when the stored

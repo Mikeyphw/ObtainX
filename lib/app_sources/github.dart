@@ -1182,6 +1182,7 @@ class GitHub extends AppSource {
       final targetRelease = releases[i];
       targetRelease['apkUrls'] = filteredApkUrls;
       targetRelease['filteredAssets'] = filteredApks;
+      targetRelease['digestAssets'] = allAssetsWithUrls;
       // Resolve the version string per the selected version-string source.
       // Asset-name + release-title are resolvable synchronously here; the
       // commit-SHA source needs an async API lookup + standardUrl, so it is
@@ -1432,10 +1433,26 @@ class GitHub extends AppSource {
         }
       }
 
+      final assetDigests = <SourceAssetDigest>[];
+      final digestInventory = targetRelease['digestAssets'] as List<dynamic>? ?? [];
+      if (digestInventory.length > 4096) {
+        throw const FormatException('Source digest inventory exceeds limit');
+      }
+      for (final raw in digestInventory) {
+        final asset = raw['final_url'] as MapEntry<String, String>;
+        final digest = SourceAssetDigest.normalize(raw['digest'], prefixed: true);
+        if (raw['digest'] != null && digest == null) {
+          throw const FormatException('Invalid release asset SHA-256');
+        }
+        if (digest != null && asset.key.isNotEmpty && asset.value.isNotEmpty) {
+          assetDigests.add(SourceAssetDigest(asset.key, asset.value, digest));
+        }
+      }
       return APKDetails(
         version,
         apkUrls,
         getAppNames(standardUrl),
+        assetDigests: assetDigests,
         releaseDate: releaseDate,
         changeLog: changeLog.isEmpty ? null : changeLog,
         allAssetUrls:
@@ -1580,7 +1597,8 @@ class GitHub extends AppSource {
     // GitHub's completed/successful run is not enough to trust the bytes.
     // Require an actual ZIP digest before making this Actions candidate
     // installable. The final downloaded file is independently rehashed.
-    if (archive.archiveSha256 == null) {
+    final archiveDigest = archive.archiveSha256;
+    if (archiveDigest == null) {
       throw const R04ActionsFailure(
         'GitHub Actions archive has no SHA-256 digest; cannot verify download',
       );
@@ -1618,6 +1636,7 @@ class GitHub extends AppSource {
       releaseDate: selection.runDate,
       changeLog: evidence.join('\n'),
       allAssetUrls: [candidate],
+      assetDigests: [SourceAssetDigest(candidate.key, candidate.value, archiveDigest)],
       rawReleaseTitleCandidates: [selection.workflowName],
       releaseTitle: 'Actions run ${archive.runId}',
       apkSizeBytes: archive.sizeBytes,

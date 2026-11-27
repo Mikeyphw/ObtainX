@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:archive/archive_io.dart' as archive;
 import 'package:crypto/crypto.dart';
+import 'package:obtainium/services/artifact_resource_budget.dart';
 
 /// Explicit extraction budget. Applies to both ZIPs and TAR-based artifacts.
 ///
@@ -21,6 +22,7 @@ class ArchiveExtractionLimits {
     this.maxPathLength = 1024,
     this.maxMetadataBytes = 8 * 1024 * 1024,
     this.maxWallTime = const Duration(minutes: 5),
+    this.maxRssGrowthBytes = 192 * 1024 * 1024,
   });
 
   final int maxArchiveBytes;
@@ -31,14 +33,17 @@ class ArchiveExtractionLimits {
   final int maxPathLength;
   final int maxMetadataBytes;
   final Duration maxWallTime;
+  final int maxRssGrowthBytes;
 
   void validate() {
-    if (maxArchiveBytes <= 0 || maxExpandedBytes <= 0 ||
+    if (maxArchiveBytes <= 0 || maxArchiveBytes > 1024 * 1024 * 1024 ||
+        maxExpandedBytes <= 0 || maxExpandedBytes > 1536 * 1024 * 1024 ||
+        maxRssGrowthBytes <= 0 || maxRssGrowthBytes > 192 * 1024 * 1024 ||
         maxEntryBytes <= 0 || maxEntries <= 0 ||
         maxEntries > 4096 || maxDepth <= 0 || maxDepth > 20 ||
         maxPathLength <= 0 || maxPathLength > 1024 || maxMetadataBytes <= 0 ||
         maxMetadataBytes > 16 * 1024 * 1024 ||
-        maxWallTime <= Duration.zero ||
+        maxWallTime <= Duration.zero || maxWallTime > const Duration(minutes: 5) ||
         maxEntryBytes > maxExpandedBytes) {
       throw const FormatException('Invalid archive extraction limits');
     }
@@ -101,6 +106,27 @@ Future<void> _runExtraction(String path, String destination, {
     throw const FormatException('Extraction destination parent does not exist');
   }
   _reclaimOrphanExtractionStages(parent);
+  // ZIP preflight can admit small archives without reserving the entire
+  // global expansion ceiling. The worker independently validates staged bytes.
+  final source = File(path);
+  if (FileSystemEntity.typeSync(path, followLinks: false) != FileSystemEntityType.file ||
+      source.lengthSync() <= 0 || source.lengthSync() > limits.maxArchiveBytes) {
+    throw const FormatException('Invalid archive source or size');
+  }
+  final int expanded;
+  if (tarball) {
+    // A compressed TAR may transiently hold both the decoded TAR and members.
+    expanded = 2 * limits.maxExpandedBytes;
+  } else {
+    expanded = await Isolate.run(() {
+      final inventory = File(path).openSync();
+      try {
+        return _readZipInventory(inventory, limits).fold<int>(0, (n, e) => n + e.expanded);
+      } finally { inventory.closeSync(); }
+    }, debugName: 'archive-capacity');
+  }
+  await ensureArtifactStorageCapacity(parent.path, source.lengthSync() + expanded);
+  checkCancellation?.call();
   final work = parent.createTempSync('.obtainx-extract-$pid-');
   RandomAccessFile? ownership;
   try {
@@ -122,8 +148,12 @@ Future<void> _runExtraction(String path, String destination, {
   Isolate? worker;
   Timer? watchdog;
   final elapsed = Stopwatch()..start();
+  final initialRss = ProcessInfo.currentRss;
   void check() {
     checkCancellation?.call();
+    if (ProcessInfo.currentRss - initialRss > limits.maxRssGrowthBytes) {
+      throw const FormatException('Archive process memory growth budget exceeded');
+    }
     if (elapsed.elapsed >= limits.maxWallTime) {
       throw TimeoutException('Archive extraction deadline exceeded');
     }

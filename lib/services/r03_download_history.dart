@@ -120,6 +120,7 @@ class R03DownloadHistory {
   Future<int> archiveTerminalWithoutBytes() async {
     final root = await _root();
     if (!await root.exists()) return 0;
+    return withR07JournalGuard(root, 'retention-review', () async {
     final archive = archiveOf(root);
     await verifyDirectory(archive);
     var moved = 0;
@@ -154,7 +155,38 @@ class R03DownloadHistory {
       }
     }
     return moved;
+    });
   }
+
+  static Future<void> visitForExport(Directory root,
+      Future<void> Function(R03DownloadRecord, String, bool, DateTime) visit) =>
+    withR07JournalGuard(root, 'retention-review', () async {
+      for (final archived in [false, true]) {
+        final directory = archived ? archiveOf(root) : root;
+        await verifyDirectory(directory);
+        if (!await directory.exists()) continue;
+        await for (final entity in directory.list(followLinks: false)) {
+          final name = entity.uri.pathSegments.last;
+          if (!archived && name.endsWith('.json.tmp') &&
+              _receiptName.hasMatch(name.substring(0, name.length - 4)) &&
+              await FileSystemEntity.type(entity.path, followLinks: false) == FileSystemEntityType.file) {
+            continue;
+          }
+          if (entity is! File || !(archived ? archivedName : _receiptName).hasMatch(name)) {
+            throw const FormatException('Unknown transfer history entry');
+          }
+          final before = await entity.stat();
+          final record = await readRecord(entity, archived: archived);
+          final after = await entity.stat();
+          if (before.modified != after.modified || before.size != after.size ||
+              (archived && !const {R03Stage.ready, R03Stage.completed, R03Stage.failed,
+                R03Stage.cancelled}.contains(record.stage))) {
+            throw const FormatException('Transfer history changed during export');
+          }
+          await visit(record, name, archived, after.modified.toUtc());
+        }
+      }
+    });
 
   Future<int> prune(R03RetentionPreview preview) async {
     final root = await _root();

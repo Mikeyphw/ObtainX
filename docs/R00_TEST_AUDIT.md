@@ -91,3 +91,7 @@ This inventory reflects the source code before R00 changes. The bootstrap has no
 - `test/version_suffix_test.dart`
 
 **Contract rule:** When implementing later phases, audit every existing test against the current source and workflows. Update or delete obsolete assertions and golden fixtures as part of the same change. Do not preserve stale contracts simply for backward compatibility.
+
+## FINAL-AUDIT-04 historical reconciliation
+
+The original fork SHA has no returned Actions runs in the 2026-11-27 inventory. The baseline remains NOT QUALIFIED. The current package-name lookup regression uses the production native device_apps channel rather than the Android-only fallback, with real Android assertions in RT02. See FINAL_AUDIT_04_ACCEPTANCE.md; subsequent cumulative success does not prove the original baseline.

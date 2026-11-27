@@ -82,3 +82,7 @@ The label removal itself triggers new full workflows. Check exact SHA and all re
 ## Performance claims
 
 The runtime savings from development-only runs are structural (heavy jobs are omitted) and can be verified by job lists. No warm-cache speedup is claimed. Three-minute artifact timeouts cap the upload step cost but do not cure upload service failures. Compare cold/warm builds, caches and actual CI results before claiming additional gains.
+
+## OPT09 — review-state deduplication and merged-tree evidence
+
+Supersedes any historical draft-dependent routing above: normal drafts and ready PRs use full qualification. `ci:development-only` is the only scoped PR mode; label changes still trigger reevaluation, and unrelated labels conservatively trigger as well. Draft/ready events no longer start workflows. Manual dispatch remains fresh. After merge the main source job is fresh; release admission can independently verify the same tracked tree and reuse actual successful full PR proofs for the other five lanes. No fake skips or changed-tree reuse. See FINAL_AUDIT_04_ACCEPTANCE.md.

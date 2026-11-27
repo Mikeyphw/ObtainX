@@ -85,7 +85,7 @@ def parse_workflow(text, filename, *, require_repair_gate=True):
             if key in pr:
                 require(isinstance(pr[key], list) and all(isinstance(x,str) for x in pr[key]), f'{filename}: invalid {key} filter')
     require(isinstance(pr, dict) and not ({'paths','paths-ignore','branches','branches-ignore'} & set(pr)), f'{filename}: unconditional PR event routing required')
-    require({'opened','reopened','synchronize','labeled','unlabeled','ready_for_review','converted_to_draft'} <= set(pr.get('types',[])), f'{filename}: incomplete mode-change events')
+    require(set(pr.get('types',[])) == {'opened','reopened','synchronize','labeled','unlabeled'} and len(pr.get('types',[])) == 5, f'{filename}: unexpected readiness/draft or missing source/scope event')
     jobs = doc.get('jobs')
     require(isinstance(jobs, dict) and bool(jobs), f'{filename}: jobs missing')
     actual = {}

@@ -366,46 +366,223 @@ def compare_builds(a, b, ident):
     return a['apks']
 
 
-def hosted_ci(head, fetch=None):
+CI_SCHEMA = 'obtainx.r12.hosted-ci.v2'
+CI_EXACT = 'EXACT_MAIN_FULL_JOBS'
+CI_REUSED = 'EXACT_MERGED_TREE_FULL_JOBS'
+
+
+def read_ci_api(path):
+    token = os.environ.get('OX_CI_READ_TOKEN', '')
+    require(bool(token), 'read-only CI evidence token missing')
+    allowed = (r'/actions/(?:workflows/[0-9]+/runs\?head_sha=[a-f0-9]{40}&per_page=50|'
+               r'runs/[0-9]+(?:/attempts/[0-9]+/jobs\?per_page=100)?)|'
+               r'/git/(?:commits/[a-f0-9]{40}|ref/heads/main)|'
+               r'/commits/[a-f0-9]{40}/pulls\?per_page=50|'
+               r'/environments/obtainx-release-candidate(?:/deployment-branch-policies\?per_page=100)?')
+    require(re.fullmatch(allowed, path), 'unexpected CI evidence endpoint')
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+    request = urllib.request.Request('https://api.github.com/repos/' + REPO + path,
+        headers={'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
+                 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'ObtainX-R12'})
+    with urllib.request.build_opener(NoRedirect()).open(request, timeout=20) as response:
+        payload = response.read(8 * 1024 * 1024 + 1)
+        require(len(payload) <= 8 * 1024 * 1024, 'oversized hosted CI evidence')
+        return json.loads(payload)
+
+
+def verify_current_main(head, tree, fetch):
+    require(HEX40.fullmatch(head) and HEX40.fullmatch(tree), 'invalid CI source')
+    ref = fetch('/git/ref/heads/main')
+    require(ref.get('ref') == 'refs/heads/main' and ref.get('object', {}).get('type') == 'commit'
+            and ref['object'].get('sha') == head, 'reviewed main moved')
+    commit = fetch(f'/git/commits/{head}')
+    require(commit.get('sha') == head and commit.get('tree', {}).get('sha') == tree,
+            'remote main tree differs from checkout')
+    return commit
+
+
+def merged_tree_origin(head, tree, commit, fetch):
+    """Only a direct, GitHub-verified two-parent PR merge of identical bytes.
+
+    Squash/rebase/direct pushes, changed merge trees, ambiguous PR association,
+    and inaccessible evidence require fresh full main jobs instead of reuse.
+    """
+    from obtainx_ci_policy import REPO_ID
+    parents = commit.get('parents')
+    require(commit.get('verification', {}).get('verified') is True and
+            isinstance(parents, list) and len(parents) == 2 and
+            all(isinstance(x, dict) and HEX40.fullmatch(str(x.get('sha', ''))) for x in parents),
+            'main is not a verified two-parent merge')
+    first, source = (p['sha'] for p in parents)
+    require(first != source and source != head, 'invalid merge parents')
+    original = fetch(f'/git/commits/{source}')
+    require(original.get('sha') == source and original.get('tree', {}).get('sha') == tree,
+            'merged PR tree differs from current main')
+    rows = fetch(f'/commits/{head}/pulls?per_page=50')
+    require(isinstance(rows, list) and 0 < len(rows) < 50, 'incomplete merged PR inventory')
+    matches = [r for r in rows if isinstance(r, dict) and r.get('merge_commit_sha') == head]
+    require(len(matches) == 1, 'ambiguous merge PR')
+    pr = matches[0]
+    require(type(pr.get('number')) is int and pr['number'] > 0 and
+            pr.get('state') == 'closed' and bool(pr.get('merged_at')) and
+            pr.get('head', {}).get('sha') == source and
+            pr.get('head', {}).get('repo', {}).get('id') == REPO_ID and
+            pr.get('base', {}).get('ref') == 'main' and
+            pr.get('base', {}).get('repo', {}).get('id') == REPO_ID and
+            isinstance(pr['head'].get('ref'), str) and pr['head']['ref'] != 'main' and
+            'ci:development-only' not in {x.get('name') for x in pr.get('labels', [])},
+            'merged PR identity or scope is not eligible for reuse')
+    return {'pr': pr['number'], 'merge_sha': head, 'source_sha': source,
+            'source_tree': tree, 'branch': pr['head']['ref']}
+
+
+def latest_lane(fetch, lane, source, branch, events):
     from obtainx_ci_policy import FULL_PROOFS, REPO_ID, full_job_proof
-    def read(path):
-        token = os.environ.get('OX_CI_READ_TOKEN', '')
-        require(bool(token), 'read-only CI evidence token missing')
-        require(re.fullmatch(r'/actions/(?:workflows/[0-9]+/runs\?head_sha=[a-f0-9]{40}&per_page=50|runs/[0-9]+/attempts/[0-9]+/jobs\?per_page=100)', path), 'unexpected CI evidence endpoint')
-        class NoRedirect(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, *args, **kwargs):
-                return None
-        request = urllib.request.Request('https://api.github.com/repos/' + REPO + path,
-            headers={'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
-                     'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'ObtainX-R12'})
-        with urllib.request.build_opener(NoRedirect()).open(request, timeout=20) as response:
-            payload = response.read(8 * 1024 * 1024 + 1)
-            require(len(payload) <= 8 * 1024 * 1024, 'oversized hosted CI evidence')
-            return json.loads(payload)
-    fetch = fetch or read
-    require(HEX40.fullmatch(head) is not None, 'invalid CI source')
+    workflow, job, steps = FULL_PROOFS[lane]
+    result = fetch(f'/actions/workflows/{workflow}/runs?head_sha={source}&per_page=50')
+    rows = result.get('workflow_runs')
+    require(isinstance(rows, list) and result.get('total_count') == len(rows),
+            f'incomplete CI evidence {lane}')
+    # Wrong-repository/commit/workflow rows are not eligible. A newer failed,
+    # cancelled, scoped or running matching run MUST NOT be masked by an old pass.
+    candidates = [r for r in rows if r.get('head_sha') == source and
+                  r.get('head_branch') == branch and r.get('event') in events]
+    if not candidates:
+        return None
+    require(all(type(r.get('id')) is int and r['id'] > 0 for r in candidates),
+            f'invalid CI run identity {lane}')
+    row = max(candidates, key=lambda r: r['id'])
+    require(row.get('workflow_id') == workflow and row.get('status') == 'completed' and
+            row.get('conclusion') == 'success' and row.get('repository', {}).get('id') == REPO_ID and
+            row.get('head_repository', {}).get('id') == REPO_ID and
+            type(row.get('run_attempt')) is int and row['run_attempt'] >= 1,
+            f'latest matching run not successful: {lane}')
+    identity_fields = ('id', 'workflow_id', 'head_sha', 'head_branch', 'event', 'run_attempt',
+                       'status', 'conclusion')
+    def recheck():
+        current = fetch(f'/actions/runs/{row["id"]}')
+        require(all(current.get(k) == row[k] for k in identity_fields) and
+                current.get('repository', {}).get('id') == REPO_ID and
+                current.get('head_repository', {}).get('id') == REPO_ID,
+                f'run identity or attempt changed: {lane}')
+    recheck()
+    evidence = fetch(f'/actions/runs/{row["id"]}/attempts/{row["run_attempt"]}/jobs?per_page=100')
+    jobs = evidence.get('jobs')
+    require(isinstance(jobs, list) and evidence.get('total_count') == len(jobs) and
+            full_job_proof(jobs, job, steps), f'full CI job proof missing: {lane}')
+    actual = next(j for j in jobs if j['name'] == job)
+    require(type(actual.get('id')) is int and actual['id'] > 0 and
+            actual.get('head_sha') == source and actual.get('run_id') == row['id'] and
+            actual.get('run_attempt') == row['run_attempt'] and actual.get('status') == 'completed' and
+            all(sum(s.get('name') == step and s.get('status') == 'completed' and
+                    s.get('conclusion') == 'success' for s in actual.get('steps', [])) == 1 for step in steps),
+            f'wrong job, attempt or decisive step: {lane}')
+    recheck()
+    # Reject a replacement run scheduled while this proof was being observed.
+    after = fetch(f'/actions/workflows/{workflow}/runs?head_sha={source}&per_page=50')
+    later = after.get('workflow_runs')
+    require(isinstance(later, list) and after.get('total_count') == len(later) and
+            any(x.get('id') == row['id'] and x.get('run_attempt') == row['run_attempt'] for x in later) and
+            not any(x.get('head_sha') == source and x.get('head_branch') == branch and
+                    x.get('event') in events and (type(x.get('id')) is not int or x['id'] > row['id']) for x in later),
+            f'newer CI run appeared during observation: {lane}')
+    return {'workflow_id': workflow, 'run_id': row['id'], 'attempt': row['run_attempt'],
+            'job_id': actual['id'], 'decisive_steps': list(steps), 'source_sha': source}
+
+
+def hosted_ci(head, tree, fetch=None):
+    from obtainx_ci_policy import FULL_PROOFS
+    fetch = fetch or read_ci_api
+    commit = verify_current_main(head, tree, fetch)
     proofs = {}
-    for lane, (workflow, job, steps) in FULL_PROOFS.items():
-        result = fetch(f'/actions/workflows/{workflow}/runs?head_sha={head}&per_page=50')
-        rows = result.get('workflow_runs')
-        require(isinstance(rows, list) and result.get('total_count') == len(rows) and bool(rows), f'incomplete CI evidence {lane}')
-        # Latest main run, not an earlier green run obscuring a newer failure.
-        candidates = [r for r in rows if r.get('head_sha') == head and r.get('head_branch') == 'main'
-                      and r.get('event') in ('workflow_dispatch', 'push')]
-        require(bool(candidates), f'no exact main run for {lane}')
-        row = max(candidates, key=lambda r: r['id'])
-        require(row.get('workflow_id') == workflow and row.get('status') == 'completed' and row.get('conclusion') == 'success'
-                and row.get('repository', {}).get('id') == REPO_ID and row.get('head_repository', {}).get('id') == REPO_ID
-                and type(row.get('id')) is int and type(row.get('run_attempt')) is int and row['run_attempt'] >= 1,
-                f'latest exact main run not successful: {lane}')
-        evidence = fetch(f'/actions/runs/{row["id"]}/attempts/{row["run_attempt"]}/jobs?per_page=100')
-        jobs = evidence.get('jobs', [])
-        require(evidence.get('total_count') == len(jobs) and full_job_proof(jobs, job, steps), f'full CI job proof missing: {lane}')
-        actual_job = next(j for j in jobs if j['name'] == job)
-        require(type(actual_job.get('id')) is int and actual_job.get('head_sha') == head, f'wrong job SHA: {lane}')
-        proofs[lane] = {'workflow_id': workflow, 'run_id': row['id'], 'attempt': row['run_attempt'],
-                        'job_id': actual_job['id'], 'decisive_steps': list(steps), 'source_sha': head}
-    return {'schema': 'obtainx.r12.hosted-ci.v1', 'source_sha': head, 'repository': REPO, 'proofs': proofs}
+    origin = None
+    pr_source_proof = None
+    for lane in FULL_PROOFS:
+        proof = latest_lane(fetch, lane, head, 'main', ('workflow_dispatch', 'push'))
+        if proof is None:
+            # Main source-contracts verifies commit-sensitive ancestry. It is
+            # always fresh. Never replace an observed main failure by PR proof.
+            require(lane != 'source', 'missing fresh exact-main source contract')
+            if origin is None:
+                origin = merged_tree_origin(head, tree, commit, fetch)
+                pr_source_proof = latest_lane(fetch, 'source', origin['source_sha'], origin['branch'], ('pull_request',))
+                require(pr_source_proof is not None, 'missing full merged PR source proof')
+            proof = latest_lane(fetch, lane, origin['source_sha'], origin['branch'], ('pull_request',))
+            require(proof is not None, f'missing full merged PR proof: {lane}')
+            proof['evidence_mode'] = 'REUSED_EXACT_MERGED_TREE'
+        else:
+            proof['evidence_mode'] = 'EXECUTED_EXACT_MAIN'
+        proof['source_tree'] = tree
+        proofs[lane] = proof
+    verify_current_main(head, tree, fetch)
+    receipt = {'schema': CI_SCHEMA, 'source_sha': head, 'source_tree': tree,
+               'repository': REPO, 'mode': CI_REUSED if origin else CI_EXACT, 'proofs': proofs}
+    if origin:
+        receipt['merge_origin'] = origin
+        receipt['merged_pr_source_proof'] = dict(pr_source_proof, source_tree=tree)
+    return receipt
+
+
+def verify_signing_environment(fetch=None):
+    """Fail closed if environment policy is inaccessible or not independently gated."""
+    fetch = fetch or read_ci_api
+    env = fetch('/environments/obtainx-release-candidate')
+    require(env.get('name') == 'obtainx-release-candidate' and env.get('can_admins_bypass') is False,
+            'signing environment administrative bypass is not demonstrably disabled')
+    rules = env.get('protection_rules')
+    require(isinstance(rules, list), 'signing environment rules unavailable')
+    reviewers = [r for r in rules if r.get('type') == 'required_reviewers']
+    require(len(reviewers) == 1 and reviewers[0].get('prevent_self_review') is True and
+            isinstance(reviewers[0].get('reviewers'), list) and bool(reviewers[0]['reviewers']),
+            'independent signing review is not demonstrably enforced')
+    branch = env.get('deployment_branch_policy')
+    require(isinstance(branch, dict), 'signing environment branch policy missing')
+    if not (branch.get('protected_branches') is True and branch.get('custom_branch_policies') is False):
+        require(branch.get('protected_branches') is False and branch.get('custom_branch_policies') is True,
+                'signing environment must restrict deployment branches')
+        allowed = fetch('/environments/obtainx-release-candidate/deployment-branch-policies?per_page=100')
+        policies = allowed.get('branch_policies')
+        require(isinstance(policies, list) and allowed.get('total_count') == len(policies) == 1 and
+                policies[0].get('name') == 'main' and policies[0].get('type') == 'branch',
+                'signing environment custom policy must allow only main')
+    return True
+
+
+def validate_ci_receipt(ci, ident):
+    from obtainx_ci_policy import FULL_PROOFS
+    require(ci.get('schema') == CI_SCHEMA and ci.get('repository') == REPO and
+            ci.get('source_sha') == ident['source_sha'] and ci.get('source_tree') == ident['source_tree'] and
+            ci.get('mode') in (CI_EXACT, CI_REUSED) and isinstance(ci.get('proofs'), dict) and
+            set(ci['proofs']) == set(FULL_PROOFS), 'missing exact main/tree CI evidence')
+    require(ci['proofs']['source'].get('evidence_mode') == 'EXECUTED_EXACT_MAIN', 'main source proof must be fresh')
+    for lane, proof in ci['proofs'].items():
+        workflow, _, steps = FULL_PROOFS[lane]
+        require(proof.get('workflow_id') == workflow and proof.get('source_tree') == ident['source_tree'] and
+                proof.get('decisive_steps') == list(steps) and
+                all(type(proof.get(k)) is int and proof[k] > 0 for k in ('run_id', 'attempt', 'job_id')),
+                'CI proof structure mismatch')
+        mode = proof.get('evidence_mode')
+        if mode == 'EXECUTED_EXACT_MAIN':
+            require(proof.get('source_sha') == ident['source_sha'], 'wrong fresh CI source')
+        else:
+            require(mode == 'REUSED_EXACT_MERGED_TREE' and lane != 'source' and ci['mode'] == CI_REUSED and
+                    ci.get('merge_origin', {}).get('merge_sha') == ident['source_sha'] and
+                    ci.get('merge_origin', {}).get('source_tree') == ident['source_tree'] and
+                    HEX40.fullmatch(str(ci['merge_origin'].get('source_sha', ''))) and
+                    proof.get('source_sha') == ci['merge_origin']['source_sha'], 'wrong reused CI source')
+    if ci['mode'] == CI_REUSED:
+        origin = ci.get('merge_origin', {})
+        original = ci.get('merged_pr_source_proof', {})
+        workflow, _, steps = FULL_PROOFS['source']
+        require(type(origin.get('pr')) is int and origin['pr'] > 0 and
+                original.get('workflow_id') == workflow and original.get('source_tree') == ident['source_tree'] and
+                original.get('source_sha') == origin.get('source_sha') and original.get('decisive_steps') == list(steps) and
+                all(type(original.get(k)) is int and original[k] > 0 for k in ('run_id', 'attempt', 'job_id')),
+                'missing original full PR source proof')
+    require((ci['mode'] == CI_REUSED) == any(p['evidence_mode'] == 'REUSED_EXACT_MERGED_TREE' for p in ci['proofs'].values()), 'CI mode does not match evidence')
+    return ci['mode']
 
 
 def build_record(args, ident):
@@ -420,7 +597,7 @@ def build_record(args, ident):
     emit(toolchain_path, {'flutter_version': flutter['frameworkVersion'], 'flutter_revision': flutter['frameworkRevision'], 'engine_revision': flutter.get('engineRevision'), 'dart_version': flutter.get('dartSdkVersion'), 'java': java, 'gradle_wrapper_sha256': digest(ROOT / 'android/gradle/wrapper/gradle-wrapper.properties'), 'build_tools': {tool: digest(Path(sdk_tool(tool))) for tool in ('apksigner', 'aapt', 'zipalign')}})
     ci_path = directory / 'ci.json'
     ci = json.loads(ci_path.read_text())
-    require(ci.get('schema') == 'obtainx.r12.hosted-ci.v1' and ci.get('source_sha') == ident['source_sha'], 'missing exact main CI evidence')
+    validate_ci_receipt(ci, ident)
     pub = dependency_inventory(ROOT)
     gradle = directory / 'gradle-dependencies.txt'
     require(gradle.is_file() and 0 < gradle.stat().st_size <= 16 * 1024 * 1024, 'missing native dependency inventory')
@@ -465,7 +642,7 @@ def sign_candidate(args, ident):
     records = [json.loads((p / 'build.json').read_text()) for p in (a, b)]
     unsigned = compare_builds(*records, ident)
     independent_ci = json.loads(args.ci.read_text())
-    require(independent_ci.get('source_sha') == ident['source_sha'], 'wrong independent CI evidence')
+    ci_mode = validate_ci_receipt(independent_ci, ident)
     for p, row in zip((a, b), records):
         require(digest(p / 'ci.json') == row['ci_sha256'] and json.loads((p / 'ci.json').read_text()) == independent_ci, 'exact main CI evidence changed')
         require(inspect_apks(ROOT, p) == unsigned, 'unsigned artifact changed after build')
@@ -478,6 +655,10 @@ def sign_candidate(args, ident):
         audit = json.loads((p / 'advisories.json').read_text())
         require(audit.get('queries') == osv_queries(inventory['pub'], inventory['maven']) and
                 audit.get('status') == 'NO_KNOWN_FINDINGS' and audit.get('findings') == [], 'advisory evidence not clear')
+    # Read live protection and reobserve before decoding signing credentials.
+    verify_signing_environment()
+    require(hosted_ci(ident['source_sha'], ident['source_tree']) == independent_ci,
+            'CI or main evidence changed before signing')
     key, expected = validate_signing_inputs(os.environ)
     require(not args.directory.exists(), 'candidate output directory already exists')
     # The key exists only in a mode-0700 temporary directory and never enters upload paths.
@@ -509,7 +690,7 @@ def sign_candidate(args, ident):
              gradle_inventory_sha256=digest(a / 'gradle-dependencies.txt'),
              sbom_sha256=digest(a / 'sbom.cdx.json'), advisories_sha256=digest(a / 'advisories.json'),
              reproducibility='UNSIGNED_EXACT_BYTES_MATCH', package_status='SIGNED_CANDIDATE_VERIFIED',
-             SOURCE_PASS='PASS_BUILD_LANES', HOSTED_CI_PASS='PASS_EXACT_MAIN_FULL_JOBS',
+             SOURCE_PASS='PASS_BUILD_LANES', HOSTED_CI_PASS='PASS_' + ci_mode,
              ci_sha256=digest(args.ci), toolchain_sha256=digest(a / 'toolchain.json'),
              DEVICE_RUNTIME_PASS='PENDING_EXTERNAL', RELEASE_QUALIFIED=False, publication_authorized=False))
 
@@ -517,7 +698,7 @@ def sign_candidate(args, ident):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
-    for name in ('preflight', 'record-ci', 'record-build', 'sign-candidate'):
+    for name in ('preflight', 'verify-environment', 'record-ci', 'record-build', 'sign-candidate'):
         p = sub.add_parser(name)
         p.add_argument('--head', required=True)
         if name in ('record-build', 'sign-candidate'):
@@ -535,8 +716,11 @@ def main():
         ident = dispatch_guard(ROOT, args.head, os.environ)
         if args.action == 'preflight':
             print(f'R12_SOURCE_SCAN_PASS files={source_scan(ROOT)}')
+        elif args.action == 'verify-environment':
+            verify_signing_environment()
+            print('R12_SIGNING_ENVIRONMENT_POLICY_PASS; actual human approval separate')
         elif args.action == 'record-ci':
-            emit(args.output, hosted_ci(args.head))
+            emit(args.output, hosted_ci(args.head, ident['source_tree']))
         elif args.action == 'record-build':
             build_record(args, ident)
         else:
@@ -544,7 +728,7 @@ def main():
     except Refused as exc:
         print('R12_REFUSED:', exc)
         return 1
-    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, zipfile.BadZipFile):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError, zipfile.BadZipFile):
         # Never echo exception arguments which might contain private data.
         print('R12_REFUSED: invalid or inaccessible qualification input')
         return 1

@@ -310,9 +310,10 @@ def requested_mode(event_name, event):
     # Legacy explicit development-only still prevents full qualification.
     if 'ci:development-only' in labels:
         return 'scoped'
-    if 'ci:full-qualification' in labels or pr.get('draft') is False:
-        return 'full'
-    return 'scoped'
+    # Review readiness is not a qualification input. Normal drafts execute
+    # the same full gate as ready PRs; only an explicit development label
+    # may request scoped, non-accepting feedback.
+    return 'full'
 
 
 def full_plan(mode, head, reason, base=None, paths=()):
@@ -346,29 +347,17 @@ def plan(head,event_name,event,*,root=ROOT,api=read_api):
         raise ValueError('checkout not exact expected HEAD')
     mode=requested_mode(event_name,event)
     if mode=='full':
-        return full_plan(mode,head,'explicit-full-or-ready')
+        return full_plan(mode,head,'full-unless-explicit-development-only')
     try:
         pr=event['pull_request']
         if pr['head']['sha']!=head or pr['head']['repo']['id']!=REPO_ID or pr['base']['repo']['id']!=REPO_ID or pr['base']['ref']!='main':
             raise ValueError('PR identity mismatch')
-        labels={x.get('name') for x in pr.get('labels',[]) if isinstance(x,dict)}
-        if policy_migration(head,root=root) and 'ci:development-only' not in labels:
-            return full_plan('full',head,'deterministic-ci-policy-migration')
         pin=json.loads((root/BASELINE_PATH).read_text(encoding='utf8'))
         git('merge-base','--is-ancestor',pr['base']['sha'],head,root=root)
         pin=discover_baseline(head,pin,root=root,api=api)
         base=pin['source_sha']
         paths=changes(base,head,root=root)
         selected=impact(paths,head,base,root=root)
-        # A verified baseline with uncertain cumulative impact can require the
-        # entire matrix (including an earlier failed policy migration). If all
-        # full lanes are selected, allow their real decisive proofs to qualify
-        # this head instead of forcing another otherwise identical full run.
-        # Explicit development-only remains authoritative; unverified baseline
-        # fallback below still cannot establish full acceptance.
-        if ('ci:development-only' not in labels and selected['full_flutter']
-                and all(selected['lanes'].values())):
-            return full_plan('full',head,'verified-baseline-full-impact',base,paths)
         return selected
     except (OSError,ValueError,TypeError,KeyError,subprocess.SubprocessError,RuntimeError,AttributeError,urllib.error.URLError):
         return full_plan(mode,head,'unverified-baseline-or-ancestry')

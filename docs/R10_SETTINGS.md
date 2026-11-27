@@ -35,3 +35,7 @@ The reduced-visual-effects golden requires the original finger-linked reveal pro
 ## GAP-05 — Locale and activity accessibility closure
 
 The current flattened English inventory has 1110 leaf keys. French, Turkish, Japanese, Portuguese and Brazilian Portuguese now have zero missing English keys, zero blank shared labels and zero brace-placeholder mismatches. Retained extra legacy keys are listed separately. Other supported languages retain explicit English fallback. Native linguistic review and physical long-label layout validation are pending. Activity Center uses localized stages, actions, evidence explanations, filters and warnings, retains raw diagnostic evidence in Details, and exposes wrapping 48dp filter/action controls rather than a fixed segmented row. Added a narrow 200% text fixture; existing navigation, keyboard, reduced-motion and swipe regressions remain required. Device contrast, TalkBack, keyboard/mouse/TV remote and all-route 200% acceptance are not established.
+
+## FINAL-AUDIT-04 — shared control acceptance
+
+The 200% text fixture now includes narrow portrait, landscape and wide views, semantic destination labels and actual callback reachability. Native linguistic review, physical TalkBack/contrast, keyboard/mouse/TV and full route review remain explicit external R12 obligations. See FINAL_AUDIT_04_ACCEPTANCE.md.

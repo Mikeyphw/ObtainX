@@ -33,6 +33,18 @@ class R10Accessibility(unittest.TestCase):
         self.assertIn("{'http', 'https'}",helper)
         self.assertIn('uri.userInfo.isNotEmpty',helper)
         self.assertIn('LaunchMode.externalApplication',helper)
+    def test_semantics_handle_released_inside_widget_callback(self):
+        # This is a source guard, not a replacement for the hosted widget test.
+        fixture = read('test/r10_accessibility_test.dart')
+        body = fixture.split("testWidgets('shared controls remain reachable at 200 percent across viewports'", 1)[1]
+        self.assertRegex(body, r'final semantics = tester\.ensureSemantics\(\);\s*//[^\n]*\n\s*try \{')
+        self.assertRegex(body, r'\} finally \{\s*semantics\.dispose\(\);\s*\}\s*\}\);')
+        self.assertNotIn('addTearDown(semantics.dispose)', body)
+        for token in ('Size(280, 640)', 'Size(640, 320)', 'Size(1024, 768)',
+                      'TextScaler.linear(2)', "find.bySemanticsLabel('Navigation destination')",
+                      'expect(invoked, 3)', 'expect(tester.takeException(), isNull)'):
+            self.assertIn(token, body)
+
     def test_custom_semantics_action_import(self):
         apps=read('lib/pages/apps.dart')
         self.assertIn("import 'package:flutter/semantics.dart' show CustomSemanticsAction;", apps)

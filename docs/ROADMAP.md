@@ -785,3 +785,12 @@ Keep current app styling and adaptive layout concepts; prioritize clear labels, 
 ## FINAL-AUDIT-03 — Provider and artifact trust closure
 
 See `FINAL_AUDIT_03_TRUST.md` for approved F03/F06/F07 scope, public metadata repair and byte-backed review. F03 unsupported cryptographic verification remains fail-closed; RuStore unsupported session is not a live provider pass. Explicit bounded artifact inspection is the approved F07 boundary. FINAL-AUDIT-02-HF03 hosted acceptance is verified at exact head `f4560d836c427d869f88599e79dda23e00be602d`; PR #32 merged at `e72a1881653f13e55891b41bf377ca22f576fb2b` with the exact qualified tree. FINAL-AUDIT-03 qualification requires fresh independent evidence. FINAL-AUDIT-04 remains gated.
+
+
+## FINAL-AUDIT-04 — Acceptance and release qualification with CI deduplication
+
+See `FINAL_AUDIT_04_ACCEPTANCE.md` for F08, F10, F12 and OPT09. PR #33 merged at `f956206348828370c339d412957b25a8ab41f697` from exact accepted head `1a6eb840826d4907c308d592488a7ee7ea7c6e98`, preserving the qualified tree; the later redundant ready-for-review batch does not supply additional acceptance. Normal drafts now receive full qualification without redundant review-state triggers. Fresh main source contracts and authenticated full exact-tree release evidence are distinguished, and signing environment rules are reobserved before signing. Expanded shared-control and real Android package lookup tests do not establish physical or historical acceptance. FINAL-AUDIT-04 source and hosted qualification must be independently observed; live provider, device, linguistic, release-mode/signing and publication gates remain external. No release authorization.
+
+### FINAL-AUDIT-04-HF01 — Widget semantics lifecycle
+
+PR #34 source integrity passed; Flutter failed because the 200% viewport test deferred its SemanticsHandle cleanup until addTearDown, after Flutter’s end-of-test invariant check. Four Android lanes correctly refused provisioning. Dispose the handle within the widget test callback on both success and exception, preserve all accessibility assertions and the six required workflow gates. Hosted rerun remains required.

@@ -5,7 +5,7 @@ from r07_workflow_contract import parse_workflow, ContractError, WORKFLOWS, REQU
 
 NAME='obtainx-r00-contracts.yml'
 def fixture(name=NAME):
-    text='name: '+WORKFLOWS[name][1]+'\non:\n  pull_request:\n    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review, converted_to_draft]\n'
+    text='name: '+WORKFLOWS[name][1]+'\non:\n  pull_request:\n    types: [opened, reopened, synchronize, labeled, unlabeled]\n'
     text+='jobs:\n  job:\n    runs-on: ubuntu-24.04\n    steps:\n      - uses: actions/checkout@v4\n'
     for label, run in REQUIRED_STEPS.get(name,{}).items():
         text+=f'      - name: {label}\n        run: {run}\n'

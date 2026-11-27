@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:obtainium/installers/stock_installer.dart';
 import 'package:obtainium/providers/settings_provider.dart';
+import 'package:obtainium/providers/apps_provider.dart' show getInstalledInfo;
 import 'package:obtainium/services/install_bundle_plan.dart';
 
 const packageName = 'dev.bikram.obtainx.rt02.fixture';
@@ -62,6 +63,11 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('RT02 fresh APK then split update through real StockInstaller', (tester) async {
     if (!Platform.isAndroid) throw StateError('Android API36 emulator required');
+    final self = await getInstalledInfo('dev.bikram.obtainx',
+        includeOwnDebugBuild: true, throwOnError: true);
+    expect(self?.packageName, 'dev.bikram.obtainx.debug',
+        reason: 'Real Android debug candidate lookup must resolve running app');
+
     final digests=<String>[v1Digest,v2Digest,splitDigest];
     if (digests.any((d)=>!RegExp(r'^[0-9a-f]{64}$').hasMatch(d)) ||
         digests.toSet().length!=3) {
@@ -102,6 +108,10 @@ void main() {
         expect(result.isSuccess,isTrue,reason:'Real system installer must commit the signed APK');
         debugPrint('OX_R02_P02_EVENT=$scenario:INSTALL_RETURNED');
         await awaitHostAck(scenario);
+        final observed = await getInstalledInfo(packageName, throwOnError: true);
+        expect(observed?.packageName, packageName);
+        expect(observed?.versionCode, version);
+
         debugPrint('OX_R02_P02_EVENT=$scenario:ACKED');
       } finally {
         if (await directory.exists())await directory.delete(recursive:true);

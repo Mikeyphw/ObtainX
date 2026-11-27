@@ -118,18 +118,13 @@ class ReleaseContractTests(unittest.TestCase):
             with self.assertRaises(gate.Refused):gate.compare_builds(row,mutation,IDENT)
 
     def test_exact_main_hosted_ci_and_newer_failure(self):
-        by_id={v[0]:(k,v) for k,v in FULL_PROOFS.items()}
-        def fetch(path, *, fail=False, stale=False, skip=False):
-            if '/workflows/' in path:
-                workflow=int(path.split('/')[3]);lane,(_,_,_)=by_id[workflow]
-                row={'workflow_id':workflow,'head_sha':TREE if stale else HEAD,'head_branch':'main','event':'workflow_dispatch','status':'completed','conclusion':'success','repository':{'id':REPO_ID},'head_repository':{'id':REPO_ID},'id':workflow,'run_attempt':1}
-                rows=[row,dict(row,id=workflow+100,conclusion='failure')] if fail else [row]
-                return {'total_count':len(rows),'workflow_runs':rows}
-            workflow=int(path.split('/')[3]);_,(_,job,steps)=by_id[workflow]
-            return {'total_count':1,'jobs':[{'id':workflow+1000,'head_sha':HEAD,'name':job,'conclusion':'success','steps':[{'name':s,'conclusion':'skipped' if skip else 'success'} for s in steps]}]}
-        self.assertEqual(len(gate.hosted_ci(HEAD,fetch)['proofs']),6)
-        for flag in ('fail','stale','skip'):
-            with self.subTest(flag=flag), self.assertRaises(gate.Refused):gate.hosted_ci(HEAD,lambda path:fetch(path,**{flag:True}))
+        from test_obtainx_ci_optimization_opt09_dedup import Fixture
+        self.assertEqual(len(gate.hosted_ci(HEAD, TREE, Fixture().api)['proofs']), 6)
+        for flag in ('failed', 'stale', 'skipped'):
+            fixture = Fixture()
+            fixture.mutate(flag)
+            with self.subTest(flag=flag), self.assertRaises(gate.Refused):
+                gate.hosted_ci(HEAD, TREE, fixture.api)
 
     def test_device_matrix_refuses_wrong_bytes_stale_and_missing_lane(self):
         candidate=dict(IDENT,schema='obtainx.r12.signed-candidate.v1',certificate_sha256=CERT,package_status='SIGNED_CANDIDATE_VERIFIED',publication_authorized=False,SOURCE_PASS='PASS_BUILD_LANES',HOSTED_CI_PASS='PASS_EXACT_MAIN_FULL_JOBS',apks={f'app-{abi}-normal-release.apk':{'sha256':DIGEST, 'abi':abi, 'package':gate.PACKAGE, 'version_name':'2.21.0','version_code':221000+index,'certificate_sha256':CERT} for abi,index in gate.ABIS.items()})

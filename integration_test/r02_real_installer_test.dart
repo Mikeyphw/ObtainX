@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:obtainium/installers/stock_installer.dart';
 import 'package:obtainium/providers/settings_provider.dart';
+import 'package:obtainium/providers/apps_provider.dart' show getInstalledInfo;
 import 'package:obtainium/services/install_bundle_plan.dart';
 
 const packageName = 'dev.bikram.obtainx.rt02.fixture';
@@ -41,6 +42,11 @@ void main() {
   testWidgets('RT02 controlled APK session through ObtainX StockInstaller', (tester) async {
     debugPrint('OX_R02_RT02_DART_STAGE=SCENARIO_STARTED');
     if (!Platform.isAndroid) throw StateError('RT02 is Android-only');
+    final self = await getInstalledInfo('dev.bikram.obtainx',
+        includeOwnDebugBuild: true, throwOnError: true);
+    expect(self?.packageName, 'dev.bikram.obtainx.debug',
+        reason: 'Real Android debug candidate lookup must resolve running app');
+
     if (scenario != 'standalone' && scenario != 'split') {
       throw StateError('RT02 scenario not approved');
     }
@@ -75,6 +81,10 @@ void main() {
       debugPrint('OX_R02_RT02_DART_STAGE=INSTALL_RETURNED');
       expect(result.isSuccess, isTrue,
         reason:'Real system PackageInstaller did not confirm installation');
+      final observed = await getInstalledInfo(packageName, throwOnError: true);
+      expect(observed?.packageName, packageName);
+      expect(observed?.versionCode, version);
+
     } finally {
       if (temporary.existsSync()) await temporary.delete(recursive: true);
     }

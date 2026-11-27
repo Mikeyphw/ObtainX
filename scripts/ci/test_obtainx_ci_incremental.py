@@ -34,7 +34,7 @@ class Impact(unittest.TestCase):
     def test_invalid_path_refused(self):
         with self.assertRaises(ValueError):p.impact(['../secret'],H,B)
     def test_modes(self):
-        for draft,labels,expected in [(True,[],'scoped'),(False,[],'full'),(True,['ci:full-qualification'],'full'),(False,['ci:development-only'],'scoped'),(True,['ci:development-only','ci:full-qualification'],'scoped')]:
+        for draft,labels,expected in [(True,[],'full'),(False,[],'full'),(True,['ci:full-qualification'],'full'),(False,['ci:development-only'],'scoped'),(True,['ci:development-only','ci:full-qualification'],'scoped')]:
             self.assertEqual(p.requested_mode('pull_request',{'pull_request':{'draft':draft,'labels':[{'name':x} for x in labels]}}),expected)
         self.assertEqual(p.requested_mode('workflow_dispatch',{}),'full')
     def test_one_invocation_targeted_tests(self):
@@ -85,7 +85,7 @@ class Baseline(unittest.TestCase):
         self.assertEqual(v['source_sha'],B);self.assertEqual(v['runs']['rt02c'],6)
     def test_unverified_baseline_fallback_no_full_claim(self):
         with patch.object(p,'git',return_value=H),patch.object(p,'policy_migration',return_value=False),patch.object(p,'discover_baseline',side_effect=ValueError('unverified')):
-            v=p.plan(H,'pull_request',{'pull_request':{'draft':True,'head':{'sha':H,'repo':{'id':p.REPO_ID}},'base':{'sha':B,'repo':{'id':p.REPO_ID},'ref':'main'}}})
+            v=p.plan(H,'pull_request',{'pull_request':{'draft':True,'labels':[{'name':'ci:development-only'}],'head':{'sha':H,'repo':{'id':p.REPO_ID}},'base':{'sha':B,'repo':{'id':p.REPO_ID},'ref':'main'}}})
         self.assertTrue(all(v['lanes'].values()));self.assertEqual(v['mode'],'scoped');self.assertFalse(v['full_acceptance_possible'])
     def test_verified_full_impact_can_qualify_without_repeated_full_run(self):
         for labels, expected in [([], 'full'), ([{'name':'ci:development-only'}], 'scoped')]:
@@ -94,10 +94,10 @@ class Baseline(unittest.TestCase):
             self.assertEqual(v['mode'],expected)
             self.assertTrue(v['full_flutter'] and all(v['lanes'].values()))
             self.assertEqual(v['full_acceptance_possible'],expected=='full')
-            self.assertEqual(v['baseline'],B)
+            self.assertEqual(v['baseline'],B if expected=='scoped' else None)
     def test_verified_narrow_impact_still_scoped(self):
         with patch.object(p,'git',return_value=H), patch.object(p,'policy_migration',return_value=False), patch.object(p,'discover_baseline',return_value=self.pin), patch.object(p,'changes',return_value=['lib/pages/apps.dart']):
-            v=p.plan(H,'pull_request',{'pull_request':{'draft':True,'head':{'sha':H,'repo':{'id':p.REPO_ID}},'base':{'sha':B,'repo':{'id':p.REPO_ID},'ref':'main'}}})
+            v=p.plan(H,'pull_request',{'pull_request':{'draft':True,'labels':[{'name':'ci:development-only'}],'head':{'sha':H,'repo':{'id':p.REPO_ID}},'base':{'sha':B,'repo':{'id':p.REPO_ID},'ref':'main'}}})
         self.assertEqual(v['mode'],'scoped');self.assertTrue(v['targeted_flutter']);self.assertFalse(any(v['lanes'].values()))
     def test_policy_migration_full_independent_of_api(self):
         with patch.object(p,'git',return_value=H),patch.object(p,'policy_migration',return_value=True),patch.object(p,'discover_baseline',side_effect=AssertionError('must not query')):

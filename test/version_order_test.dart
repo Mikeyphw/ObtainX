@@ -556,48 +556,43 @@ void main() {
   test(
     'release package lookup only includes debug build when requested',
     () async {
-      // The standalone packageNamesToTryForInstalledInfo helper was inlined into
-      // getInstalledInfo. Observe the same contract (which package names are
-      // probed, in order) by recording the getPackageInfo channel calls: the mock
-      // returns null for every name, so getInstalledInfo tries them all.
-      final List<String> requested = <String>[];
+      // The production targeted native worker is now a mockable MethodChannel.
+      // Exercise real getInstalledInfo ordering and absence without the
+      // Android-only package_manager fallback. Real Android lookup also runs
+      // in the RT02 integration harness.
+      const channel = MethodChannel('dev.imranr.obtainium/device_apps');
+      final requested = <String>[];
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      messenger.setMockMethodCallHandler(
-        const MethodChannel('android_package_manager'),
-        (MethodCall call) async {
-          if (call.method == 'getPackageInfo') {
-            requested.add((call.arguments as Map)['packageName'] as String);
-          }
-          return null;
-        },
-      );
-      addTearDown(() {
-        messenger.setMockMethodCallHandler(
-          const MethodChannel('android_package_manager'),
-          (MethodCall call) async => null,
-        );
+      String? installed;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        expect(call.method, 'getInstalledPackageInfo');
+        final name = (call.arguments as Map)['packageName'] as String;
+        requested.add(name);
+        if (name != installed) return null;
+        return {'packageName': name, 'versionName': '2.0', 'versionCode': 2};
       });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
-      requested.clear();
-      await getInstalledInfo('dev.bikram.obtainx');
+      expect(await getInstalledInfo('dev.bikram.obtainx', throwOnError: true), isNull);
       expect(requested, const ['dev.bikram.obtainx']);
-
       requested.clear();
-      await getInstalledInfo('dev.bikram.obtainx', includeOwnDebugBuild: true);
-      expect(
-        requested,
-        kDebugMode
-            ? const ['dev.bikram.obtainx.debug', 'dev.bikram.obtainx']
-            : const ['dev.bikram.obtainx'],
-      );
+      expect(await getInstalledInfo('dev.bikram.obtainx',
+          includeOwnDebugBuild: true, throwOnError: true), isNull);
+      expect(requested, kDebugMode
+          ? const ['dev.bikram.obtainx.debug', 'dev.bikram.obtainx']
+          : const ['dev.bikram.obtainx']);
+      requested.clear();
+      installed = kDebugMode ? 'dev.bikram.obtainx.debug' : 'dev.bikram.obtainx';
+      final found = await getInstalledInfo('dev.bikram.obtainx',
+          includeOwnDebugBuild: true, throwOnError: true);
+      expect(found?.packageName, installed);
+      expect(requested, [installed]);
+      requested.clear();
+      expect(await getInstalledInfo('dev.example.other',
+          includeOwnDebugBuild: true, throwOnError: true), isNull);
+      expect(requested, const ['dev.example.other']);
     },
-    skip:
-        'packageNamesToTryForInstalledInfo was removed and inlined into '
-        'getInstalledInfo, which reaches packageManager (android_package_manager). '
-        'That plugin\'s factory throws "Can only be run on Android devices", so '
-        'the candidate-name resolution can no longer be exercised on a non-Android '
-        'test host. Re-enable with an on-device / Robolectric-style harness.',
   );
 
   test('legacy release-date microseconds compare with ISO release dates', () {

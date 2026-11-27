@@ -48,6 +48,33 @@ class _FarsroidFixture extends Farsroid {
   }
 }
 
+class _FarsroidPublicFixture extends Farsroid {
+  _FarsroidPublicFixture(this.html);
+  final String html;
+  int requests = 0;
+  @override
+  Future<http.Response> sourceRequest(String url, Map<String, dynamic> settings,
+      {bool followRedirects = true, Object? postBody}) async {
+    requests++;
+    if (requests != 1) throw StateError('Unexpected legacy fallback');
+    return http.Response(html, 200, request: http.Request('GET', Uri.parse(url)),
+      headers: {'content-type': 'text/html; charset=utf-8'});
+  }
+}
+
+String _farsroidPublicPage(String encoded) {
+  final middle = encoded.length ~/ 2;
+  return '<h3 class="version-name">نسخه 2.4</h3>'
+      '<div id="secure-json"><span data-j="${encoded.substring(0, middle)}"></span>'
+      '<span data-j="${encoded.substring(middle)}"></span></div>'
+      '<div class="download-links" data-post-id="1" data-post-version="0.1"></div>';
+}
+
+const _farsroidSettings = <String, dynamic>{
+  'apkFilterRegEx': '', 'invertAPKFilter': false, 'autoApkFilterByArch': false,
+  'useFirstApkOfVersion': true,
+};
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
@@ -140,6 +167,48 @@ void main() {
     expect(source.seen.last.queryParameters, {'post_id': '12', 'post_version': '1+2&β'});
     expect(details.version, '1+2&β');
     expect(details.apkUrls.single.value, 'https://example.org/app.apk');
+  });
+  test('FINAL-AUDIT-03 Farsroid public inventory preserves signed URL and selects version', () async {
+    const signed = 'https://cdn.example.org/app-2.4.apk?z=%2B&token=a%2fb';
+    final encoded = base64Encode(utf8.encode(jsonEncode([
+      {'url': '/files/app-2.3.apk'},
+      {'url': signed}, {'url': signed},
+      {'url': 'http://cdn.example.org/unsafe.apk'},
+      {'url': 'https://user@cdn.example.org/unsafe.apk'},
+      {'url': 'https://cdn.example.org/image.png?name=fake.apk'},
+    ])));
+    final provider = _FarsroidPublicFixture(_farsroidPublicPage(encoded));
+    final result = await provider.getLatestAPKDetails('https://farsroid.com/example/', _farsroidSettings);
+    expect(provider.requests, 1);
+    expect(result.version, '2.4');
+    expect(result.apkUrls.single.key, 'app-2.4.apk');
+    expect(result.apkUrls.single.value, signed);
+    final all = await _FarsroidPublicFixture(_farsroidPublicPage(encoded))
+        .getLatestAPKDetails('https://farsroid.com/example/',
+            {..._farsroidSettings, 'useFirstApkOfVersion': false});
+    expect(all.apkUrls.map((asset) => asset.value), [
+      'https://farsroid.com/files/app-2.3.apk', signed,
+    ]);
+  });
+  test('FINAL-AUDIT-03 invalid public inventory never falls back', () async {
+    for (final encoded in ['!!!!', base64Encode(utf8.encode('{"url":"a.apk"}')),
+      base64Encode(utf8.encode(jsonEncode([
+        {'url': 'https://cdn.example.org/app.apk?a=1'},
+        {'url': 'https://cdn.example.org/app.apk?a=2'},
+      ]))), base64Encode(utf8.encode(jsonEncode(List.filled(513, {'url': null}))))]) {
+      final provider = _FarsroidPublicFixture(_farsroidPublicPage(encoded));
+      await expectLater(provider.getLatestAPKDetails('https://farsroid.com/example/', _farsroidSettings), throwsA(isA<NoAPKError>()));
+      expect(provider.requests, 1);
+    }
+  });
+  test('FINAL-AUDIT-03 public inventory bounds and type checks', () {
+    final page = Uri.parse('https://farsroid.com/app/');
+    expect(() => farsroidPublicAssetLinks([List.filled(2 * 1024 * 1024 + 1, 'A').join()], page), throwsFormatException);
+    expect(() => farsroidPublicAssetLinks([base64Encode(utf8.encode('[42]'))], page), throwsFormatException);
+    expect(farsroidPublicAssetLinks([base64Encode(utf8.encode(jsonEncode([
+      {'url': 'https://cdn.example.org/file.apk#fragment'},
+      {'url': 'https://cdn.example.org/file.jpg?apk=.apk'},
+    ])))], page), isEmpty);
   });
   test('#336 Mozilla beta and alpha have numeric prerelease order', () {
     expect(compareVersionStrings('158.0b3', '158.0b4').relation,

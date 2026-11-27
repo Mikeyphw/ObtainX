@@ -1,7 +1,7 @@
 {
   "schema": "obtainx.r10.locale-review.v1",
   "fallback": "en",
-  "english_leaf_keys": 1115,
+  "english_leaf_keys": 1122,
   "new_labels": [
     "filtered",
     "gap01AttestationAbsent",
@@ -144,6 +144,7 @@
     "r09ReviewCancel",
     "r09ReviewCertificates",
     "r09ReviewCompatible",
+    "r09ReviewConfigForSplit",
     "r09ReviewExplanation",
     "r09ReviewFailed",
     "r09ReviewFilteredInventory",
@@ -156,9 +157,13 @@
     "r09ReviewNativeAbi",
     "r09ReviewNoInstalledSigner",
     "r09ReviewNoNativeLibs",
+    "r09ReviewNone",
     "r09ReviewNotSelected",
     "r09ReviewObbUnsupported",
     "r09ReviewPackageMismatch",
+    "r09ReviewProvidedSplitTypes",
+    "r09ReviewRequiredSplitTypes",
+    "r09ReviewRequiredSplits",
     "r09ReviewSdkMismatch",
     "r09ReviewSelected",
     "r09ReviewSelectionChanged",
@@ -166,7 +171,9 @@
     "r09ReviewSignerMatches",
     "r09ReviewSignerUnavailable",
     "r09ReviewSplitIdentity",
+    "r09ReviewSplitRequired",
     "r09ReviewSplitSignerMismatch",
+    "r09ReviewTargetSdk",
     "r09RoleApk",
     "r09RoleArchive",
     "r09RoleSplit",
@@ -205,7 +212,7 @@
   ],
   "locales": {
     "fr": {
-      "leaf_keys": 1118,
+      "leaf_keys": 1125,
       "missing": [],
       "extra": [
         "aboutLetMeDowngradeUrl",
@@ -216,7 +223,7 @@
       "blank": []
     },
     "tr": {
-      "leaf_keys": 1118,
+      "leaf_keys": 1125,
       "missing": [],
       "extra": [
         "aboutLetMeDowngradeUrl",
@@ -227,7 +234,7 @@
       "blank": []
     },
     "ja": {
-      "leaf_keys": 1118,
+      "leaf_keys": 1125,
       "missing": [],
       "extra": [
         "aboutLetMeDowngradeUrl",
@@ -238,7 +245,7 @@
       "blank": []
     },
     "pt": {
-      "leaf_keys": 1120,
+      "leaf_keys": 1127,
       "missing": [],
       "extra": [
         "aboutLetMeDowngradeUrl",
@@ -251,7 +258,7 @@
       "blank": []
     },
     "pt-BR": {
-      "leaf_keys": 1120,
+      "leaf_keys": 1127,
       "missing": [],
       "extra": [
         "aboutLetMeDowngradeUrl",

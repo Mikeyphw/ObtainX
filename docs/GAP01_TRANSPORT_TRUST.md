@@ -17,3 +17,7 @@ The widget test previously invoked the actual APKMirror network path under Flutt
 ## HF03 — hosted Android runner readiness
 
 After HF02 all full Flutter tests passed. The RT02C P03 runner instead failed while Flutter was replacing its debug APK: package path is not an atomic UID reservation. The shared host helper polls only the fixed debug package in Android user 0, treats clean absent responses and exact No UID as pending, and refuses all other failures. Existing bounded pollers use the same helper; the real RT02C authenticated case start requires eligibility. P03 retains successful eligibility, real UI cancellation and independent unchanged signed bytes, and stops its own Flutter process group on failure. No application-source security policy or device receipt is weakened. The local tests reproduce the exact exit/error race and fatal alternatives; real hosted device acceptance remains mandatory.
+
+## FINAL-AUDIT-03 — approved F03 limit
+
+The operator explicitly approved retaining fail-closed attestation enforcement until a supported cryptographic verifier exists. No stored receipt, provider presence, certificate digest or API response becomes cryptographic verification. See `FINAL_AUDIT_03_TRUST.md`.

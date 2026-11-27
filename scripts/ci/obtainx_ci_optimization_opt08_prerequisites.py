@@ -23,6 +23,7 @@ FLUTTER_STEPS = (
     'R03 deterministic mock HTTP resume and persistence tests',
     'R08 source reliability named regressions',
     'F-Droid and source provider digest regressions',
+    'R09 byte-backed artifact metadata review',
     'Execute full Flutter test suite',
 )
 MAX_POLLS = 24

@@ -90,6 +90,27 @@ class AppInfoDialog extends StatelessWidget {
   }
 }
 
+/// Presentation of facts already inspected from the exact consented APK bytes.
+/// Do not infer missing manifest fields or initiate network requests here.
+List<String> r09MemberReviewLines(R09ApkFacts member, bool selected,
+    String Function(String) label) {
+  String values(List<String> items) => items.isEmpty ? label('r09ReviewNone') : items.join(', ');
+  return [
+    '${member.name} · ${label(selected ? 'r09ReviewSelected' : 'r09ReviewNotSelected')}',
+    '${member.packageName} · ${member.versionName ?? label('unknown')} (${member.versionCode})',
+    '${label('r09ReviewMinSdk')}: ${member.minSdk ?? label('unknown')} · ${member.split ?? label('r09ReviewBase')}',
+    '${label('r09ReviewTargetSdk')}: ${member.targetSdk ?? label('unknown')}',
+    '${label('r09ReviewSplitRequired')}: ${label(member.splitRequired ? 'yes' : 'no')}',
+    '${label('r09ReviewRequiredSplits')}: ${values(member.requiredSplits)}',
+    '${label('r09ReviewConfigForSplit')}: ${member.configForSplit ?? label('r09ReviewNone')}',
+    '${label('r09ReviewRequiredSplitTypes')}: ${values(member.requiredSplitTypes)}',
+    '${label('r09ReviewProvidedSplitTypes')}: ${values(member.splitTypes)}',
+    '${label('r09ReviewNativeAbi')}: ${member.nativeAbis.isEmpty ? label('r09ReviewNoNativeLibs') : member.nativeAbis.join(', ')}',
+    '${label('r09ReviewLocalDigest')}: ${member.sha256}',
+    '${label('r09ReviewCertificates')}: ${member.signers.isEmpty ? label('unknown') : member.signers.join(', ')}',
+  ];
+}
+
 class AppFilePicker extends StatefulWidget {
   const AppFilePicker({
     super.key,
@@ -217,14 +238,8 @@ class _AppFilePickerState extends State<AppFilePicker> {
       ...result.refusals.map((reason) => tr(reason)),
     ];
     for (final member in result.members) {
-      lines.addAll([
-        '${member.name} · ${tr(result.selectedPaths.contains(member.path) ? 'r09ReviewSelected' : 'r09ReviewNotSelected')}',
-        '${member.packageName} · ${member.versionName ?? tr('unknown')} (${member.versionCode})',
-        '${tr('r09ReviewMinSdk')}: ${member.minSdk ?? tr('unknown')} · ${member.split ?? tr('r09ReviewBase')}',
-        '${tr('r09ReviewNativeAbi')}: ${member.nativeAbis.isEmpty ? tr('r09ReviewNoNativeLibs') : member.nativeAbis.join(', ')}',
-        '${tr('r09ReviewLocalDigest')}: ${member.sha256}',
-        '${tr('r09ReviewCertificates')}: ${member.signers.isEmpty ? tr('unknown') : member.signers.join(', ')}',
-      ]);
+      lines.addAll(r09MemberReviewLines(member,
+          result.selectedPaths.contains(member.path), (key) => tr(key)));
     }
     return lines.join('\n');
   }

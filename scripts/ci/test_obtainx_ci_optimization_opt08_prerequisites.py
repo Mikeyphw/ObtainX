@@ -63,6 +63,8 @@ class Opt08Prerequisites(unittest.TestCase):
     def test_all_flutter_decisive_steps_required_before_android(self):
         workflow = (ROOT / '.github/workflows/obtainx-r00-flutter.yml').read_text()
         self.assertIn('Execute full Flutter test suite', opt.FLUTTER_STEPS)
+        self.assertIn('R09 byte-backed artifact metadata review', opt.FLUTTER_STEPS)
+        self.assertIn('name: R09 byte-backed artifact metadata review\n        run: flutter test --no-pub test/r09_artifact_inspection_test.dart', workflow)
         self.assertIn('R08 source reliability named regressions', opt.FLUTTER_STEPS)
         self.assertIn('F-Droid and source provider digest regressions', opt.FLUTTER_STEPS)
         self.assertIn('name: F-Droid and source provider digest regressions\n        run: flutter test --no-pub test/source_provider_test.dart', workflow)

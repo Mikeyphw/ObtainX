@@ -15,7 +15,7 @@ REQUIRED = {
     'lib/app_sources/apkmirror.dart': ['previous.url != standardUrl', 'filteredEntries.take(3)', 'filteredEntries.length > 3'],
     'lib/app_sources/apkcombo.dart': ['#best-variant-tab ul.file-list > li', "resolved.queryParametersAll['u']", "resolved.scheme != 'https'"],
     'lib/app_sources/rustore.dart': ['overallInfoResponse.statusCode == 419', 'downloadLinksResponse.statusCode == 419', 'links.length != 1'],
-    'lib/app_sources/farsroid.dart': ['farsroidDownloadBoxUri(postId, version).toString()', "'post_version': version", 'data is Map'],
+    'lib/app_sources/farsroid.dart': ['farsroidDownloadBoxUri(postId, version).toString()', "'post_version': version", 'data is Map', "html.querySelectorAll('#secure-json')", 'farsroidPublicAssetLinks(', 'base64Decode(encoded.toString())', 'Conflicting Farsroid public asset identity', 'resolved.userInfo.isNotEmpty', 'reference.hasScheme ? raw : resolved.toString()'],
     'lib/pages/home.dart': ['await handleAddUrl(obtainiumAddUrl(uri))', 'IncomingSourceLinkGate()', 'linkGate.accept(uri, DateTime.now())', 'pendingLink = pendingLink.then'],
     'lib/components/version_regex_assist_dialog.dart': ['R10RegexPreview(', 'invert: widget.initialInvert'],
     'lib/components/r10_regex_preview.dart': ["filterApks([MapEntry(sample, '')], request.pattern, request.invert)", 'R10RegexPreviewStatus.ready'],

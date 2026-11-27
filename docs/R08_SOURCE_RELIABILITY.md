@@ -48,3 +48,7 @@ identity and action must be in the same allowlisted system UI. All six CI
 workflows pin checkout, evidence and cache identities to the PR head via
 OX_EXPECTED_SHA (or the actual event commit outside PRs); structural regressions
 cover synthetic merge substitution, unbound artifacts and conditional guards.
+
+## FINAL-AUDIT-03 — approved F06 limit
+
+The public Farsroid format change is addressed in the source parser and deterministic fixtures. Current-format malformed metadata refuses rather than falling back. Live provider acceptance remains pending. RuStore unsupported authentication is explicitly accepted; no extracted official-client credentials are used. APKMirror access-control refusal and shared pacing are preserved. See `FINAL_AUDIT_03_TRUST.md`.

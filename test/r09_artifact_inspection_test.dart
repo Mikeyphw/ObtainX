@@ -1,6 +1,7 @@
 import 'dart:typed_data' show Uint8List;
 import 'package:flutter/services.dart' show MethodChannel;
 import 'package:obtainium/providers/apps_provider.dart';
+import 'package:obtainium/components/app_detail_widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/services/r09_artifact_inspection.dart';
@@ -97,6 +98,29 @@ void main() {
     ]) {
       expect(review([base, bad], format: InstallArtifactFormat.apks).eligible, isFalse);
     }
+  });
+  test('FINAL-AUDIT-03 review presents byte-backed member metadata without inference', () {
+    final facts = R09ApkFacts.fromNative(<String, Object?>{
+      'packageName': 'dev.example.app', 'versionCode': 2, 'versionName': '2.0',
+      'minSdk': 26, 'targetSdk': 35, 'split': 'config.arm64_v8a', 'configForSplit': 'base',
+      'splitRequired': true, 'requiredSplits': ['feature'], 'requiredSplitTypes': ['base__abi'],
+      'splitTypes': ['base__abi'], 'nativeAbis': ['arm64-v8a'], 'signers': [signer],
+    }, path: '/private/config.arm64_v8a.apk', name: 'config.arm64_v8a.apk', sha256: digest);
+    final lines = r09MemberReviewLines(facts, false, (key) => key);
+    expect(lines, containsAll([
+      'config.arm64_v8a.apk · r09ReviewNotSelected',
+      'dev.example.app · 2.0 (2)',
+      'r09ReviewMinSdk: 26 · config.arm64_v8a',
+      'r09ReviewTargetSdk: 35', 'r09ReviewSplitRequired: yes',
+      'r09ReviewRequiredSplits: feature', 'r09ReviewConfigForSplit: base',
+      'r09ReviewRequiredSplitTypes: base__abi', 'r09ReviewProvidedSplitTypes: base__abi',
+      'r09ReviewNativeAbi: arm64-v8a', 'r09ReviewLocalDigest: $digest',
+      'r09ReviewCertificates: $signer',
+    ]));
+    final unknown = r09MemberReviewLines(member('base.apk', sdk: null), true, (key) => key);
+    expect(unknown, containsAll(['base.apk · r09ReviewSelected',
+      'r09ReviewMinSdk: unknown · r09ReviewBase', 'r09ReviewTargetSdk: unknown',
+      'r09ReviewSplitRequired: no', 'r09ReviewRequiredSplits: r09ReviewNone']));
   });
   test('selection is bound to exact release and reviewed digest', () {
     final binding = R09ReviewBinding(releaseKey: 'release', digest: digest);

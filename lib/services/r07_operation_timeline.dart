@@ -447,7 +447,7 @@ class R07OperationTimeline {
   // Bounded review batches avoid an unbounded in-memory deletion manifest.
   Future<R07EventRetentionPreview> _previewEvents(Transaction txn, DateTime cutoff,
       String? listingKey, String? packageId, String? channel) async {
-    final where = <String>["o.finished = 1", "o.stage IN ('checked','downloadReady','failed','cancelled','declined')",
+    final where = <String>['o.finished = 1', "o.stage IN ('checked','downloadReady','failed','cancelled','declined')",
       "o.channel != 'unknown'", 'o.parentId IS NULL', 'o.transferId IS NULL', 'o.attemptId IS NULL',
       'o.updated < ?', 'o.revision > 1',
       'NOT EXISTS (SELECT 1 FROM operations child WHERE child.parentId = o.id)',

@@ -36,7 +36,8 @@ Map<String, Object?> r11PublicReceipt(R05OperationReceipt receipt) => {
 
 Map<String, Object?>? r11PublicRecord(R07ActivityRecord record) {
   if (record.install != null) return r11PublicReceipt(record.install!);
-  if (record.download != null) return {
+  if (record.download != null) {
+    return {
       'kind': 'download',
       'id': r11HistoryKey(record.id),
       'listing': record.listingKey == null ? null : r11HistoryKey(record.listingKey!),
@@ -49,7 +50,9 @@ Map<String, Object?>? r11PublicRecord(R07ActivityRecord record) {
       'totalBytes': record.totalBytes,
       'digest': record.download!.finalDigest,
     };
-    if (record.timeline != null) return {
+  }
+  if (record.timeline != null) {
+    return {
       'kind': record.timeline!.intent.kind,
       'id': record.timeline!.id,
       'listing': record.timeline!.intent.channel == 'unknown' ? null : r11HistoryKey(record.timeline!.intent.listingKey),
@@ -62,7 +65,8 @@ Map<String, Object?>? r11PublicRecord(R07ActivityRecord record) {
       'attempt': record.timeline!.attemptId,
       'updatedUtc': record.updatedUtc.toIso8601String(),
     };
-    return null;
+  }
+  return null;
 }
 
 Map<String, Object?> r11PublicHistory(List<R07ActivityRecord> records) => {

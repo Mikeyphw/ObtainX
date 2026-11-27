@@ -1,5 +1,5 @@
-/// Resource admission checks. The Android plugin is registered on foreground
-/// and background engines; missing capacity evidence is not treated as space.
+// Resource admission checks. The Android plugin is registered on foreground
+// and background engines; missing capacity evidence is not treated as space.
 import 'dart:io';
 import 'package:flutter/services.dart';
 

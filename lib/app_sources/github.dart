@@ -1597,17 +1597,17 @@ class GitHub extends AppSource {
     // GitHub's completed/successful run is not enough to trust the bytes.
     // Require an actual ZIP digest before making this Actions candidate
     // installable. The final downloaded file is independently rehashed.
-    final archiveDigest = archive.archiveSha256;
-    if (archiveDigest == null) {
+    if (archive.archiveSha256 == null) {
       throw const R04ActionsFailure(
         'GitHub Actions archive has no SHA-256 digest; cannot verify download',
       );
     }
+    final archiveDigest = archive.archiveSha256!;
     additionalSettings[r04ActionsArchiveEvidenceKey] = <String, dynamic>{
       'sourceUrl': standardUrl,
       'archiveUrl': archive.archiveUrl.toString(),
       'archiveName': archive.fileName,
-      'archiveSha256': archive.archiveSha256,
+      'archiveSha256': archiveDigest,
       'artifactId': archive.artifactId,
       'runId': archive.runId,
       'runAttempt': archive.runAttempt,
@@ -1625,8 +1625,7 @@ class GitHub extends AppSource {
       'Commit SHA: ${archive.commitSha}',
       'Artifact ID: ${archive.artifactId}',
       'Expires: ${archive.expiresAt.toIso8601String()}',
-      if (archive.archiveSha256 != null)
-        'ZIP digest (NOT APK signing): sha256:${archive.archiveSha256}',
+      'ZIP digest (NOT APK signing): sha256:$archiveDigest',
       'Final APK certificate and installed bytes require R02 verification.',
     ];
     return APKDetails(

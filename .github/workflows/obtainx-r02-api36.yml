@@ -51,7 +51,7 @@ jobs:
           OX_PLAN_DIGEST: ${{ steps.scope.outputs.plan_digest }}
         shell: bash
         run: test "${#OX_PLAN_DIGEST}" -eq 64 && [[ "$OX_PLAN_DIGEST" =~ ^[a-f0-9]{64}$ ]]
-      - name: Await exact-head source and targeted Flutter prerequisites
+      - name: Await exact-head source and full Flutter test prerequisites
         if: github.event_name == 'pull_request' && steps.scope.outputs.mode == 'full' && steps.scope.outputs.api36 == 'true'
         timeout-minutes: 15
         shell: bash

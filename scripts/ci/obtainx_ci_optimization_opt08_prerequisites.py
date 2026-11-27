@@ -21,6 +21,9 @@ from obtainx_ci_policy import FULL_PROOFS, REPO_ID, SHA, git, read_api
 FLUTTER_STEPS = (
     'Analyze current source and tests',
     'R03 deterministic mock HTTP resume and persistence tests',
+    'R08 source reliability named regressions',
+    'F-Droid and source provider digest regressions',
+    'Execute full Flutter test suite',
 )
 MAX_POLLS = 24
 POLL_SECONDS = 30

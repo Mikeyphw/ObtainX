@@ -60,6 +60,26 @@ class Opt08Prerequisites(unittest.TestCase):
         with self.assertRaises(ValueError):
             opt.wait(HEAD, TREE, api=f, polls=1)
 
+    def test_all_flutter_decisive_steps_required_before_android(self):
+        workflow = (ROOT / '.github/workflows/obtainx-r00-flutter.yml').read_text()
+        self.assertIn('Execute full Flutter test suite', opt.FLUTTER_STEPS)
+        self.assertIn('R08 source reliability named regressions', opt.FLUTTER_STEPS)
+        self.assertIn('F-Droid and source provider digest regressions', opt.FLUTTER_STEPS)
+        self.assertIn('name: F-Droid and source provider digest regressions\n        run: flutter test --no-pub test/source_provider_test.dart', workflow)
+        for name in opt.FLUTTER_STEPS:
+            with self.subTest(step=name):
+                for state in ('failure', 'skipped'):
+                    f = Fixture()
+                    step = next(s for s in f.jobs[22][0]['steps'] if s['name'] == name)
+                    step['conclusion'] = state
+                    with self.assertRaises(ValueError):
+                        opt.wait(HEAD, TREE, api=f, polls=1)
+                f = Fixture()
+                step = next(s for s in f.jobs[22][0]['steps'] if s['name'] == name)
+                step.update(status='in_progress', conclusion=None)
+                with self.assertRaises(TimeoutError):
+                    opt.wait(HEAD, TREE, api=f, polls=1)
+
     def test_skipped_step_refused(self):
         f = Fixture()
         f.jobs[22][0]['steps'][-1]['conclusion'] = 'skipped'
@@ -120,7 +140,7 @@ class Opt08Prerequisites(unittest.TestCase):
             name = f'obtainx-r02-{lane}.yml'
             content = (ROOT/'.github/workflows'/name).read_text()
             parse_workflow(content, name)
-            self.assertEqual(content.count('Await exact-head source and targeted Flutter prerequisites'), 1)
+            self.assertEqual(content.count('Await exact-head source and full Flutter test prerequisites'), 1)
             self.assertIn(f"if: github.event_name == 'pull_request' && steps.scope.outputs.mode == 'full' && steps.scope.outputs.{lane} == 'true'", content)
             self.assertIn(f"needs: scope\n    if: needs.scope.outputs.{lane} == 'true'", content)
             self.assertLess(content.index('Await exact-head source'), content.index('Set up Java 21'))

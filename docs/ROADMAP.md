@@ -781,3 +781,7 @@ Keep current app styling and adaptive layout concepts; prioritize clear labels, 
 5. Deliver R01–R02 as a consolidated, CI-qualified change before user-facing Actions UI or further automation.
 
 **Final project rule:** Features are not “done” because a source patch applied or an APK built. “Done” means reviewed semantics, current contracts, hosted tests, appropriate Android runtime evidence and release provenance are all recorded.
+
+## FINAL-AUDIT-03 — Provider and artifact trust closure
+
+See `FINAL_AUDIT_03_TRUST.md` for approved F03/F06/F07 scope, public metadata repair and byte-backed review. F03 unsupported cryptographic verification remains fail-closed; RuStore unsupported session is not a live provider pass. Explicit bounded artifact inspection is the approved F07 boundary. FINAL-AUDIT-02-HF03 hosted acceptance is verified at exact head `f4560d836c427d869f88599e79dda23e00be602d`; PR #32 merged at `e72a1881653f13e55891b41bf377ca22f576fb2b` with the exact qualified tree. FINAL-AUDIT-03 qualification requires fresh independent evidence. FINAL-AUDIT-04 remains gated.

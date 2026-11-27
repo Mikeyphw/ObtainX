@@ -906,7 +906,7 @@ class APKMirror extends AppSource {
       }
       return releasePageSize;
     } catch (error) {
-      await _logApkMirrorSizeDebug('lazy resolver error=${error.toString()}');
+      await _logApkMirrorSizeDebug('lazy resolver error=${error.runtimeType}');
       return null;
     }
   }

@@ -43,10 +43,139 @@ def need(ok: bool, reason: str) -> None:
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
+# The native pending-approval callback precedes Android drawing/focusing its
+# window. Wait for a fresh focused window, not a stale package name anywhere
+# in dumpsys. This is a hosted harness boundary, not an installer retry.
+FOREGROUND_BUDGET = 55.0
+APPROVAL_FOCUS_BUDGET = 20.0
+FOREGROUND_COMPONENT = base.APP+'/dev.imranr.obtainium.MainActivity'
+FOREGROUND_REFUSALS = frozenset({
+    'P03_BASELINE_REFUSED', 'P03_WINDOW_QUERY_REFUSED',
+    'P03_APPROVAL_FOCUS_TIMEOUT', 'P03_FOREGROUND_START_REFUSED',
+    'P03_APP_FOCUS_TIMEOUT', 'P03_FOREGROUND_DEADLINE',
+    'P03_FOREGROUND_DUPLICATE', 'P03_FOREGROUND_REQUEST_REFUSED',
+})
+
+
+class ForegroundRefused(Refused):
+    def __init__(self, code: str):
+        if code not in FOREGROUND_REFUSALS:
+            raise ValueError('invalid foreground refusal code')
+        super().__init__(code)
+
+
+DISPLAY_HEADER = 'WINDOW MANAGER DISPLAY CONTENTS (dumpsys window displays)'
+
+
+def focus_observation(display_state: str) -> tuple[str | None, str]:
+    """Parse only live, single-display user-0 focus from WindowManager.
+
+    Android 16's window-list dump is not the display-state dump. The latter
+    owns mCurrentFocus; mFocusedApp, previous focus and window inventory are
+    never substitutes. This disposable emulator lane requires display 0 only.
+    """
+    if len(display_state) > 2 * 1024 * 1024:
+        return None, 'DISPLAY_OVERSIZE'
+    lines = display_state.splitlines()
+    if not lines or lines[0].strip() != DISPLAY_HEADER:
+        return None, 'DISPLAY_HEADER_MISSING'
+    displays = [(i, match.group(1)) for i, line in enumerate(lines)
+                if (match := re.fullmatch(r'[ \t]*Display: mDisplayId=(\d+)(?: \(organized\))?[ \t]*', line))]
+    if len(displays) != 1 or displays[0][1] != '0':
+        return None, 'DISPLAY_AMBIGUOUS'
+    focus = [(i, match.group(1).strip()) for i, line in enumerate(lines)
+             if (match := re.fullmatch(r'[ \t]*mCurrentFocus=([^\r\n]*)', line))]
+    if not focus:
+        return None, 'FOCUS_MISSING'
+    if len(focus) != 1 or focus[0][0] <= displays[0][0]:
+        return None, 'FOCUS_AMBIGUOUS'
+    value = focus[0][1]
+    if value == 'null':
+        return None, 'FOCUS_NULL'
+    match = re.fullmatch(r'Window\{[0-9a-fA-F]+ u0 ([A-Za-z0-9_.]+)/([A-Za-z0-9_.$]+)\}', value)
+    if not match:
+        return None, 'FOCUS_NONCOMPONENT'
+    package, activity = match.groups()
+    if activity.startswith('.'):
+        activity = package + activity
+    component = package + '/' + activity
+    if component == FOREGROUND_COMPONENT:
+        return component, 'APP_FOCUSED'
+    if package in base.APPROVERS:
+        return component, 'APPROVER_FOCUSED'
+    return component, 'OTHER_FOCUSED'
+
+
+def focused_component(window: str) -> str | None:
+    return focus_observation(window)[0]
+
+
+def wait_focused_window(predicate, deadline: float, refusal: str) -> None:
+    last_observation = 'NO_SAMPLE'
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            # AOSP Android 16 WindowManagerService.dump: "displays" invokes
+            # RootWindowContainer.dumpDisplayContents; "windows" does not.
+            window = base.adb('shell','dumpsys','window','displays',
+                              timeout=min(5, remaining))
+        except (base.Refused, subprocess.TimeoutExpired) as exc:
+            raise ForegroundRefused('P03_WINDOW_QUERY_REFUSED') from exc
+        component, last_observation = focus_observation(window)
+        if time.monotonic() < deadline and component is not None and predicate(component):
+            print('OX_R02F_P03_FOCUS_OBSERVED category='+last_observation, flush=True)
+            return
+        time.sleep(max(0, min(0.4, deadline-time.monotonic())))
+    # Only fixed categories; raw Android dumps and arbitrary app names never
+    # reach CI output. Distinguish absent/malformed evidence from actual focus.
+    print('OX_R02F_P03_FOCUS_TIMEOUT category='+last_observation, flush=True)
+    raise ForegroundRefused(refusal)
+
+
+def restore_app_foreground(fixtures: Path, baseline: dict) -> None:
+    deadline = time.monotonic() + FOREGROUND_BUDGET
+    # No Install tap, no ADB session abandonment, no activity restart retry.
+    # The owned Dart operation already proved an active pending session.
+    wait_focused_window(lambda c: c.split('/',1)[0] in base.APPROVERS,
+                        min(deadline, time.monotonic()+APPROVAL_FOCUS_BUDGET),
+                        'P03_APPROVAL_FOCUS_TIMEOUT')
+    try:
+        unchanged = rt02c.baseline_v1(fixtures, deadline=deadline) == baseline
+    except (Refused, base.Refused, rt02c.Refused, subprocess.TimeoutExpired, OSError) as exc:
+        raise ForegroundRefused('P03_BASELINE_REFUSED') from exc
+    if not unchanged:
+        raise ForegroundRefused('P03_BASELINE_REFUSED')
+    # A slow baseline probe must never authorize a late foreground mutation.
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ForegroundRefused('P03_FOREGROUND_DEADLINE')
+    # Recheck current approval after the baseline probe, before bringing the
+    # same existing Activity forward (CLEAR_TOP | SINGLE_TOP).
+    wait_focused_window(lambda c: c.split('/',1)[0] in base.APPROVERS,
+                        min(deadline, time.monotonic()+5),
+                        'P03_APPROVAL_FOCUS_TIMEOUT')
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ForegroundRefused('P03_FOREGROUND_DEADLINE')
+    try:
+        result = base.adb('shell','am','start','-f','0x24000000','-n',
+                          FOREGROUND_COMPONENT, timeout=min(10, remaining))
+    except (base.Refused, subprocess.TimeoutExpired) as exc:
+        raise ForegroundRefused('P03_FOREGROUND_START_REFUSED') from exc
+    if re.search(r'(?im)^\s*(?:error|exception|securityexception)\b', result):
+        raise ForegroundRefused('P03_FOREGROUND_START_REFUSED')
+    wait_focused_window(lambda c: c == FOREGROUND_COMPONENT, deadline,
+                        'P03_APP_FOCUS_TIMEOUT')
+
+
 class P03Handler(BaseHTTPRequestHandler):
     fixtures: Path
     baseline: dict
     foreground_count: int = 0
+    foreground_attempted: bool = False
+    foreground_lock = threading.Lock()
 
     def log_message(self, *args): pass
 
@@ -69,24 +198,21 @@ class P03Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path != '/p03/foreground' or self.headers.get('Content-Length') != '0':
             self.send_error(403); return
-        if P03Handler.foreground_count:
-            self.send_error(409); return
+        # Exactly one foreground attempt, including refusal. A second request
+        # cannot duplicate a mutation whose outcome was uncertain.
+        with P03Handler.foreground_lock:
+            if P03Handler.foreground_attempted:
+                self.send_error(409, 'P03_FOREGROUND_DUPLICATE'); return
+            P03Handler.foreground_attempted = True
         try:
-            # Device baseline must still match after the system displayed the
-            # approval prompt; no install was approved by host input.
-            need(rt02c.baseline_v1(self.fixtures) == self.baseline,
-                 'v1 baseline changed before UI cancellation')
-            window = base.adb('shell','dumpsys','window','windows', timeout=25).lower()
-            need('packageinstaller' in window or 'permissioncontroller' in window,
-                 'Android user-approval screen not observed')
-            # Reuse the same Flutter test Activity; CLEAR_TOP | SINGLE_TOP
-            # prevents the Android installer overlay from spawning a second
-            # MainActivity and destroying the in-flight integration test.
-            base.adb('shell','am','start','-f','0x24000000','-n',
-                     base.APP+'/dev.imranr.obtainium.MainActivity', timeout=30)
+            restore_app_foreground(self.fixtures, self.baseline)
+        except ForegroundRefused as exc:
+            # Publish only a fixed category. No raw dumpsys, ADB text or paths.
+            code = str(exc)
+            print('OX_R02F_P03_FOREGROUND_REFUSED code='+code, flush=True)
+            self.send_error(409, code); return
+        with P03Handler.foreground_lock:
             P03Handler.foreground_count += 1
-        except (Refused, base.Refused, subprocess.TimeoutExpired) as exc:
-            self.send_error(409, str(exc)[:120]); return
         data = b'foreground_ready'
         self.send_response(200)
         self.send_header('Content-Type', 'text/plain')
@@ -112,6 +238,7 @@ def run(out: Path) -> int:
     P03Handler.fixtures = fixtures
     P03Handler.baseline = before
     P03Handler.foreground_count = 0
+    P03Handler.foreground_attempted = False
     server = ThreadingHTTPServer(('127.0.0.1', base.PORT), P03Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     log = out/'r02f-p03-private.log'

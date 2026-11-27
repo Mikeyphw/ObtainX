@@ -941,7 +941,7 @@ Future<PackageInfo?> getInstalledInfo(
       }
     } catch (e) {
       if (printErr) {
-        debugPrint('getInstalledInfo($packageName): $e');
+        debugPrint('getInstalledInfo($packageName): ${e.runtimeType}');
       }
       if (throwOnError) rethrow;
     }
@@ -1247,7 +1247,7 @@ class AppsProvider with ChangeNotifier {
 
   /// Records a transient error banner for [appId]'s detail page.
   void setAppPageError(String appId, Object error, {String? title}) {
-    appPageErrors[appId] = (title: title, message: error.toString());
+    appPageErrors[appId] = (title: title, message: safeErrorDisplay(error));
     notifyListeners();
   }
 
@@ -1269,7 +1269,7 @@ class AppsProvider with ChangeNotifier {
     loadApps().catchError((e) {
       unawaited(
         logs.add(
-          'Reload after background save failed: $e',
+          'Reload after background save failed: ${e.runtimeType}',
           level: LogLevel.error,
         ),
       );
@@ -1377,7 +1377,7 @@ class AppsProvider with ChangeNotifier {
     try {
       status = await R02fP03CancellableStock.instance.cancelRecovered(id);
     } catch (error) {
-      unawaited(logs.add('P03 recovered cancel uncertain: $error'));
+      unawaited(logs.add('P03 recovered cancel uncertain: ${error.runtimeType}'));
     }
     final entry = apps[listingKey];
     if (entry == null) return;
@@ -1404,7 +1404,7 @@ class AppsProvider with ChangeNotifier {
         }
       } catch (error) {
         recoveredNativeInstallIds[listingKey] = id;
-        unawaited(logs.add('P03 post-cancel recovery uncertain: $error'));
+        unawaited(logs.add('P03 post-cancel recovery uncertain: ${error.runtimeType}'));
       }
     }
     notify();
@@ -1455,7 +1455,7 @@ class AppsProvider with ChangeNotifier {
       entry.downloadProgress ??= -5;
       notify();
     } catch (error) {
-      unawaited(logs.add('P03 restart session reconciliation inconclusive: $error'));
+      unawaited(logs.add('P03 restart session reconciliation inconclusive: ${error.runtimeType}'));
     }
   }
 
@@ -1519,7 +1519,7 @@ class AppsProvider with ChangeNotifier {
         await export(isAuto: true);
       } catch (error) {
         unawaited(
-          logs.add('Auto-export failed: $error', level: LogLevel.warning),
+          logs.add('Auto-export failed: ${error.runtimeType}', level: LogLevel.warning),
         );
       } finally {
         _autoExportRunning = false;
@@ -1558,7 +1558,7 @@ class AppsProvider with ChangeNotifier {
           _needsBgReload = true;
           unawaited(
             logs.add(
-              'Foreground reconciliation failed: $error',
+              'Foreground reconciliation failed: ${error.runtimeType}',
               level: LogLevel.warning,
             ),
           );
@@ -1637,10 +1637,10 @@ class AppsProvider with ChangeNotifier {
       }
       _completeInitialLoad();
     }().catchError((e) {
-      initError = e.toString();
+      initError = safeErrorDisplay(e);
       _completeInitialLoad();
       unawaited(
-        logs.add('AppsProvider async init error: $e', level: LogLevel.error),
+        logs.add('AppsProvider async init error: ${e.runtimeType}', level: LogLevel.error),
       );
     });
   }
@@ -1807,7 +1807,7 @@ Future<bool> _runBGInstallMode(
         );
       });
     } else {
-      unawaited(logs.add('Fatal error in BG install task: ${e.toString()}'));
+      unawaited(logs.add('Fatal error in BG install task: ${e.runtimeType}'));
       rethrow;
     }
   }
@@ -2183,7 +2183,7 @@ _bgRunUpdateCheck(
       errors.rawErrors.forEach((key, err) {
         unawaited(
           logs.add(
-            'BG update task: Got error on checking for $key \'${err.toString()}\'.',
+            'BG update task: Got error on checking for $key \'${err.runtimeType}\'.',
           ),
         );
 
@@ -2211,7 +2211,7 @@ _bgRunUpdateCheck(
         }
       });
     } else {
-      unawaited(logs.add('Fatal error in BG update task: ${e.toString()}'));
+      unawaited(logs.add('Fatal error in BG update task: ${e.runtimeType}'));
       rethrow;
     }
   } finally {

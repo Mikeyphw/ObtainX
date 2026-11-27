@@ -342,7 +342,8 @@ void main() {
       expect(database.reads, 1);
       expect(
         provider.logs.messages.any(
-          (message) => message.contains('Check timestamp database read'),
+          (message) =>
+              message == 'Check timestamp database read failed: TimeoutException',
         ),
         isTrue,
       );

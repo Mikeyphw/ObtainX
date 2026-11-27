@@ -3,6 +3,7 @@ import 'dart:ui' show Brightness, PlatformDispatcher;
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/widgets.dart';
 import 'package:obtainium/app_distribution.dart';
+import 'package:obtainium/services/diagnostic_redaction.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/app_sources/gitlab.dart';
 import 'package:obtainium/providers/apps_provider.dart';
@@ -126,7 +127,7 @@ Future<String> _permissionStatusLabel(Permission permission) async {
   try {
     return (await permission.status).name;
   } catch (error) {
-    return 'Unknown ($error)';
+    return 'Unknown (${error.runtimeType})';
   }
 }
 
@@ -152,7 +153,7 @@ Future<String> buildObtainxDiagnosticLog({
   final StringBuffer buffer = StringBuffer();
   buffer.writeln('=== ObtainX Diagnostic Log ===');
   if (performanceReport.isNotEmpty) {
-    buffer.write(performanceReport);
+    buffer.write(redactDiagnosticText(performanceReport));
     if (!performanceReport.endsWith('\n')) buffer.writeln();
   }
 
@@ -170,7 +171,7 @@ Future<String> buildObtainxDiagnosticLog({
       );
       _writeLine(buffer, 'Package ID', packageInfo?.packageName ?? obtainiumId);
     } catch (error) {
-      _writeLine(buffer, 'App Version', 'Unknown ($error)');
+      _writeLine(buffer, 'App Version', 'Unknown (${error.runtimeType})');
     }
   }
   if (AppDistribution.fdroid) {
@@ -195,7 +196,7 @@ Future<String> buildObtainxDiagnosticLog({
       );
       _writeLine(buffer, 'ABIs', androidInfo.supportedAbis.join(', '));
     } catch (error) {
-      _writeLine(buffer, 'Device', 'Unknown ($error)');
+      _writeLine(buffer, 'Device', 'Unknown (${error.runtimeType})');
     }
   }
   if (settings.isTV) {
@@ -241,7 +242,7 @@ Future<String> buildObtainxDiagnosticLog({
     _writeLine(
       buffer,
       'GitHub request prefix',
-      '$githubProxy (sends token: ${settings.getSettingBool(GitHub.githubReqPrefixUseTokenKey)})',
+      'Configured (credential forwarding ${settings.getSettingBool(GitHub.githubReqPrefixUseTokenKey)})',
     );
   }
   final String? gitlabPat = settings.getSettingString('gitlab-creds');
@@ -341,7 +342,7 @@ Future<String> buildObtainxDiagnosticLog({
               : 'Configured (access ${await settings.getExportDir(warnIfInaccessible: false) != null})',
         );
       } catch (error) {
-        _writeLine(buffer, 'Export directory', 'Unknown ($error)');
+        _writeLine(buffer, 'Export directory', 'Unknown (${error.runtimeType})');
       }
     }
     if (settings.saveDownloadedApkCopies) {
@@ -355,7 +356,7 @@ Future<String> buildObtainxDiagnosticLog({
               : 'Configured (access ${await settings.getApkSaveDir(warnIfInaccessible: false) != null})',
         );
       } catch (error) {
-        _writeLine(buffer, 'APK save directory', 'Unknown ($error)');
+        _writeLine(buffer, 'APK save directory', 'Unknown (${error.runtimeType})');
       }
     }
   }

@@ -14,7 +14,7 @@ import zipfile
 
 import r12_release_gate as gate
 from r12_release_contract import ROOT, WORKFLOW, inspect_workflow
-from r12_device_evidence import MATRIX, verify_matrix, load
+from r12_device_evidence import MATRIX, LANE_RULES, verify_matrix, load
 from r00_source_contract import check_workflows, EXPECTED_WORKFLOWS
 from obtainx_ci_policy import FULL_PROOFS, REPO_ID
 
@@ -132,22 +132,54 @@ class ReleaseContractTests(unittest.TestCase):
             with self.subTest(flag=flag), self.assertRaises(gate.Refused):gate.hosted_ci(HEAD,lambda path:fetch(path,**{flag:True}))
 
     def test_device_matrix_refuses_wrong_bytes_stale_and_missing_lane(self):
-        candidate=dict(IDENT,schema='obtainx.r12.signed-candidate.v1',certificate_sha256=CERT,package_status='SIGNED_CANDIDATE_VERIFIED',publication_authorized=False,SOURCE_PASS='PASS_BUILD_LANES',HOSTED_CI_PASS='PASS_EXACT_MAIN_FULL_JOBS',apks={f'app-{abi}-normal-release.apk':{'sha256':DIGEST} for abi in gate.ABIS})
-        matrix=dict(IDENT,schema='obtainx.r12.device-matrix.v1',certificate_sha256=CERT,lanes={k:{'status':'PENDING_EXTERNAL','reason':'no approved fixture'} for k in MATRIX})
+        candidate=dict(IDENT,schema='obtainx.r12.signed-candidate.v1',certificate_sha256=CERT,package_status='SIGNED_CANDIDATE_VERIFIED',publication_authorized=False,SOURCE_PASS='PASS_BUILD_LANES',HOSTED_CI_PASS='PASS_EXACT_MAIN_FULL_JOBS',apks={f'app-{abi}-normal-release.apk':{'sha256':DIGEST, 'abi':abi, 'package':gate.PACKAGE, 'version_name':'2.21.0','version_code':221000+index,'certificate_sha256':CERT} for abi,index in gate.ABIS.items()})
+        matrix=dict(IDENT,schema='obtainx.r12.device-matrix.v2',certificate_sha256=CERT,lanes={k:{'status':'PENDING_EXTERNAL','reason':'no approved fixture'} for k in MATRIX})
         with tempfile.TemporaryDirectory() as t:
             d=Path(t);self.assertEqual(len(verify_matrix(candidate,matrix,d)['pending']),len(MATRIX))
-            for n in MATRIX:
-                f=d/(n+'.log');f.write_text('local fixture only, not actual device evidence');matrix['lanes'][n]=dict(status='PASS',apk='app-arm64-v8a-normal-release.apk',apk_sha256=DIGEST,observed_utc='2026-11-26T00:00:00Z',reviewer='fixture',backend=n,android_sdk=36,authorized_fixture=True,evidence=[{'path':f.name,'sha256':gate.digest(f)}])
+            fixtures = {}
+            for n,(backend,kind,checks) in LANE_RULES.items():
+                row=dict(status='PASS',apk='app-arm64-v8a-normal-release.apk',apk_sha256=DIGEST,observed_utc='2026-11-26T00:00:00Z',reviewer='fixture',backend=backend,device_kind=kind,android_sdk=36,abi='arm64-v8a',authorized_fixture=True,observations={})
+                matrix['lanes'][n]=row
+                for check,outcome in checks.items():
+                    f=d/f'{n}-{check}.log';f.write_text(f'synthetic {n} {check} {outcome}; not actual device evidence')
+                    proof=dict(IDENT,schema='obtainx.r12.device-observation.v2',certificate_sha256=CERT,lane=n,check=check,expected_outcome=outcome,outcome=outcome,**{k:v for k,v in row.items() if k not in ('observations','status')},attachments=[{'path':f.name,'sha256':gate.digest(f),'kind':'sanitized-log'}])
+                    proof['candidate_package_state']={'package':gate.PACKAGE,'version_code':221000+gate.ABIS['arm64-v8a'],'certificate_sha256':CERT,'apk_sha256':DIGEST,'independently_observed':True}
+                    if check in {'wrong-signer','downgrade','archive-invalid','cancel','refusal','declined-handoff','old-signer'} and outcome in ('REFUSED','CANCELLED'):proof.update(target_before=None,target_after=None,owned_session_remaining=False)
+                    if outcome=='INSTALLED' or check=='installed-identity':proof['target_package_state']={'package':'com.example.fixture','version_code':1,'certificate_sha256':CERT,'apk_sha256':DIGEST,'independently_observed':True}
+                    p=d/f'{n}-{check}.json';p.write_text(json.dumps(proof));row['observations'][check]={'path':p.name,'sha256':gate.digest(p)};fixtures[n,check]=(p,proof)
             result=verify_matrix(candidate,matrix,d);self.assertEqual(result['device_evidence_status'],'READY_FOR_INDEPENDENT_REVIEW');self.assertFalse(result['RELEASE_QUALIFIED'])
-            for mutation in ('sha','lane','apk','digest','consent','reuse'):
-                bad=copy.deepcopy(matrix);first=next(iter(MATRIX));second=list(MATRIX)[1]
+            first=next(iter(MATRIX));second=list(MATRIX)[1];check=next(iter(LANE_RULES[first][2]));other_check=next(iter(LANE_RULES[second][2]))
+            for mutation in ('sha','lane','apk','digest','consent','reuse','timestamp','backend','api','device-kind','abi','observation-missing','v1'):
+                bad=copy.deepcopy(matrix);row=bad['lanes'][first]
                 if mutation=='sha':bad['source_sha']=TREE
                 if mutation=='lane':bad['lanes'].pop(first)
-                if mutation=='apk':bad['lanes'][first]['apk_sha256']=CERT
-                if mutation=='digest':bad['lanes'][first]['evidence'][0]['sha256']=CERT
-                if mutation=='consent':bad['lanes'][first]['authorized_fixture']=False
-                if mutation=='reuse':bad['lanes'][second]['evidence']=bad['lanes'][first]['evidence']
+                if mutation=='apk':row['apk_sha256']=CERT
+                if mutation=='digest':row['observations'][check]['sha256']=CERT
+                if mutation=='consent':row['authorized_fixture']=False
+                if mutation=='reuse':bad['lanes'][second]['observations'][other_check]=row['observations'][check]
+                if mutation=='timestamp':row['observed_utc']='not-a-date'
+                if mutation=='backend':row['backend']='arbitrary'
+                if mutation=='api':row['android_sdk']=26
+                if mutation=='device-kind':row['device_kind']='physical'
+                if mutation=='abi':row['abi']='x86_64'
+                if mutation=='observation-missing':row['observations'].pop(check)
+                if mutation=='v1':bad['schema']='obtainx.r12.device-matrix.v1'
                 with self.subTest(mutation=mutation),self.assertRaises(gate.Refused):verify_matrix(candidate,bad,d)
+            original_path, original = fixtures[first,check]
+            for mutation in ('wrong-lane','wrong-outcome','missing-target','screenshot-only','duplicate-content','invalid-time','wrong-apk','wrong-installed-candidate'):
+                bad=copy.deepcopy(matrix);proof=copy.deepcopy(original)
+                if mutation=='wrong-lane':proof['lane']=second
+                if mutation=='wrong-outcome':proof['outcome']='ERROR'
+                if mutation=='missing-target':proof.pop('target_package_state')
+                if mutation=='screenshot-only':proof['attachments'][0]['kind']='screenshot'
+                if mutation=='duplicate-content':
+                    other=fixtures[second,other_check][1]['attachments'][0];duplicate=d/'distinct-filename.log';duplicate.write_bytes((d/other['path']).read_bytes());proof['attachments'][0].update(path=duplicate.name,sha256=gate.digest(duplicate))
+                if mutation=='invalid-time':proof['observed_utc']='2026-02-30T00:00:00Z'
+                if mutation=='wrong-apk':proof['apk_sha256']=CERT
+                if mutation=='wrong-installed-candidate':proof['candidate_package_state']['apk_sha256']=CERT
+                original_path.write_text(json.dumps(proof));bad['lanes'][first]['observations'][check]['sha256']=gate.digest(original_path)
+                with self.subTest(mutation=mutation),self.assertRaises(gate.Refused):verify_matrix(candidate,bad,d)
+            original_path.write_text(json.dumps(original))
             f=d/'duplicate.json';f.write_text('{"schema":1,"schema":2}')
             with self.assertRaises(gate.Refused):load(f)
 

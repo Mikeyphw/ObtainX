@@ -236,7 +236,7 @@ class _ImportFromUrlListPageState extends State<ImportFromUrlListPage> {
       try {
         _sourceProvider.getSource(lines[lineIndex].trim());
       } catch (error) {
-        return '${tr('line')} ${lineIndex + 1}: $error';
+        return '${tr('line')} ${lineIndex + 1}: ${safeErrorDisplay(error)}';
       }
     }
     return null;

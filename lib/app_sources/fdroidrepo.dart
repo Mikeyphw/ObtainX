@@ -261,7 +261,7 @@ class FDroidRepo extends AppSource {
       } catch (e) {
         unawaited(
           LogsProvider().add(
-            'Failed to get supported ABIs: $e',
+            'Failed to get supported ABIs: ${e.runtimeType}',
             level: LogLevel.error,
           ),
         );
@@ -375,7 +375,7 @@ class FDroidRepo extends AppSource {
       final appId = Uri.parse(inputUrl).queryParameters['appId'];
       _appIdFoundInUrl = appId != null;
     } catch (e) {
-      unawaited(LogsProvider().add('Failed to parse appId from URL: $e'));
+      unawaited(LogsProvider().add('Failed to parse appId from URL: ${e.runtimeType}'));
     }
   }
 

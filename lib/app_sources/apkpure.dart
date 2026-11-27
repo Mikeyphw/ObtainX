@@ -207,7 +207,7 @@ class APKPure extends AppSource {
       } catch (e) {
         unawaited(
           LogsProvider().add(
-            'Failed to get device info headers: $e',
+            'Failed to get device info headers: ${e.runtimeType}',
             level: LogLevel.error,
           ),
         );
@@ -250,7 +250,7 @@ class APKPure extends AppSource {
     } catch (e) {
       unawaited(
         LogsProvider().add(
-          'APKPure icon fetch failed: $e',
+          'APKPure icon fetch failed: ${e.runtimeType}',
           level: LogLevel.error,
         ),
       );
@@ -275,7 +275,7 @@ class APKPure extends AppSource {
       } catch (e) {
         unawaited(
           LogsProvider().add(
-            'Failed to get supported ABIs: $e',
+            'Failed to get supported ABIs: ${e.runtimeType}',
             level: LogLevel.error,
           ),
         );
@@ -296,7 +296,7 @@ class APKPure extends AppSource {
       } catch (e) {
         unawaited(
           LogsProvider().add(
-            'Failed to parse version list: $e',
+            'Failed to parse version list: ${e.runtimeType}',
             level: LogLevel.error,
           ),
         );

@@ -41,6 +41,7 @@ import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/providers/virustotal_provider.dart';
 import 'package:obtainium/services/diagnostic_snapshot.dart';
+import 'package:obtainium/services/diagnostic_redaction.dart';
 import 'package:obtainium/services/performance_recorder.dart';
 import 'package:obtainium/theme.dart';
 import 'package:obtainium/theme/app_dialog_theme.dart';
@@ -1088,7 +1089,7 @@ class _RunBgUpdateCheckNowButtonState
     } catch (e) {
       unawaited(
         logs.add(
-          'Manual background update check failed: $e',
+          'Manual background update check failed: ${e.runtimeType}',
           level: LogLevel.error,
         ),
       );
@@ -3645,7 +3646,7 @@ class _LogsSheetState extends State<LogsSheet> {
           setState(() {
             final chronologicalLogs = logsList.reversed.toList();
             final String joinedLogs = chronologicalLogs
-                .map((logEntry) => logEntry.toString())
+                .map((logEntry) => boundedDiagnosticText(logEntry.toString()))
                 .join('\n\n');
             logString = joinedLogs.isNotEmpty ? joinedLogs : tr('noLogs');
             isLoading = false;

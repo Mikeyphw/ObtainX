@@ -301,7 +301,7 @@ class FDroid extends AppSource {
         } catch (e) {
           unawaited(
             LogsProvider().add(
-              'Failed to process changelog for F-Droid app: ${e.toString()}',
+              'Failed to process changelog for F-Droid app: ${e.runtimeType}',
             ),
           );
         }
@@ -420,7 +420,7 @@ class FDroid extends AppSource {
       unawaited(
         LogsProvider().add(
           'Failed to check F-Droid reproducible build status for '
-          '$appId ($versionCode): $e',
+          '$appId ($versionCode): ${e.runtimeType}',
         ),
       );
       return reproducibleBuildStatusError;
@@ -679,7 +679,7 @@ class FDroid extends AppSource {
         } catch (error) {
           unawaited(
             LogsProvider().add(
-              'Failed to read F-Droid package page for ABI selection: $error',
+              'Failed to read F-Droid package page for ABI selection: ${error.runtimeType}',
               level: LogLevel.warning,
             ),
           );
@@ -700,7 +700,7 @@ class FDroid extends AppSource {
         } catch (error) {
           unawaited(
             LogsProvider().add(
-              'Failed to get supported ABIs: $error',
+              'Failed to get supported ABIs: ${error.runtimeType}',
               level: LogLevel.error,
             ),
           );

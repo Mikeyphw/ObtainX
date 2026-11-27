@@ -44,7 +44,7 @@ class ExternalInstallerBridge {
     } catch (e) {
       unawaited(
         LogsProvider().add(
-          'Failed to list external installer targets: $e',
+          'Failed to list external installer targets: ${e.runtimeType}',
           level: LogLevel.error,
         ),
       );
@@ -85,7 +85,7 @@ class ExternalInstallerBridge {
     } catch (e) {
       unawaited(
         LogsProvider().add(
-          'Failed to get label for $package: $e',
+          'Failed to get label for $package: ${e.runtimeType}',
           level: LogLevel.warning,
         ),
       );
@@ -99,7 +99,7 @@ class ExternalInstallerBridge {
     } catch (e) {
       unawaited(
         LogsProvider().add(
-          'Failed to get icon for $package: $e',
+          'Failed to get icon for $package: ${e.runtimeType}',
           level: LogLevel.warning,
         ),
       );

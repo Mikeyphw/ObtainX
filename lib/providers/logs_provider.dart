@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:obtainium/services/diagnostic_redaction.dart';
 
 const String logTable = 'logs';
 const String idColumn = '_id';
@@ -9,13 +10,17 @@ const String levelColumn = 'level';
 const String messageColumn = 'message';
 const String timestampColumn = 'timestamp';
 const String dbPath = 'logs.db';
+const String redactionColumn = 'redaction_version';
+const int diagnosticRedactionVersion = 1;
 
 enum LogLevel { debug, info, warning, error }
 
 class Log {
   int? id;
   late LogLevel level;
-  late String message;
+  late String _message;
+  String get message => _message;
+  set message(String value) => _message = boundedDiagnosticText(value);
   DateTime timestamp = DateTime.now();
 
   Map<String, Object?> toMap() {
@@ -24,16 +29,21 @@ class Log {
       levelColumn: level.index,
       messageColumn: message,
       timestampColumn: timestamp.millisecondsSinceEpoch,
+      redactionColumn: diagnosticRedactionVersion,
     };
     return map;
   }
 
-  Log(this.message, this.level);
+  Log(String message, this.level) {
+    this.message = message;
+  }
 
   Log.fromMap(Map<String, Object?> map) {
     id = map[idColumn] as int;
     level = LogLevel.values.elementAt(map[levelColumn] as int);
-    message = map[messageColumn] as String;
+    message = map[redactionColumn] == diagnosticRedactionVersion
+        ? map[messageColumn] as String
+        : '[legacy diagnostic withheld: redaction not established]';
     timestamp = DateTime.fromMillisecondsSinceEpoch(
       map[timestampColumn] as int,
     );
@@ -63,7 +73,7 @@ class LogsProvider {
       _instance
           .clear(before: DateTime.now().subtract(const Duration(days: 7)))
           .catchError((e) {
-            debugPrint('Failed to clear old logs: $e');
+            debugPrint('Failed to clear old logs: ${diagnosticErrorCategory(e)}');
             return 0;
           });
     }
@@ -75,15 +85,23 @@ class LogsProvider {
   Future<Database> getDB() async {
     _db ??= await openDatabase(
       dbPath,
-      version: 1,
+      version: 2,
       onCreate: (Database db, int version) async {
         await db.execute('''
 create table if not exists $logTable ( 
   $idColumn integer primary key autoincrement, 
   $levelColumn integer not null,
   $messageColumn text not null,
-  $timestampColumn integer not null)
+  $timestampColumn integer not null,
+  $redactionColumn integer not null default 1)
 ''');
+      },
+      onUpgrade: (Database db, int oldVersion, int newVersion) async {
+        if (oldVersion < 2) {
+          // Preserve timestamps, levels and row identity. Legacy raw text is
+          // not displayed/exported; existing explicit clear removes rows.
+          await db.execute('alter table $logTable add column $redactionColumn integer not null default 0');
+        }
       },
       onOpen: (Database db) async {
         // Index the timestamp column so the logs-viewer date-range queries
@@ -203,7 +221,7 @@ class AppLogger implements Logger {
   void debug(String message) {
     _logs.add(message, level: LogLevel.debug);
     if (_isDebug) {
-      debugPrint('[DEBUG] $message');
+      debugPrint('[DEBUG] ${boundedDiagnosticText(message)}');
     }
   }
 
@@ -211,13 +229,14 @@ class AppLogger implements Logger {
   void info(String message) {
     _logs.add(message, level: LogLevel.info);
     if (_isDebug) {
-      debugPrint('[INFO] $message');
+      debugPrint('[INFO] ${boundedDiagnosticText(message)}');
     }
   }
 
   @override
   void warn(String message, [Object? error, StackTrace? stack]) {
-    final full = error != null ? '$message\n$error\n$stack' : message;
+    final full = boundedDiagnosticText(error != null
+        ? '$message (${diagnosticErrorCategory(error)})' : message);
     _logs.add(full, level: LogLevel.warning);
     if (_isDebug) {
       debugPrint('[WARN] $full');
@@ -226,7 +245,8 @@ class AppLogger implements Logger {
 
   @override
   void error(String message, [Object? error, StackTrace? stack]) {
-    final full = error != null ? '$message\n$error\n$stack' : message;
+    final full = boundedDiagnosticText(error != null
+        ? '$message (${diagnosticErrorCategory(error)})' : message);
     _logs.add(full, level: LogLevel.error);
     if (_isDebug) {
       debugPrint('[ERROR] $full');

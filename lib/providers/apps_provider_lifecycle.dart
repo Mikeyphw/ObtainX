@@ -307,7 +307,7 @@ extension AppsProviderLifecycle on AppsProvider {
         unawaited(
           logs.add(
             'Installed package snapshot unavailable; loading saved apps without '
-            'changing install state: $error',
+            'changing install state: ${error.runtimeType}',
             level: LogLevel.warning,
           ),
         );
@@ -339,7 +339,7 @@ extension AppsProviderLifecycle on AppsProvider {
         // Timestamp storage is optional for loading the durable app records.
         unawaited(
           logs.add(
-            'Could not load check timestamps: $error',
+            'Check timestamp database read failed: ${error.runtimeType}',
             level: LogLevel.warning,
           ),
         );
@@ -389,7 +389,7 @@ extension AppsProviderLifecycle on AppsProvider {
               } catch (error) {
                 unawaited(
                   logs.add(
-                    'Failed to clean stale save temp ${item.path}: $error',
+                    'Failed to clean stale save temp ${item.path}: ${error.runtimeType}',
                     level: LogLevel.warning,
                   ),
                 );
@@ -458,7 +458,7 @@ extension AppsProviderLifecycle on AppsProvider {
                   // Genuinely corrupt JSON: set it aside so it stops failing.
                   unawaited(
                     logs.add(
-                      'Corrupt JSON, renaming ${item.path}: $err',
+                      'Corrupt JSON, renaming ${item.path}: ${err.runtimeType}',
                       level: LogLevel.error,
                     ),
                   );
@@ -468,7 +468,7 @@ extension AppsProviderLifecycle on AppsProvider {
                   // skip but keep the file so it can load once resolved.
                   unawaited(
                     logs.add(
-                      'Error loading app ${item.path} (skipped, file kept): $err',
+                      'Error loading app ${item.path} (skipped, file kept): ${err.runtimeType}',
                       level: LogLevel.warning,
                     ),
                   );
@@ -566,11 +566,11 @@ extension AppsProviderLifecycle on AppsProvider {
                 if (e is RateLimitError || e is SocketException) {
                   unawaited(
                     logs.add(
-                      'Transient error loading app $loadingAppId, will retry: $e',
+                      'Transient error loading app $loadingAppId, will retry: ${e.runtimeType}',
                     ),
                   );
                 } else {
-                  errors.add([loadingAppId, loadingAppName, e.toString()]);
+                  errors.add([loadingAppId, loadingAppName, safeErrorDisplay(e)]);
                 }
               }
             }
@@ -787,13 +787,13 @@ extension AppsProviderLifecycle on AppsProvider {
             ),
           );
         } catch (e) {
-          unawaited(logs.add('User icon migrate $fileName: $e'));
+          unawaited(logs.add('User icon migrate $fileName: ${e.runtimeType}'));
         }
       }
       // Mark done only after a clean pass so an interrupted migration retries.
       await settingsProvider.prefs?.setBool(migratedFlag, true);
     } catch (e) {
-      unawaited(logs.add('User icon migrate: $e'));
+      unawaited(logs.add('User icon migrate: ${e.runtimeType}'));
     }
   }
 
@@ -830,7 +830,7 @@ extension AppsProviderLifecycle on AppsProvider {
       codec.dispose();
       if (byteData != null) return byteData.buffer.asUint8List();
     } catch (e) {
-      unawaited(logs.add('Icon resize failed, keeping original: $e'));
+      unawaited(logs.add('Icon resize failed, keeping original: ${e.runtimeType}'));
     }
     return bytes;
   }
@@ -845,7 +845,7 @@ extension AppsProviderLifecycle on AppsProvider {
       if (!_bytesLookLikeRasterImage(bytes)) return null;
       return bytes;
     } catch (e) {
-      unawaited(logs.add('Icon fetch failed for $url: $e'));
+      unawaited(logs.add('Icon fetch failed for $url: ${e.runtimeType}'));
       return null;
     }
   }
@@ -861,7 +861,7 @@ extension AppsProviderLifecycle on AppsProvider {
       return await applicationInfo.getAppIcon();
     } catch (e) {
       unawaited(
-        logs.add('App icon unavailable for $appId (clearing stale info): $e'),
+        logs.add('App icon unavailable for $appId (clearing stale info): ${e.runtimeType}'),
       );
       // Install state is per package, so clear it on every listing of it.
       for (final AppInMemory listing
@@ -905,7 +905,7 @@ extension AppsProviderLifecycle on AppsProvider {
         await _resizeIconForStorage(archiveIcon),
       );
     } catch (e) {
-      unawaited(logs.add('APK icon extraction failed for $appId: $e'));
+      unawaited(logs.add('APK icon extraction failed for $appId: ${e.runtimeType}'));
     }
   }
 
@@ -947,7 +947,7 @@ extension AppsProviderLifecycle on AppsProvider {
         name = await applicationInfo.getAppLabel();
       } catch (e) {
         unawaited(
-          logs.add('Installed package details unavailable for $appId: $e'),
+          logs.add('Installed package details unavailable for $appId: ${e.runtimeType}'),
         );
       }
     }
@@ -973,7 +973,7 @@ extension AppsProviderLifecycle on AppsProvider {
       try {
         return await file.readAsBytes();
       } catch (e) {
-        unawaited(logs.add('Icon read failed for $packageId: $e'));
+        unawaited(logs.add('Icon read failed for $packageId: ${e.runtimeType}'));
         return null;
       }
     }
@@ -1028,7 +1028,7 @@ extension AppsProviderLifecycle on AppsProvider {
           return;
         }
       } catch (e) {
-        unawaited(logs.add('User icon load failed for $packageId: $e'));
+        unawaited(logs.add('User icon load failed for $packageId: ${e.runtimeType}'));
       }
     }
 
@@ -1068,7 +1068,7 @@ extension AppsProviderLifecycle on AppsProvider {
       try {
         icon = await deducedIcon.readAsBytes();
       } catch (e) {
-        unawaited(logs.add('Deduced icon load failed for $packageId: $e'));
+        unawaited(logs.add('Deduced icon load failed for $packageId: ${e.runtimeType}'));
       }
     }
     if (!isInstalled && icon == null) {
@@ -1117,7 +1117,7 @@ extension AppsProviderLifecycle on AppsProvider {
       try {
         return await cachedIcon.readAsBytes();
       } catch (e) {
-        unawaited(logs.add('loadIconPreviewExcludingUserOverride cache: $e'));
+        unawaited(logs.add('loadIconPreviewExcludingUserOverride cache: ${e.runtimeType}'));
       }
     }
     Uint8List? icon = await _getInstalledAppIconSafely(packageId);
@@ -1129,7 +1129,7 @@ extension AppsProviderLifecycle on AppsProvider {
       try {
         return await deducedIcon.readAsBytes();
       } catch (e) {
-        unawaited(logs.add('loadIconPreviewExcludingUserOverride deduced: $e'));
+        unawaited(logs.add('loadIconPreviewExcludingUserOverride deduced: ${e.runtimeType}'));
       }
     }
     if (icon == null) {
@@ -1167,7 +1167,7 @@ extension AppsProviderLifecycle on AppsProvider {
       unawaited(mirrorIconToIconsDir(packageId, isUserIcon: true));
       return null;
     } catch (e) {
-      unawaited(logs.add('applyUserAppIconPngBytes: $e'));
+      unawaited(logs.add('applyUserAppIconPngBytes: ${e.runtimeType}'));
       return tr('unexpectedError');
     }
   }
@@ -1186,7 +1186,7 @@ extension AppsProviderLifecycle on AppsProvider {
       final Uint8List bytes = await sourceFile.readAsBytes();
       return await applyUserAppIconPngBytes(appId, bytes);
     } catch (e) {
-      unawaited(logs.add('setUserAppIconFromPngPath: $e'));
+      unawaited(logs.add('setUserAppIconFromPngPath: ${e.runtimeType}'));
       return tr('unexpectedError');
     }
   }
@@ -1236,7 +1236,7 @@ extension AppsProviderLifecycle on AppsProvider {
       } catch (error) {
         unawaited(
           logs.add(
-            'Failed to clean save temp for $listingKey: $error',
+            'Failed to clean save temp for $listingKey: ${error.runtimeType}',
             level: LogLevel.warning,
           ),
         );
@@ -1301,7 +1301,7 @@ extension AppsProviderLifecycle on AppsProvider {
         } catch (e) {
           unawaited(
             logs.add(
-              'Failed to prefetch installed package info for bulk save: $e',
+              'Failed to prefetch installed package info for bulk save: ${e.runtimeType}',
               level: LogLevel.warning,
             ),
           );
@@ -1451,7 +1451,7 @@ extension AppsProviderLifecycle on AppsProvider {
         unawaited(
           logs.add(
             'Check timestamp save failed; falling back to ${checkpointApps.length} '
-            'app records: $error',
+            'app records: ${error.runtimeType}',
             level: LogLevel.warning,
           ),
         );
@@ -1850,7 +1850,7 @@ extension AppsProviderLifecycle on AppsProvider {
       } catch (err) {
         unawaited(
           logs.add(
-            'Could not list app records while removing categories: $err',
+            'Could not list app records while removing categories: ${err.runtimeType}',
             level: LogLevel.warning,
           ),
         );
@@ -1873,7 +1873,7 @@ extension AppsProviderLifecycle on AppsProvider {
           // quarantining corrupt JSON.
           unawaited(
             logs.add(
-              'Could not read $fileName while removing categories: $err',
+              'Could not read $fileName while removing categories: ${err.runtimeType}',
               level: LogLevel.warning,
             ),
           );
@@ -1911,7 +1911,7 @@ extension AppsProviderLifecycle on AppsProvider {
     } catch (err) {
       unawaited(
         logs.add(
-          'Could not remove deleted categories from saved apps: $err',
+          'Could not remove deleted categories from saved apps: ${err.runtimeType}',
           level: LogLevel.error,
         ),
       );

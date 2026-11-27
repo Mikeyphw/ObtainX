@@ -95,7 +95,7 @@ extension AppsProviderIconBackup on AppsProvider {
         bytes: bytes,
       );
     } catch (e) {
-      unawaited(logs.add('Icon mirror failed for $appId: $e'));
+      unawaited(logs.add('Icon mirror failed for $appId: ${e.runtimeType}'));
     }
   }
 
@@ -113,7 +113,7 @@ extension AppsProviderIconBackup on AppsProvider {
         _mirroredIconDisplayName(appId, isUserIcon: isUserIcon),
       );
     } catch (e) {
-      unawaited(logs.add('Icon mirror cleanup failed for $appId: $e'));
+      unawaited(logs.add('Icon mirror cleanup failed for $appId: ${e.runtimeType}'));
     }
   }
 
@@ -121,7 +121,7 @@ extension AppsProviderIconBackup on AppsProvider {
     try {
       await _localIconFile(appId, isUserIcon: false).writeAsBytes(bytes);
     } catch (e) {
-      unawaited(logs.add('Deduced icon restore failed for $appId: $e'));
+      unawaited(logs.add('Deduced icon restore failed for $appId: ${e.runtimeType}'));
       return false;
     }
     if (!hasUserAppIconOverride(appId)) {
@@ -185,7 +185,7 @@ extension AppsProviderIconBackup on AppsProvider {
           );
           exported++;
         } catch (e) {
-          unawaited(logs.add('Icon export failed for $fileName: $e'));
+          unawaited(logs.add('Icon export failed for $fileName: ${e.runtimeType}'));
         }
       }
     }
@@ -256,11 +256,11 @@ extension AppsProviderIconBackup on AppsProvider {
           }
         } catch (e) {
           skipped++;
-          unawaited(logs.add('Icon restore failed for $name: $e'));
+          unawaited(logs.add('Icon restore failed for $name: ${e.runtimeType}'));
         }
       }
     } catch (e) {
-      unawaited(logs.add('Icon folder sweep failed: $e'));
+      unawaited(logs.add('Icon folder sweep failed: ${e.runtimeType}'));
     }
     return IconImportSweepResult(
       restoredUserIcons: restoredUserIcons,

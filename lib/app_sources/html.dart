@@ -166,7 +166,7 @@ Future<List<MapEntry<String, String>>> grabLinksCommon(
     } catch (e) {
       unawaited(
         LogsProvider().add(
-          'Failed to parse HTML links: ${e.toString()}',
+          'Failed to parse HTML links: ${e.runtimeType}',
           level: LogLevel.warning,
         ),
       );
@@ -186,7 +186,7 @@ Future<List<MapEntry<String, String>>> grabLinksCommon(
       } catch (e) {
         unawaited(
           LogsProvider().add(
-            'Failed to decode URI in HTML filter: ${e.toString()}',
+            'Failed to decode URI in HTML filter: ${e.runtimeType}',
             level: LogLevel.debug,
           ),
         );
@@ -201,7 +201,7 @@ Future<List<MapEntry<String, String>>> grabLinksCommon(
       } catch (e) {
         unawaited(
           LogsProvider().add(
-            'Failed to decode URI in HTML APK filter: ${e.toString()}',
+            'Failed to decode URI in HTML APK filter: ${e.runtimeType}',
             level: LogLevel.debug,
           ),
         );
@@ -549,7 +549,7 @@ class HTML extends AppSource {
       } catch (e) {
         unawaited(
           LogsProvider().add(
-            'Failed to decode URI for version extraction: ${e.toString()}',
+            'Failed to decode URI for version extraction: ${e.runtimeType}',
             level: LogLevel.debug,
           ),
         );
@@ -667,7 +667,7 @@ class HTML extends AppSource {
         } catch (error) {
           unawaited(
             LogsProvider().add(
-              'Failed to resolve HTML download filename: $error',
+              'Failed to resolve HTML download filename: ${error.runtimeType}',
               level: LogLevel.debug,
             ),
           );

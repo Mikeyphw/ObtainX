@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:obtainium/main.dart';
 import 'package:obtainium/providers/logs_provider.dart';
+import 'package:obtainium/services/diagnostic_redaction.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/theme/app_dialog_theme.dart';
 import 'package:obtainium/widgets/app_toast.dart';
@@ -43,13 +44,13 @@ class ObtainiumError {
     this.url,
   });
 
-  String get message =>
+  String get message => boundedDiagnosticText(
       code == 'UNKNOWN' ||
           code == 'UNEXPECTED' ||
           code == 'CHECK_UPDATES_FAILED' ||
           code == 'HTTP_ERROR'
       ? _message
-      : localizeErrorCode(code, data);
+      : localizeErrorCode(code, data));
 
   /// Attaches [contextUrl] as the offending URL if none is set yet, so logs and
   /// messages can identify the app/URL involved. Returns this for chaining.
@@ -64,7 +65,7 @@ class ObtainiumError {
 
   @override
   String toString() =>
-      url != null && url!.isNotEmpty ? '$message ($url)' : message;
+      url != null && url!.isNotEmpty ? '$message ([source URL withheld])' : message;
 }
 
 Never rethrowOrWrapError(
@@ -77,7 +78,7 @@ Never rethrowOrWrapError(
       final resolvedStack = error.stack ?? StackTrace.current;
       unawaited(
         LogsProvider().add(
-          'Unexpected ObtainiumError: ${error.toString()}\n$resolvedStack',
+          'Unexpected ObtainiumError: ${diagnosticErrorCategory(error)}',
           level: LogLevel.error,
         ),
       );
@@ -95,12 +96,12 @@ Never rethrowOrWrapError(
   final capturedStack = stack ?? StackTrace.current;
   unawaited(
     LogsProvider().add(
-      'Wrapping unexpected error: $error\n$capturedStack',
+      'Wrapping unexpected error: ${diagnosticErrorCategory(error)}',
       level: LogLevel.error,
     ),
   );
   throw ObtainiumError(
-    sourceName != null ? '$sourceName: $error' : error.toString(),
+    sourceName != null ? '$sourceName: ${diagnosticErrorCategory(error)}' : diagnosticErrorCategory(error),
     code: 'UNEXPECTED',
     unexpected: true,
     stack: capturedStack,
@@ -231,10 +232,10 @@ class MultiAppMultiError extends ObtainiumError {
   void add(String appId, dynamic error, {String? appName}) {
     if (error is SocketException) {
       // Use the concise message rather than the verbose OS-level toString.
-      error = error.message;
+      error = diagnosticErrorCategory(error);
     }
     rawErrors[appId] = error;
-    final string = error.toString();
+    final string = safeErrorDisplay(error);
     var tempIds = idsByErrorString.remove(string);
     if (tempIds == null) {
       tempIds = [];
@@ -247,19 +248,19 @@ class MultiAppMultiError extends ObtainiumError {
   }
 
   String errorString(String appId, {bool includeIdsWithNames = false}) =>
-      '${appIdNames.containsKey(appId) ? '${appIdNames[appId]}${includeIdsWithNames ? ' ($appId)' : ''}' : appId}: ${rawErrors[appId].toString()}';
+      boundedDiagnosticText('${appIdNames.containsKey(appId) ? '${appIdNames[appId]}${includeIdsWithNames ? ' ($appId)' : ''}' : appId}: ${safeErrorDisplay(rawErrors[appId])}');
 
   String errorsAppsString(
     String errString,
     List<String> appIds, {
     bool includeIdsWithNames = false,
   }) =>
-      '$errString [${list2FriendlyString(appIds.map((id) => appIdNames.containsKey(id) == true ? '${appIdNames[id]}${includeIdsWithNames ? ' ($id)' : ''}' : id).toList())}]';
+      boundedDiagnosticText('$errString [${list2FriendlyString(appIds.map((id) => appIdNames.containsKey(id) == true ? '${appIdNames[id]}${includeIdsWithNames ? ' ($id)' : ''}' : id).toList())}]');
 
   @override
-  String toString() => idsByErrorString.entries
+  String toString() => boundedDiagnosticText(idsByErrorString.entries
       .map((e) => errorsAppsString(e.key, e.value))
-      .join('\n\n');
+      .join('\n\n'));
 }
 
 String localizeErrorCode(String code, Map<String, dynamic>? data) {
@@ -333,6 +334,14 @@ class CancellationException implements Exception {
   String toString() => message ?? tr('cancelled');
 }
 
+/// Typed app errors have bounded, redacted messages; platform and provider
+/// exceptions are untrusted and must never be copied into UI/logs verbatim.
+String safeErrorDisplay(Object? error) => boundedDiagnosticText(
+  error is ObtainiumError || error is CancellationException || error is String
+      ? error.toString()
+      : diagnosticErrorCategory(error),
+);
+
 // Fork-only UI helpers: surface an error/message as a snackbar (recoverable)
 // or a copyable dialog (unexpected). Used across the fork's pages.
 void showMessage(
@@ -343,12 +352,12 @@ void showMessage(
 }) {
   final ScaffoldMessengerState? messenger = scaffoldMessengerKey.currentState;
   if (e is CancellationException) {
-    unawaited(LogsProvider().add(e.toString(), level: LogLevel.info));
+    unawaited(LogsProvider().add(safeErrorDisplay(e), level: LogLevel.info));
     if (messenger != null) {
       messenger.showSnackBar(
         buildAppSnackBar(
           messenger.context,
-          e.toString(),
+          safeErrorDisplay(e),
           theme: theme,
           scaffoldHasBottomBar: scaffoldHasBottomBar,
         ),
@@ -358,7 +367,7 @@ void showMessage(
   }
   unawaited(
     LogsProvider().add(
-      e.toString(),
+      safeErrorDisplay(e),
       level: isError ? LogLevel.error : LogLevel.info,
     ),
   );
@@ -367,7 +376,7 @@ void showMessage(
       messenger.showSnackBar(
         buildAppSnackBar(
           messenger.context,
-          e.toString(),
+          safeErrorDisplay(e),
           type: isError ? ToastType.error : ToastType.info,
           theme: theme,
           scaffoldHasBottomBar: scaffoldHasBottomBar,
@@ -391,7 +400,7 @@ void showMessage(
             ),
             content: GestureDetector(
               onLongPress: () {
-                unawaited(Clipboard.setData(ClipboardData(text: e.toString())));
+                unawaited(Clipboard.setData(ClipboardData(text: safeErrorDisplay(e))));
                 final ScaffoldMessengerState? clipboardMessenger =
                     scaffoldMessengerKey.currentState;
                 if (clipboardMessenger != null) {
@@ -404,7 +413,7 @@ void showMessage(
                   );
                 }
               },
-              child: Text(e.toString()),
+              child: Text(safeErrorDisplay(e)),
             ),
             actions: [
               TextButton(

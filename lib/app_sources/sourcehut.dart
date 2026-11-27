@@ -119,7 +119,7 @@ class SourceHut extends AppSource {
           } catch (e) {
             unawaited(
               LogsProvider().add(
-                'Failed to parse SourceHut release date: ${e.toString()}',
+                'Failed to parse SourceHut release date: ${e.runtimeType}',
                 level: LogLevel.warning,
               ),
             );

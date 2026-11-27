@@ -58,16 +58,24 @@ def progress(out:Path,case:str,phase:str,elapsed:int,taps:int)->None:
     (out/'rt02c-progress.json').write_text(json.dumps(data,sort_keys=True,indent=2)+'\n')
     print(f'OX_R02_RT02C_PROGRESS case={case} phase={phase} elapsed={int(elapsed)}s approvals={taps}',flush=True)
 
-def baseline_v1(fixtures:Path)->dict:
-    paths=base.adb('shell','pm','path',base.FIXTURE).splitlines()
+def baseline_v1(fixtures:Path, *, deadline:float|None=None)->dict:
+    # Existing callers retain their original command limits. The P03 HTTP
+    # handshake shares one monotonic deadline across all three observations.
+    def limit(default):
+        if deadline is None:
+            return default
+        remaining = deadline-time.monotonic()
+        need(remaining > 0, 'v1 baseline observation deadline expired')
+        return min(default, remaining)
+    paths=base.adb('shell','pm','path',base.FIXTURE,timeout=limit(30)).splitlines()
     need(len(paths)==1 and paths[0].startswith('package:/data/app/') and
          paths[0].endswith('/base.apk'),'v1 baseline APK path ambiguous or unexpected')
     match=re.fullmatch(r'package:(/data/app/[A-Za-z0-9_+./~=-]+/base\.apk)',paths[0])
     need(match is not None,'v1 baseline installed APK path untrusted')
-    digest=base.adb('shell','sha256sum',match.group(1),timeout=60).split()
+    digest=base.adb('shell','sha256sum',match.group(1),timeout=limit(60)).split()
     expected=sha(fixtures/'base_v1.apk')
     need(len(digest)==2 and digest[0]==expected,'v1 installed signed bytes drift')
-    versions=re.findall(r'\bversionCode=(\d+)\b',base.adb('shell','dumpsys','package',base.FIXTURE,timeout=60))
+    versions=re.findall(r'\bversionCode=(\d+)\b',base.adb('shell','dumpsys','package',base.FIXTURE,timeout=limit(60)))
     need('1' in versions and '2' not in versions,'v1 baseline version changed')
     return {'version_code':1,'installed_path_count':1,'base_sha256':expected,
             'installed_original_intact':True}

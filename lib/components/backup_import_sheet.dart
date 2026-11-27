@@ -439,7 +439,7 @@ class _BackupImportSheetState extends State<BackupImportSheet> {
             ? null
             : Text(
                 // Its URL is the row's title already.
-                error is ObtainiumError ? error.message : error.toString(),
+                safeErrorDisplay(error),
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: colorScheme.error),

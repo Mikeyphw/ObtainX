@@ -66,7 +66,7 @@ class CoolApk extends AppSource {
       } catch (e) {
         unawaited(
           LogsProvider().add(
-            'Failed to decode JSON response: $e',
+            'Failed to decode JSON response: ${e.runtimeType}',
             level: LogLevel.error,
           ),
         );

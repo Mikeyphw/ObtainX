@@ -1808,7 +1808,7 @@ class SettingsProvider with ChangeNotifier {
       final bool canWriteTree = await saf.canWrite(treeUri) ?? false;
       return canWriteTree;
     } catch (e) {
-      debugPrint('Error checking SAF tree permissions: $e');
+      debugPrint('Error checking SAF tree permissions: ${e.runtimeType}');
       return false;
     }
   }

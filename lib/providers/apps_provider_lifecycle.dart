@@ -339,7 +339,7 @@ extension AppsProviderLifecycle on AppsProvider {
         // Timestamp storage is optional for loading the durable app records.
         unawaited(
           logs.add(
-            'Could not load check timestamps: ${error.runtimeType}',
+            'Check timestamp database read failed: ${error.runtimeType}',
             level: LogLevel.warning,
           ),
         );

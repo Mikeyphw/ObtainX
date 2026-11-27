@@ -125,6 +125,33 @@ def validate_inventory(fixtures:Path,source:str)->tuple[dict,dict]:
          'wrong signing identity or ephemeral-key cleanup not proven')
     return initial,extra
 
+# Report fixed, bounded categories only. Never emit arbitrary Gradle output,
+# repository URLs, credentials, test bodies, paths or exception messages.
+_FAILURE_PATTERNS = (
+    ('GRADLE_DAEMON_LOST', r'gradle build daemon disappeared|daemon disappeared unexpectedly'),
+    ('MEMORY_EXHAUSTED', r'outofmemoryerror|java heap space|gc overhead limit exceeded'),
+    ('DISK_EXHAUSTED', r'no space left on device|disk quota exceeded'),
+    ('DEPENDENCY_RESOLUTION', r'could not resolve all (?:files|dependencies|artifacts)|could not resolve [^\r\n]+|could not download'),
+    ('ANDROID_BUILD_TOOL_FAILURE', r'android resource linking failed|execution failed for task|compilation error|manifest merger failed'),
+    ('DEVICE_TRANSPORT_FAILURE', r'adb: device offline|device disconnected|device not found'),
+    ('DART_TEST_FAILURE', r'some tests failed\.|exception caught by flutter test framework'),
+    ('GRADLE_BUILD_FAILURE', r'build failed|gradle task .* failed with exit code'),
+)
+
+
+def failure_diagnostics(log: Path, returncode: int) -> dict:
+    # The private log stays in the ephemeral runner. Bound the diagnostic read
+    # and expose only closed-vocabulary categories and a digest of the log.
+    with log.open('rb') as stream:
+        stream.seek(max(0, log.stat().st_size - 65536))
+        tail = stream.read(65536).decode('utf-8', 'replace')
+    categories = [name for name, pattern in _FAILURE_PATTERNS
+                  if re.search(pattern, tail, re.IGNORECASE)]
+    return {'schema': 1, 'returncode': returncode,
+            'categories': categories or ['UNCLASSIFIED_PRIVATE_FAILURE'],
+            'log_sha256': sha(log)}
+
+
 def run_one_session(out:Path,fixtures:Path,initial:dict,extra:dict)->tuple[list[dict],str]:
     state=AckState({WRONG:fixtures/WRONG,'base_v1.apk':fixtures/'base_v1.apk'})
     server=ThreadingHTTPServer(('127.0.0.1',base.PORT),FixtureServer)
@@ -178,6 +205,13 @@ def run_one_session(out:Path,fixtures:Path,initial:dict,extra:dict)->tuple[list[
                 time.sleep(1)
             sequence=events_from_log(log)
             text=log.read_text('utf8','replace')
+            if child.returncode != 0 or 'All tests passed!' not in text:
+                detail = failure_diagnostics(log, child.returncode)
+                # Only fixed categories, exit status and a digest leave the runner.
+                (out/'rt02b-failure.json').write_text(
+                    json.dumps(detail, sort_keys=True, indent=2)+'\n')
+                print('OX_R02_RT02B_FAILURE_DIAGNOSTICS '+
+                      json.dumps(detail, sort_keys=True), flush=True)
             need(child.returncode==0 and 'All tests passed!' in text,
                  'one real Flutter integration-test invocation failed; log_sha256='+sha(log))
             need(sequence==EVENTS and done==list(CASES) and installed,
@@ -277,6 +311,9 @@ def main()->int:
                         detail=json.loads(progress.read_text())
                         if detail.get('case') in CASES:d['failure_case']=detail['case']
                         if detail.get('phase') in PHASES:d['failure_phase']=detail['phase']
+                    failure=a.out/'rt02b-failure.json'
+                    if failure.is_file():
+                        d['flutter_failure_diagnostics']=json.loads(failure.read_text())
                     rp.write_text(json.dumps(d,sort_keys=True,indent=2)+'\n')
                 except (OSError,ValueError):pass
         print('OX_R02_RT02B_REFUSED: '+str(exc),file=sys.stderr,flush=True)

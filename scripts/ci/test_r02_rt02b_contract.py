@@ -93,6 +93,37 @@ class SourceMutationTests(unittest.TestCase):
     def test_both_compile_time_sha_required(self):
         self.mutate(C.DART,'OX_R02B_DOWNGRADE_SHA256', 'OX_R02B_SINGLE_SHA256')
 
+class FailureDiagnosticsTests(unittest.TestCase):
+    def test_known_gradle_failure_retains_only_fixed_codes_and_digest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp)/'private.log'
+            log.write_text('Gradle build daemon disappeared unexpectedly\n'
+                           'Authorization: Bearer synthetic-private-value\n'
+                           'https://example.invalid/sensitive/path\nBUILD FAILED\n')
+            detail = H.failure_diagnostics(log, 1)
+            self.assertEqual(detail['categories'],
+                             ['GRADLE_DAEMON_LOST', 'GRADLE_BUILD_FAILURE'])
+            self.assertEqual(detail['returncode'], 1)
+            self.assertEqual(detail['log_sha256'], H.sha(log))
+            encoded = json.dumps(detail)
+            for secret in ('synthetic-private-value', 'example.invalid', 'Authorization'):
+                self.assertNotIn(secret, encoded)
+
+    def test_unknown_failure_does_not_invent_diagnosis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp)/'private.log'
+            log.write_text('opaque synthetic private diagnostic')
+            self.assertEqual(H.failure_diagnostics(log, 17)['categories'],
+                             ['UNCLASSIFIED_PRIVATE_FAILURE'])
+
+    def test_diagnostic_tail_is_bounded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp)/'private.log'
+            log.write_text('java heap space\n'+'x'*70000+'\nNo space left on device')
+            self.assertEqual(H.failure_diagnostics(log, 1)['categories'],
+                             ['DISK_EXHAUSTED'])
+
+
 class ReceiptTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(prefix='ox-rt02b-proof-')

@@ -70,6 +70,16 @@ class FinalAudit01Contract(unittest.TestCase):
         self.assertIn('safeErrorDisplay(e)', read('lib/custom_errors.dart'))
         self.assertIn('raw details withheld', read('lib/main.dart'))
 
+    def test_checkpoint_read_diagnostic_preserves_safe_operation_label(self):
+        source = read('lib/providers/apps_provider_lifecycle.dart')
+        start = source.index('checkTimesRead = checks.read(')
+        end = source.index('final checkStoreModifiedAtStart', start)
+        handler = source[start:end]
+        self.assertIn("'Check timestamp database read failed: ${error.runtimeType}'", handler)
+        self.assertNotIn('$error', handler)
+        self.assertNotIn('error.toString()', handler)
+        self.assertIn('return <String, Map<String, Object?>>{};', handler)
+
     def test_security_changes_require_full_hosted_gate(self):
         for name in ('lib/http/linked_changelog_policy.dart', 'lib/services/diagnostic_redaction.dart',
                      'lib/providers/logs_provider.dart', 'scripts/ci/r12_device_evidence.py',

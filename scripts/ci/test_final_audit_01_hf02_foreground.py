@@ -21,8 +21,12 @@ BASELINE = {'version_code': 1, 'base_sha256': 'a'*64}
 
 
 def window(component):
-    return ('  Window #2 Window{abcd u0 '+APPROVAL+'}\n'
-            '  mCurrentFocus=Window{a123 u0 '+component+'}\n')
+    # Android 16 display-state layout, not a synthetic window inventory.
+    return ('WINDOW MANAGER DISPLAY CONTENTS (dumpsys window displays)\n'
+            ' Display: mDisplayId=0\n'
+            '  init=1080x2400 420dpi\n'
+            '  mCurrentFocus=Window{a123 u0 '+component+'}\n'
+            '  mFocusedApp=ActivityRecord{abcd u0 '+APPROVAL+' t12}\n')
 
 
 class Clock:
@@ -66,6 +70,8 @@ class ForegroundTests(unittest.TestCase):
         self.assertEqual(self.baseline.call_count, 1)
         self.assertGreaterEqual(self.clock.now, 10.8)
         self.assertEqual(self.commands()[3], ('shell','am','start','-f','0x24000000','-n',APP))
+        self.assertEqual([c for c in self.commands() if c[:2] == ('shell','dumpsys')],
+                         [('shell','dumpsys','window','displays')]*5)
         self.assertTrue(all(c.kwargs['timeout'] <= host.FOREGROUND_BUDGET for c in self.adb.call_args_list))
 
     def test_stale_unfocused_installer_is_not_proof(self):

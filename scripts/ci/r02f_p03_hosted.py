@@ -64,31 +64,73 @@ class ForegroundRefused(Refused):
         super().__init__(code)
 
 
+DISPLAY_HEADER = 'WINDOW MANAGER DISPLAY CONTENTS (dumpsys window displays)'
+
+
+def focus_observation(display_state: str) -> tuple[str | None, str]:
+    """Parse only live, single-display user-0 focus from WindowManager.
+
+    Android 16's window-list dump is not the display-state dump. The latter
+    owns mCurrentFocus; mFocusedApp, previous focus and window inventory are
+    never substitutes. This disposable emulator lane requires display 0 only.
+    """
+    if len(display_state) > 2 * 1024 * 1024:
+        return None, 'DISPLAY_OVERSIZE'
+    lines = display_state.splitlines()
+    if not lines or lines[0].strip() != DISPLAY_HEADER:
+        return None, 'DISPLAY_HEADER_MISSING'
+    displays = [(i, match.group(1)) for i, line in enumerate(lines)
+                if (match := re.fullmatch(r'[ \t]*Display: mDisplayId=(\d+)(?: \(organized\))?[ \t]*', line))]
+    if len(displays) != 1 or displays[0][1] != '0':
+        return None, 'DISPLAY_AMBIGUOUS'
+    focus = [(i, match.group(1).strip()) for i, line in enumerate(lines)
+             if (match := re.fullmatch(r'[ \t]*mCurrentFocus=([^\r\n]*)', line))]
+    if not focus:
+        return None, 'FOCUS_MISSING'
+    if len(focus) != 1 or focus[0][0] <= displays[0][0]:
+        return None, 'FOCUS_AMBIGUOUS'
+    value = focus[0][1]
+    if value == 'null':
+        return None, 'FOCUS_NULL'
+    match = re.fullmatch(r'Window\{[0-9a-fA-F]+ u0 ([A-Za-z0-9_.]+)/([A-Za-z0-9_.$]+)\}', value)
+    if not match:
+        return None, 'FOCUS_NONCOMPONENT'
+    package, activity = match.groups()
+    if activity.startswith('.'):
+        activity = package + activity
+    component = package + '/' + activity
+    if component == FOREGROUND_COMPONENT:
+        return component, 'APP_FOCUSED'
+    if package in base.APPROVERS:
+        return component, 'APPROVER_FOCUSED'
+    return component, 'OTHER_FOCUSED'
+
+
 def focused_component(window: str) -> str | None:
-    # Restrict the observation to user 0, one unambiguous focused window.
-    # mFocusedApp and historical Window entries are not focus evidence.
-    lines = re.findall(r'(?m)^\s*mCurrentFocus=([^\r\n]*)$', window)
-    if len(lines) != 1:
-        return None
-    match = re.fullmatch(r'Window\{[0-9a-fA-F]+ u0 ([A-Za-z0-9_.]+/[A-Za-z0-9_.$]+)\}',
-                         lines[0].strip())
-    return match.group(1) if match else None
+    return focus_observation(window)[0]
 
 
 def wait_focused_window(predicate, deadline: float, refusal: str) -> None:
+    last_observation = 'NO_SAMPLE'
     while time.monotonic() < deadline:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
         try:
-            window = base.adb('shell','dumpsys','window','windows',
+            # AOSP Android 16 WindowManagerService.dump: "displays" invokes
+            # RootWindowContainer.dumpDisplayContents; "windows" does not.
+            window = base.adb('shell','dumpsys','window','displays',
                               timeout=min(5, remaining))
         except (base.Refused, subprocess.TimeoutExpired) as exc:
             raise ForegroundRefused('P03_WINDOW_QUERY_REFUSED') from exc
-        component = focused_component(window)
+        component, last_observation = focus_observation(window)
         if time.monotonic() < deadline and component is not None and predicate(component):
+            print('OX_R02F_P03_FOCUS_OBSERVED category='+last_observation, flush=True)
             return
         time.sleep(max(0, min(0.4, deadline-time.monotonic())))
+    # Only fixed categories; raw Android dumps and arbitrary app names never
+    # reach CI output. Distinguish absent/malformed evidence from actual focus.
+    print('OX_R02F_P03_FOCUS_TIMEOUT category='+last_observation, flush=True)
     raise ForegroundRefused(refusal)
 
 

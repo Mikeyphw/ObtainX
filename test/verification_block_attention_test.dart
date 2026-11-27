@@ -168,7 +168,7 @@ void main() {
             latestAttestationStatus: githubAttestationStatusVerified,
           ),
         ),
-        isFalse,
+        isTrue,
       );
     });
   });
@@ -226,8 +226,8 @@ void main() {
         },
         attestationStatus: githubAttestationStatusUnsupported,
       );
-      // Without a validated token nothing is enforced, so the install can run.
-      expect(provider.verificationWouldBlockAgain(noAttestation), isFalse);
+      // Missing or invalid credentials must never disable enforcement.
+      expect(provider.verificationWouldBlockAgain(noAttestation), isTrue);
 
       GitHub.storePATValidation('token', provider.settingsProvider);
       expect(provider.verificationWouldBlockAgain(noAttestation), isTrue);

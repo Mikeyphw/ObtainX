@@ -62,8 +62,8 @@ class CIOptimizationSafety(unittest.TestCase):
 
     def test_guard_requires_label(self):
         self.mutation(M.SOURCE,
-            '        if: ${{ '+M.REFUSE_EXPR+' }}',
-            '        if: ${{ false }}')
+            '        if: '+M.REFUSE_EXPR,
+            '        if: false')
 
 
     def test_api36_cache_mandatory(self):
@@ -102,7 +102,7 @@ class CIOptimizationSafety(unittest.TestCase):
 
     def test_full_flutter_mandatory_when_qualifying(self):
         self.mutation(M.FLUTTER,
-          "needs.scope.outputs.full_flutter == 'true' && !contains(github.event.pull_request.labels.*.name, 'ci:development-only')",
+          "needs.scope.outputs.full_flutter == 'true'",
           "needs.scope.outputs.full_flutter == 'false'")
 
     def test_summary_does_not_count_as_artifact(self):
@@ -112,7 +112,7 @@ class CIOptimizationSafety(unittest.TestCase):
         self.mutation(M.POLICY,"'"+M.RISK+"'","'docs/*.md'")
 
     def test_opt_python_change_retriggers_android(self):
-        self.mutation(M.HEAVY[0],"      - '"+M.RISK+"'","      - 'docs/**'")
+        self.mutation(M.HEAVY[0],"  pull_request:\n", "  pull_request:\n    paths: [docs/**]\n")
 
     def test_opt03_cache_action_pin_cannot_be_mutated(self):
         self.mutation(M.FLUTTER,'actions/cache/save@'+M.OPT03_CACHE_PIN,

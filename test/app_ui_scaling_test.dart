@@ -47,7 +47,7 @@ void main() {
 
     expect(scaledMediaQuery?.size, const Size(320, 640));
     expect(scaledMediaQuery?.padding.top, 16);
-    expect(scaledMediaQuery?.textScaler.scale(20), 24);
+    expect(scaledMediaQuery?.textScaler.scale(20), 60);
 
     final Finder target = find.byKey(const ValueKey<String>('scaled-target'));
     expect(tester.getTopLeft(target), Offset.zero);

@@ -10,7 +10,8 @@ class CISelection(unittest.TestCase):
     def test_docs_only_uses_source(self):
         x=classify(['docs/README.md']); self.assertFalse(x['full_flutter']); self.assertFalse(x['targeted_flutter']); self.assertTrue(x['source_contracts'])
     def test_regular_flutter_is_targeted(self):
-        x=classify(['lib/components/app_detail_widgets.dart']); self.assertTrue(x['targeted_flutter']); self.assertFalse(x['full_flutter'])
+        x=classify(['lib/components/app_card.dart']); self.assertTrue(x['targeted_flutter']); self.assertFalse(x['full_flutter'])
+        self.assertTrue(classify(['lib/components/app_detail_widgets.dart'])['full_flutter'])
     def test_test_only_is_targeted(self):
         x=classify(['test/example_test.dart']); self.assertTrue(x['targeted_flutter'])
     def test_installer_source_requires_full(self):
@@ -20,7 +21,7 @@ class CISelection(unittest.TestCase):
     def test_adversarial_source_and_workflows_require_full(self):
         for path in ('.github/workflows/obtainx-r02-rt02c.yml','scripts/ci/r02_rt02c_hosted.py',
                      'scripts/ci/obtainx_ci_policy.py','android/app/build.gradle',
-                     'pubspec.lock','docs/SECURITY_RELEASE_POLICY.md'):
+                     'pubspec.lock','packages/obtainx_native_evidence/android/build.gradle.kts','docs/SECURITY_RELEASE_POLICY.md'):
             self.assertTrue(classify([path])['full_flutter'],path)
     def test_unknown_github_configuration_fails_closed(self):
         self.assertTrue(classify(['.github/codeowners'])['full_flutter'])

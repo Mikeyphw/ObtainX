@@ -157,7 +157,7 @@ def build(out:Path):
     need(out.is_absolute() and out.is_dir() and not out.is_symlink(),'absolute CI fixture root required')
     need(os.getenv('GITHUB_ACTIONS')=='true' and os.getenv('RUNNER_OS')=='Linux',
          'positive install target restricted to hosted GitHub runner')
-    source=os.getenv('GITHUB_SHA','')
+    source=os.getenv('OX_EXPECTED_SHA','')
     need(re.fullmatch('[0-9a-f]{40}',source) is not None,'source SHA invalid')
     sdk=Path(os.getenv('ANDROID_HOME') or os.getenv('ANDROID_SDK_ROOT') or '/')
     tools=sdk/'build-tools'/'35.0.0'; android=sdk/'platforms'/'android-36'/'android.jar'

@@ -99,12 +99,12 @@ class CacheIntegrity(unittest.TestCase):
         with self.assertRaises(M.Refused):M.verify(self.apk,self.receipt,self.source)
     def test_checked_out_source_must_equal_event_sha(self):
         proc=subprocess.CompletedProcess(['git'],0,b'b'*40+b'\n',b'')
-        with patch.dict(M.os.environ,{'GITHUB_SHA':self.source,'GITHUB_ACTIONS':'true',
+        with patch.dict(M.os.environ,{'OX_EXPECTED_SHA':self.source,'GITHUB_ACTIONS':'true',
                                       'RUNNER_OS':'Linux','RUNNER_ARCH':'X64'}),\
              patch.object(M.subprocess,'run',return_value=proc):
             with self.assertRaises(M.Refused):M.source_identity()
     def test_source_identity_requires_hosted_x64(self):
-        with patch.dict(M.os.environ,{'GITHUB_SHA':self.source,'GITHUB_ACTIONS':'false',
+        with patch.dict(M.os.environ,{'OX_EXPECTED_SHA':self.source,'GITHUB_ACTIONS':'false',
                                       'RUNNER_OS':'Linux','RUNNER_ARCH':'X64'}):
             with self.assertRaises(M.Refused):M.source_identity()
     def test_android_inspection_missing_sdk_refuses(self):

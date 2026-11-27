@@ -80,13 +80,12 @@ def inspect(root: Path = ROOT) -> list[str]:
         if 'permissions:\n  contents: read' not in w:
             errors.append('workflow permissions changed: '+path)
         if path in ANDROID:
-            for glob in GROUPS:
-                if w.count("      - '"+glob+"'") != 1:
-                    errors.append('Android PR path coverage missing/duplicated: '+path+' '+glob)
-            if "      - '.github/workflows/**'" not in w:
-                errors.append('workflow policy edits do not trigger Android gate: '+path)
-            if "github.event_name != 'pull_request'" not in w:
-                errors.append('Android event safety gate changed: '+path)
+            lane = ('api36','rt02','rt02b','rt02c')[ANDROID.index(path)]
+            if ('    paths:' in w or '    paths-ignore:' in w or
+                'ready_for_review, converted_to_draft' not in w or
+                'needs: scope\n    if: needs.scope.outputs.'+lane+" == 'true'" not in w or
+                'scripts/ci/obtainx_ci_policy.py plan --head' not in w):
+                errors.append('Android exact-scope or full event gate changed: '+path)
     try:
         s=read(root,SCOPE)
         for glob in GROUPS:

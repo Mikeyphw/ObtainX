@@ -28,13 +28,17 @@ class R02FinalSourceMutations(unittest.TestCase):
     def test_07_no_obb_sdk_bypass(self):self.alter(C.SERVICE,'verifyP05SdkEnvelope(', 'ignoreP05SdkEnvelope(')
     def test_08_no_privilege_bypass(self):self.alter(C.SERVICE,'provider.installApkDir(', 'privilegedInstall(')
     def test_09_no_approval_bypass(self):self.alter(C.SERVICE,'barrierDismissible: false', 'barrierDismissible: true')
-    def test_10_no_signer_check(self):self.alter(C.BRIDGE,'getPackageInfo(target, PackageManager.GET_SIGNING_CERTIFICATES)','getPackageInfo(target, 0)')
+    def test_10_no_signer_check(self):self.alter(C.BRIDGE,'val observed = context.packageManager.getPackageInfo(target, flags)','val observed = context.packageManager.getPackageInfo(target, 0)')
     def test_11_no_confidence_forgery(self):self.alter(C.POLICY,'installerReportedSuccess && byteEvidenceQualified','true || installerReportedSuccess')
     def test_12_no_missing_UI(self):self.alter(C.PAGE,'Install local APK / archive','Import JSON')
-    def test_13_no_missing_native(self):self.alter(C.MAIN,'R02LocalArchiveBridge(applicationContext, flutterEngine.dartExecutor.binaryMessenger)','noBridge()')
+    def test_13_no_missing_native(self):self.alter(C.PLUGIN,'R02LocalArchiveBridge(binding.applicationContext, binding.binaryMessenger)','noBridge()')
     def test_14_no_missing_flutter(self):self.alter(C.FLUTTER,'flutter test --no-pub test/r02_local_archive_policy_test.dart','echo skipped')
     def test_15_no_missing_source(self):self.alter(C.R00,'python3 -B scripts/ci/r02_final_contract.py --check','echo skipped')
-    def test_16_no_source_signer_check(self):self.alter(C.BRIDGE,'val flags = PackageManager.GET_SIGNING_CERTIFICATES', 'val flags = 0')
+    def test_16_no_source_signer_check(self):self.alter(C.BRIDGE,'R09ApkSignatures.current(file, Build.VERSION.SDK_INT)', 'emptyList()')
+    def test_18_no_mixed_signer_acceptance(self):self.alter(C.BRIDGE,'expectedSigners == signers','true')
+    def test_19_no_unverified_certificate_claim(self):self.alter(C.SIGNATURES,'require(result.isVerified)','require(true)')
+    def test_20_no_signature_dependency_drift(self):self.alter(C.PLUGIN_BUILD,'apksig:9.3.1','apksig:+')
+    def test_21_no_post_observation_signer_drift(self):self.alter(C.BRIDGE,'afterSigners != signers','false')
     def test_17_contract_cli_check_is_executable(self):
         # Exercise the same command used by both the launcher and R00 CI.
         result=subprocess.run(

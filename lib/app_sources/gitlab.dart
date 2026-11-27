@@ -7,6 +7,7 @@ import 'package:http/http.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/app_sources/gradle_app_id.dart';
 import 'package:obtainium/custom_errors.dart';
+import 'package:obtainium/http/origin_redirect_policy.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -40,16 +41,12 @@ class GitLab extends AppSource {
     final AppNames names = _gh.getAppNames(standardUrl);
     final String projectUriComponent =
         '${Uri.encodeComponent(names.author)}%2F${Uri.encodeComponent(names.name)}';
-    final String? pat = await getPATIfAny(
-      hostChanged ? additionalSettings : {},
-    );
-    final String optionalAuth = (pat != null) ? '&private_token=$pat' : '';
     return inferAppIdFromGradleFiles(
       (String path) async {
         final res = await sourceRequest(
           'https://${hosts[0]}/api/v4/projects/$projectUriComponent'
           '/repository/files/${Uri.encodeComponent(path)}/raw'
-          '?ref=HEAD$optionalAuth',
+          '?ref=HEAD',
           additionalSettings,
         );
         if (res.statusCode != 200) return null;
@@ -141,25 +138,16 @@ class GitLab extends AppSource {
     String url, {
     bool forAPKDownload = false,
   }) async {
-    // Provide headers acceptable to, e.g. Cloudflare protection
-    final headers = <String, String>{};
-    headers[HttpHeaders.refererHeader] = 'https://${hosts[0]}';
-    return headers;
-  }
-
-  @override
-  Future<String> assetUrlPrefetchModifier(
-    String assetUrl,
-    String standardUrl,
-    Map<String, dynamic> additionalSettings,
-  ) async {
-    final String? pat = await getPATIfAny(
-      hostChanged ? additionalSettings : {},
-    );
-    final String optionalAuth = (pat != null) ? 'private_token=$pat' : '';
-    return optionalAuth.isEmpty
-        ? assetUrl
-        : '$assetUrl${Uri.parse(assetUrl).query.isEmpty ? '?' : '&'}$optionalAuth';
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.userInfo.isNotEmpty ||
+        !sameRequestOrigin(uri, Uri.parse('https://${hosts[0]}'))) {
+      return null;
+    }
+    final pat = await getPATIfAny(hostChanged ? additionalSettings : {});
+    return {
+      HttpHeaders.refererHeader: 'https://${hosts[0]}',
+      'PRIVATE-TOKEN': ?pat,
+    };
   }
 
   @override
@@ -171,16 +159,12 @@ class GitLab extends AppSource {
       final names = _gh.getAppNames(standardUrl);
       final String projectUriComponent =
           '${Uri.encodeComponent(names.author)}%2F${Uri.encodeComponent(names.name)}';
-      final String? pat = await getPATIfAny(
-        hostChanged ? additionalSettings : {},
-      );
-      final String optionalAuth = (pat != null) ? 'private_token=$pat' : '';
 
       final bool trackOnly = additionalSettings['trackOnly'] == true;
 
       // Get project ID
       final Response res0 = await sourceRequest(
-        'https://${hosts[0]}/api/v4/projects/$projectUriComponent?$optionalAuth',
+        'https://${hosts[0]}/api/v4/projects/$projectUriComponent',
         additionalSettings,
       );
       if (res0.statusCode != 200) {
@@ -193,10 +177,7 @@ class GitLab extends AppSource {
 
       // Request data from REST API
       final String releasesPath = trackOnly ? 'repository/tags' : 'releases';
-      final String query = [
-        if (optionalAuth.isNotEmpty) optionalAuth,
-        'per_page=100',
-      ].join('&');
+      const String query = 'per_page=100';
       final Response res = await sourceRequest(
         'https://${hosts[0]}/api/v4/projects/$projectUriComponent/$releasesPath?$query',
         additionalSettings,
@@ -386,12 +367,13 @@ class GitLab extends AppSource {
       return tr('gitlabPATRequiredForDefaultVerification');
     }
     try {
-      final Response response = await get(
-        Uri.parse('https://gitlab.com/api/v4/user'),
-        headers: <String, String>{
+      final Response response = await HttpService().request(
+        'GET', Uri.parse('https://gitlab.com/api/v4/user'),
+        <String, String>{
           'Authorization': 'Bearer $token',
           HttpHeaders.userAgentHeader: 'ObtainX',
         },
+        followRedirects: false,
       );
       if (response.statusCode == 200) {
         return null;

@@ -9,6 +9,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -23,6 +24,93 @@ def load(name,path):
 C=load('r02_rt02c_contract','scripts/ci/r02_rt02c_contract.py')
 F=load('r02_rt02c_fixture','scripts/ci/r02_rt02c_fixture.py')
 H=load('r02_rt02c_hosted','scripts/ci/r02_rt02c_hosted.py')
+
+class BoundedDartDiagnostics(unittest.TestCase):
+    def test_current_case_exact_checkpoint_and_error(self):
+        text = ('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+                'OX_RT02C_CHECKPOINT case=apks step=R09_INSTALLED_SIGNERS\n'
+                'OX_RT02C_FAILURE case=apks step=R09_INSTALLED_SIGNERS error=ASSERTION_FAILED\n'
+                'private token ghp_never_export_this\n')
+        self.assertEqual(H.dart_diagnostic(text,'apks'),
+                         {'checkpoint':'R09_INSTALLED_SIGNERS','error':'ASSERTION_FAILED'})
+    def test_unknown_wrong_case_or_trailing_payload_not_exported(self):
+        text = ('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+                'OX_RT02C_CHECKPOINT case=apks step=R09_BASE_INSPECT\n'
+                'OX_RT02C_FAILURE case=apks step=R09_BASE_INSPECT error=R09_APK_MANIFEST_REFUSED secret=do-not-export\n'
+                'OX_RT02C_FAILURE case=apkm step=R09_BASE_INSPECT error=R09_APK_MANIFEST_REFUSED\n'
+                'OX_RT02C_FAILURE case=apks step=R09_BASE_INSPECT error=UNKNOWN_SECRET\n')
+        self.assertEqual(H.dart_diagnostic(text,'apks'),
+                         {'checkpoint':'R09_BASE_INSPECT','error':'NOT_OBSERVED'})
+    def test_stale_case_never_contaminates(self):
+        text = ('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+                'OX_RT02C_CHECKPOINT case=apks step=R09_BASE_INSPECT\n'
+                'OX_RT02C_FAILURE case=apks step=R09_BASE_INSPECT error=R09_APK_MANIFEST_REFUSED\n'
+                'OX_R02C_DART_STAGE=SCENARIO_STARTED case=apkm\n'
+                'OX_RT02C_CHECKPOINT case=apkm step=DOWNLOAD_ARCHIVE\n')
+        self.assertEqual(H.dart_diagnostic(text,'apkm'),
+                         {'checkpoint':'DOWNLOAD_ARCHIVE','error':'NOT_OBSERVED'})
+        self.assertEqual(H.dart_diagnostic(text,'apks'),
+                         {'checkpoint':'NOT_OBSERVED','error':'NOT_OBSERVED'})
+    def test_fixed_native_refusal_code_retained(self):
+        text = ('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+                'OX_RT02C_CHECKPOINT case=apks step=R09_SPLIT_INSPECT\n'
+                'OX_RT02C_FAILURE case=apks step=R09_SPLIT_INSPECT error=R09_APK_MANIFEST_REFUSED\n')
+        self.assertEqual(H.dart_diagnostic(text,'apks')['error'],'R09_APK_MANIFEST_REFUSED')
+
+    def test_empty_scenario_marker_is_not_evidence(self):
+        self.assertEqual(H.dart_diagnostic('OX_R02C_DART_STAGE=SCENARIO_STARTED case=', 'apks'),
+                         {'checkpoint':'NOT_OBSERVED','error':'NOT_OBSERVED'})
+    def test_review_refusals_allowlisted(self):
+        text = ('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+                'OX_RT02C_CHECKPOINT case=apks step=R09_REVIEW_REFUSALS\n'
+                'OX_RT02C_REVIEW_REFUSAL case=apks code=r09ReviewPackageMismatch\n'
+                'OX_RT02C_REVIEW_REFUSAL case=apks code=private_token\n'
+                'OX_RT02C_REVIEW_REFUSAL case=apkm code=r09ReviewAbiMismatch\n'
+                'OX_RT02C_FAILURE case=apks step=R09_REVIEW_REFUSALS error=ASSERTION_FAILED\n')
+        self.assertEqual(H.dart_diagnostic(text,'apks'),
+                         {'checkpoint':'R09_REVIEW_REFUSALS','error':'ASSERTION_FAILED',
+                          'review_refusals':['r09ReviewPackageMismatch']})
+    def test_failure_receipt_survives_failed_package_state_probe(self):
+        import subprocess
+        from types import SimpleNamespace
+        from r02_rt02c_single_session import SingleSession
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory); receipt_path = out/'rt02c-receipt.json'
+            def refused(*args, **kwargs):
+                persisted = json.loads(receipt_path.read_text())
+                self.assertEqual(persisted['failure_details']['dart_diagnostic']['checkpoint'],
+                                 'R09_INSTALLED_SIGNERS')
+                raise subprocess.TimeoutExpired(['adb'], 1)
+            session = SingleSession(out,out,{}, {'status':'NOT_RUN','cases':[]},
+                                    receipt_path,H,SimpleNamespace(installed_state=refused))
+            session.active = 'apks'; session.phase = 'DART_TEST_STARTED'
+            session.flutter_log.write_text(
+                'OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+                'OX_RT02C_CHECKPOINT case=apks step=R09_INSTALLED_SIGNERS\n'
+                'OX_RT02C_FAILURE case=apks step=R09_INSTALLED_SIGNERS error=ASSERTION_FAILED\n'
+                'raw private secret ghp_DO_NOT_EXPORT\n')
+            with patch.object(H,'baseline_v1',side_effect=refused):
+                session.record_failure(1)
+            result = json.loads(receipt_path.read_text())
+            self.assertEqual(result['status'],'FAILED')
+            self.assertEqual(result['failure_details']['package_state_observation'],'UNKNOWN')
+            self.assertEqual(result['failure_details']['flutter_returncode_after_stop'],1)
+            self.assertNotIn('ghp_DO_NOT_EXPORT',receipt_path.read_text())
+    def test_preinstall_failure_attests_intact_v1(self):
+        from types import SimpleNamespace
+        from r02_rt02c_single_session import SingleSession
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory); receipt_path = out/'rt02c-receipt.json'
+            def refused(*args,**kwargs): raise H.Refused('no v2')
+            session = SingleSession(out,out,{}, {'status':'NOT_RUN','cases':[]},
+                                    receipt_path,H,SimpleNamespace(installed_state=refused))
+            session.active = 'apks'; session.phase = 'DART_TEST_STARTED'
+            session.flutter_log.write_text('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n')
+            with patch.object(H,'baseline_v1',return_value={'installed_original_intact':True}) as probe:
+                session.record_failure(1)
+            probe.assert_called_once_with(out)
+            self.assertEqual(json.loads(receipt_path.read_text())['failure_details']['package_state_observation'],
+                             'V1_SIGNED_BASE_VERIFIED')
 
 class SourceMutations(unittest.TestCase):
     def setUp(self):
@@ -43,7 +131,7 @@ class SourceMutations(unittest.TestCase):
     def test_new_workflow_mandatory(self):
         self.mutation(C.WF,'permissions:\n  contents: read','permissions:\n  contents: write')
     def test_sha_checkout_required(self):
-        self.mutation(C.WF,'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"','true')
+        self.mutation(C.WF,'test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"','true')
     def test_action_pin_required(self):
         self.mutation(C.WF,'@a421e43855164a8197daf9d8d40fe71c6996bb0d','@main')
     def test_no_older_sdk(self):
@@ -60,6 +148,61 @@ class SourceMutations(unittest.TestCase):
         self.mutation(C.SOURCE_WF,'python3 scripts/ci/r02_rt02c_contract.py --check','echo pass')
     def test_no_mock_installer(self):
         self.mutation(C.DART,'StockInstaller(SettingsProvider()).installApk(','fakeInstaller(')
+    def test_hf13_original_environment_constant_set_refused(self):
+        self.mutation(C.DART, 'expect(v1Sha, isNot(baseSha));',
+                      'expect({v1Sha, baseSha, splitSha}.length, 3);')
+    def test_hf13_reordered_constant_set_refused_even_with_good_assertions(self):
+        good = 'expect(v1Sha, isNot(baseSha));'
+        self.mutation(C.DART, good, good + '\n    expect({ splitSha,\n v1Sha, baseSha, }.length, 3);')
+    def test_hf13_list_to_set_refused_even_with_good_assertions(self):
+        good = 'expect(v1Sha, isNot(baseSha));'
+        self.mutation(C.DART, good, good + '\n    expect([splitSha, v1Sha, baseSha].toSet().length, 3);')
+    def test_hf13_each_pair_required(self):
+        for line in ('expect(v1Sha, isNot(baseSha));', 'expect(v1Sha, isNot(splitSha));',
+                     'expect(baseSha, isNot(splitSha));'):
+            with self.subTest(line=line):
+                p=self.root/C.DART;original=p.read_text()
+                try:self.mutation(C.DART,line,'expect(true, true);')
+                finally:p.write_text(original)
+    def test_hf13_duplicate_digest_argument_refused(self):
+        self.mutation(C.DART,'expect(v1Sha, isNot(splitSha));','expect(v1Sha, isNot(v1Sha));')
+    def test_hf13_weakened_matcher_refused(self):
+        self.mutation(C.DART,'expect(baseSha, isNot(splitSha));','expect(baseSha, isNotNull);')
+    def test_hf13_pair_after_loop_refused(self):
+        p=self.root/C.DART;original=p.read_text();line='expect(baseSha, isNot(splitSha));'
+        p.write_text(original.replace(line,'',1).replace('for (final name in scenarios) {','for (final name in scenarios) {\n      '+line,1))
+        self.assertNotEqual(C.inspect(self.root),[])
+    def test_hf13_both_lint_suppressions_refused(self):
+        for lint in ('equal_elements_in_set','prefer_collection_literals'):
+            with self.subTest(lint=lint):
+                p=self.root/C.DART;original=p.read_text()
+                try:self.mutation(C.DART,'void main() {','// ignore_for_file: '+lint+'\nvoid main() {')
+                finally:p.write_text(original)
+    def test_hf13_analyzer_downgrade_refused_all_workflows(self):
+        for wf in (C.WF,C.RT02_WF,C.RT02B_WF,C.FLUTTER_WF):
+            for flag in ('--no-fatal-warnings','--no-fatal-infos'):
+                with self.subTest(wf=wf,flag=flag):
+                    p=self.root/wf;original=p.read_text()
+                    command='flutter analyze lib test integration_test' if wf==C.FLUTTER_WF else 'flutter analyze integration_test lib test'
+                    try:self.mutation(wf,command,command+' '+flag)
+                    finally:p.write_text(original)
+    def test_hf13_main_analyzer_scope_required(self):
+        self.mutation(C.FLUTTER_WF,'run: flutter analyze lib test integration_test','run: flutter analyze lib test')
+    def test_hf13_pairwise_whitespace_allowed(self):
+        p=self.root/C.DART
+        text=p.read_text();p.write_text(text.replace('expect(v1Sha, isNot(baseSha));',
+            'expect( v1Sha,\n isNot( baseSha ) );'))
+        self.assertEqual(C.inspect(self.root), [])
+    def test_owned_foreground_gate_required(self):
+        self.mutation(C.DART, 'owner.sealForHandoff(nativeCancelable: true)', 'true')
+    def test_native_gate_dispatch_required(self):
+        self.mutation(C.DART, "installOptions: {'r02fP03Gate': owner}", 'installOptions: {}')
+    def test_terminal_listing_binding_required(self):
+        self.mutation(C.DART, "expect(terminal['listingKey'], listing)", 'expect(true, true)')
+    def test_signed_native_receipt_required(self):
+        self.mutation(C.DART, "expect(after['splitSha256'], [splitSha])", 'expect(true, true)')
+    def test_explicit_approval_gate_required(self):
+        self.mutation(C.SINGLE, 'self.taps == 1', 'True')
     def test_extract_zip_required(self):
         self.mutation(C.DART,'extractZipOffIsolate(','fakeExtractor(')
     def test_extract_tar_required(self):
@@ -198,6 +341,226 @@ class PreDartRetry(unittest.TestCase):
                 H.eligible_pre_dart_retry(self.out,self.fixtures,self.case,
                    H.Refused('Flutter RT02C case failed apks phase=GRADLE_BUILD'))
 
+class FailureDiagnostics(unittest.TestCase):
+    def test_native_state_bounded_to_current_case(self):
+        old='OX_R02C_NATIVE_STATE=APPROVAL TERMINAL=SUCCESS\n'
+        current='OX_R02C_DART_STAGE=SCENARIO_STARTED case=apkm\n'
+        self.assertEqual(H.native_session_observation(old+current),
+                         {'active':'NOT_OBSERVED','terminal':'NOT_OBSERVED'})
+        marker='OX_R02C_NATIVE_STATE=COMMITTING TERMINAL=NO_MATCHING_TERMINAL\n'
+        self.assertEqual(H.native_session_observation(current+marker),
+                         {'active':'COMMITTING','terminal':'NO_MATCHING_TERMINAL'})
+        for invalid in (marker+marker,marker.replace('COMMITTING','arbitrary/private/path'),
+                        marker.replace('NO_MATCHING_TERMINAL','private-token')):
+            self.assertEqual(H.native_session_observation(current+invalid),
+                             {'active':'NOT_OBSERVED','terminal':'NOT_OBSERVED'})
+    def test_installer_timeout_is_not_gradle_failure(self):
+        log = ('Running Gradle task assembleNormalDebug\n'
+               'OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\n'
+               'OX_R02C_DART_STAGE=INSTALL_CALL\nTimeoutException: timed out')
+        self.assertEqual(H.flutter_failure(log), 'INSTALLER_TIMEOUT_NO_APPROVAL')
+        self.assertEqual(H.flutter_failure(log, phase='STOCK_INSTALLER_CALL', approvals=1),
+                         'INSTALLER_TIMEOUT_AFTER_APPROVAL')
+
+    def test_explicit_gradle_failure_requires_pre_dart_phase(self):
+        log = 'Gradle task assembleNormalDebug failed with exit code 1'
+        self.assertEqual(H.flutter_failure(log, phase='GRADLE_BUILD'), 'GRADLE_BUILD_FAILED')
+        self.assertEqual(H.flutter_failure(log, phase='STOCK_INSTALLER_CALL'),
+                         'INSTALLER_INCOMPLETE_NO_APPROVAL')
+        self.assertEqual(H.flutter_failure('Running Gradle task assemble\nException: later',
+                                          phase='GRADLE_BUILD'), 'UNKNOWN_PRECISE_FAILURE')
+
+    def test_previous_case_timeout_cannot_contaminate_current_case(self):
+        log = ('OX_R02C_DART_STAGE=SCENARIO_STARTED case=apks\nTimeoutException\n'
+               'OX_R02C_DART_STAGE=SCENARIO_STARTED case=apkm\n'
+               'OX_R02C_DART_STAGE=INSTALL_CALL\nSome tests failed')
+        self.assertEqual(H.flutter_failure(log), 'INSTALLER_INCOMPLETE_NO_APPROVAL')
+
+    def _probe(self, *, dump_rc=0, xml=b'', tap_rc=0, cleanup_rc=0):
+        from types import SimpleNamespace
+        calls=[]; observed=[]
+        def command(args, **kwargs):
+            op=args[4]; calls.append(tuple(args))
+            return SimpleNamespace(returncode={'uiautomator':dump_rc,'cat':0,
+                                   'rm':cleanup_rc,'input':tap_rc}[op],
+                                   stdout=xml if op=='cat' else b'',stderr=b'')
+        with patch.object(H.base,'command',side_effect=command):
+            try:
+                result=H.base._tap_confirmed_install_dialog(on_observation=observed.append)
+            except H.base.Refused:
+                result='REFUSED'
+        return result,calls,observed
+
+    def test_failed_dump_never_reads_stale_xml_or_taps(self):
+        result,calls,observed=self._probe(dump_rc=1)
+        self.assertFalse(result)
+        self.assertEqual([c[4] for c in calls], ['uiautomator','rm'])
+        self.assertEqual(calls[0][-1],calls[1][-1])
+        self.assertEqual(observed,['DUMP_FAILED'])
+        _,other,_=self._probe(dump_rc=1)
+        self.assertNotEqual(calls[0][-1],other[0][-1])
+
+    def _xml(self, count=1, fixture=True):
+        label=H.base.NAME if fixture else 'Different package'
+        node=('<node package="com.android.packageinstaller" enabled="true" '
+              'text="Update" bounds="[0,0][20,20]"/>')
+        return ('<?xml version="1.0"?><hierarchy><node package="com.android.packageinstaller" text="'+label+'"/>'
+                +node*count+'</hierarchy>').encode()
+
+    def test_fresh_unique_installer_tap(self):
+        result,calls,observed=self._probe(xml=self._xml())
+        self.assertIs(result,True)
+        self.assertEqual([c[4] for c in calls],['uiautomator','cat','rm','input'])
+        self.assertEqual(calls[0][-1],calls[1][-1]);self.assertEqual(calls[1][-1],calls[2][-1])
+        self.assertEqual(observed,['CONFIRMATION_TAPPED'])
+
+    def test_ambiguous_or_wrong_fixture_never_taps(self):
+        for xml,category in ((self._xml(2),'ACTION_AMBIGUOUS'),
+                             (self._xml(fixture=False),'FIXTURE_NOT_VISIBLE'),
+                             (self._xml(0),'ACTION_NOT_VISIBLE'),
+                             (b'not xml','XML_INVALID')):
+            with self.subTest(category=category):
+                result,calls,observed=self._probe(xml=xml)
+                self.assertFalse(result);self.assertNotIn('input',[c[4] for c in calls])
+                self.assertEqual(observed,[category])
+
+    def test_uncertain_tap_fails_closed(self):
+        result,calls,observed=self._probe(xml=self._xml(),tap_rc=1)
+        self.assertEqual(result,'REFUSED')
+        self.assertEqual([c[4] for c in calls].count('input'),1)
+        self.assertEqual(observed,['TAP_FAILED'])
+
+    def test_cleanup_failure_prevents_tap(self):
+        result,calls,observed=self._probe(xml=self._xml(),cleanup_rc=1)
+        self.assertEqual(result,'REFUSED')
+        self.assertNotIn('input',[c[4] for c in calls])
+        self.assertEqual(observed,['CLEANUP_FAILED'])
+
+
+    def test_fixture_identity_must_belong_to_installer_package(self):
+        xml=self._xml().replace(b'package="com.android.packageinstaller"',
+                                b'package="unrelated.app"',1)
+        result,calls,observed=self._probe(xml=xml)
+        self.assertFalse(result)
+        self.assertNotIn('input',[c[4] for c in calls])
+        self.assertEqual(observed,['FIXTURE_NOT_VISIBLE'])
+
+    def test_action_must_belong_to_fixture_owner_ui(self):
+        xml=self._xml().replace(b'package="com.android.packageinstaller" enabled=',
+                                b'package="com.google.android.packageinstaller" enabled=')
+        result,calls,observed=self._probe(xml=xml)
+        self.assertFalse(result)
+        self.assertNotIn('input',[c[4] for c in calls])
+        self.assertEqual(observed,['ACTION_NOT_VISIBLE'])
+
+
+class ApprovalBoundaryConcurrency(unittest.TestCase):
+    def setUp(self):
+        from r02_rt02c_single_session import SingleSession
+        self.tmp=tempfile.TemporaryDirectory(prefix='ox-rt02c-concurrency-')
+        out=Path(self.tmp.name)
+        self.session=SingleSession(out,out,{}, {}, out/'receipt.json',H,H.base)
+        self.session.active='apks';self.session.called=True
+        self.session.phase='STOCK_INSTALLER_CALL'
+
+    def tearDown(self):self.tmp.cleanup()
+
+    def test_slow_dump_does_not_block_finish_and_stale_tap_refused(self):
+        entered=threading.Event();release=threading.Event();transition=threading.Event()
+        taps=[];results=[];errors=[]
+        def mock_probe(*, on_observation, authorize_tap):
+            entered.set()
+            if not release.wait(3):raise AssertionError('test probe not released')
+            on_observation('ACTION_NOT_VISIBLE')
+            return authorize_tap(lambda: taps.append('tap') or True)
+        def run():
+            try:results.append(self.session.probe_approval('apks',0))
+            except BaseException as exc:errors.append(exc)
+        def finish_boundary():
+            with self.session.lock:
+                self.session.active='apkm';self.session.next_index=1
+                self.session.called=True;self.session.taps=0
+                transition.set()
+        with patch.object(H.base,'_tap_confirmed_install_dialog',side_effect=mock_probe):
+            worker=threading.Thread(target=run);worker.start()
+            other=None
+            try:
+                self.assertTrue(entered.wait(2),'probe never started')
+                other=threading.Thread(target=finish_boundary);other.start()
+                self.assertTrue(transition.wait(1),'read-only UI probe blocked controller transition')
+            finally:
+                release.set();worker.join(4)
+                if other is not None:other.join(4)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors,[]);self.assertEqual(results,[False])
+            self.assertEqual(taps,[])
+            self.assertEqual(self.session.approval_probe_counts,{})
+
+    def test_current_boundary_tap_once(self):
+        taps=[]
+        def probe(*, on_observation, authorize_tap):
+            def tap():
+                taps.append(1);on_observation('CONFIRMATION_TAPPED');return True
+            self.assertTrue(authorize_tap(tap))
+            self.assertFalse(authorize_tap(tap))
+            return True
+        with patch.object(H.base,'_tap_confirmed_install_dialog',side_effect=probe) as helper:
+            self.assertTrue(self.session.probe_approval('apks',0))
+            self.assertFalse(self.session.probe_approval('apks',0))
+            self.assertEqual(helper.call_count,1)
+        self.assertEqual(taps,[1]);self.assertEqual(self.session.taps,1)
+        self.assertEqual(self.session.approval_probe_counts,{'CONFIRMATION_TAPPED':1})
+
+    def test_failed_boundary_not_probed(self):
+        self.session.failure='Refused'
+        with patch.object(H.base,'_tap_confirmed_install_dialog') as helper:
+            self.assertFalse(self.session.probe_approval('apks',0))
+            helper.assert_not_called()
+
+
+class OwnedSessionBoundary(unittest.TestCase):
+    def setUp(self):
+        from r02_rt02c_single_session import SingleSession
+        self.tmp=tempfile.TemporaryDirectory(prefix='ox-rt02c-owner-')
+        self.out=Path(self.tmp.name)
+        inv={'files':{H.filename(case):{'sha256':hashlib.sha256(case.encode()).hexdigest()}
+                      for case in H.CASES}}
+        self.s=SingleSession(self.out,self.out,inv,{'cases':[]},self.out/'receipt.json',H,H.base)
+        self.s.active='apks';self.s.called=True;self.s.taps=1
+        self.s.flutter_log.write_text('private source fixture')
+    def tearDown(self):self.tmp.cleanup()
+    def finish(self,**fields):
+        return self.s.transition('/rt02c/finish',{'case':self.s.active,'result':'installed',**fields})
+    def test_host_refuses_missing_or_invalid_owned_identity_before_adb(self):
+        with patch.object(H.base,'installed_state') as proof:
+            for fields in ({},{'owned_session_id':True},{'owned_session_id':0},
+                           {'owned_session_id':2**31},{'owned_session_id':'1'}):
+                with self.subTest(fields=fields),self.assertRaises(H.Refused):self.finish(**fields)
+            proof.assert_not_called();self.assertEqual(self.s.receipt['cases'],[])
+    def test_host_refuses_zero_approval_or_reused_session(self):
+        with patch.object(H.base,'installed_state') as proof:
+            self.s.taps=0
+            with self.assertRaises(H.Refused):self.finish(owned_session_id=18)
+            self.s.taps=1;self.s.receipt['cases']=[{'owned_session_id':18}]
+            with self.assertRaises(H.Refused):self.finish(owned_session_id=18)
+            proof.assert_not_called()
+    def test_positive_ack_requires_independent_android_state(self):
+        with patch.object(H.base,'installed_state',side_effect=H.Refused('APK mismatch')):
+            with self.assertRaises(H.Refused):self.finish(owned_session_id=18)
+        self.assertEqual(self.s.receipt['cases'],[]);self.assertEqual(self.s.next_index,0)
+        expected={'version_code':2,'installed_path_count':2,'config_x86_64_present':True}
+        with patch.object(H.base,'installed_state',return_value=expected) as proof:
+            self.assertEqual(self.finish(owned_session_id=18),{'verified':True,'next_index':1})
+            proof.assert_called_once_with(2,True,self.out)
+        self.assertEqual(self.s.receipt['cases'][0]['owned_session_id'],18)
+        self.assertEqual(self.s.receipt['cases'][0]['android_confirmations'],1)
+    def test_negative_cannot_submit_session_identity(self):
+        self.s.active='traversal';self.s.next_index=5;self.s.called=False;self.s.taps=0
+        with patch.object(H,'baseline_v1') as proof:
+            with self.assertRaises(H.Refused):self.s.transition('/rt02c/finish',{
+                'case':'traversal','result':'refused','owned_session_id':18})
+            proof.assert_not_called()
+
 class RuntimeReceipts(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(prefix='ox-rt02c-receipt-');self.out=Path(self.tmp.name)
@@ -208,7 +571,7 @@ class RuntimeReceipts(unittest.TestCase):
             if case in F.POSITIVE:
                 cases.append({'case':case,'archive_sha256':digest,'flutter_log_sha256':digest,
                   'installed_signed_members_verified':True,'version_code':2,'installed_path_count':2,
-                  'config_x86_64_present':True,'android_confirmations':0})
+                  'config_x86_64_present':True,'android_confirmations':1,'owned_session_id':index+100})
             else:
                 cases.append({'case':case,'archive_sha256':digest,'flutter_log_sha256':digest,
                   'preinstall_refused':True,'installed_original_intact':True,'version_code':1,
@@ -222,7 +585,8 @@ class RuntimeReceipts(unittest.TestCase):
                    'source_sha':self.commit,'run_id':self.run,'hosted_emulator_only':True,
                    'physical_device_qualified':False,'full_r02_matrix_qualified':False,
                    'user_facing_import_qualified':False,'release_qualified':False,
-                   'publication_allowed':False,'backend':'production StockInstaller','cases':cases}
+                   'publication_allowed':False,'backend':'production StockInstaller',
+                   'installer_route':'owned_foreground_session','cases':cases}
         self.write()
     def tearDown(self):self.tmp.cleanup()
     def write(self):(self.out/H.RECEIPT).write_text(json.dumps(self.data))
@@ -247,6 +611,23 @@ class RuntimeReceipts(unittest.TestCase):
         with self.assertRaises(H.Refused):self.verify()
     def test_opt06_float_skipped_count_refused(self):
         self.data['runner_probe_skipped']=0.0;self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_legacy_route_receipt_refused(self):
+        self.data.pop('installer_route');self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_zero_approval_positive_refused(self):
+        self.data['cases'][0]['android_confirmations']=0;self.write()
+        with self.assertRaises(H.Refused):self.verify()
+    def test_missing_or_duplicate_owned_session_refused(self):
+        first=self.data['cases'][0]
+        old=first.pop('owned_session_id');self.write()
+        with self.assertRaises(H.Refused):self.verify()
+        for value in (True,0,-1,2**31,self.data['cases'][1]['owned_session_id']):
+            first['owned_session_id']=value;self.write()
+            with self.assertRaises(H.Refused):self.verify()
+        first['owned_session_id']=old;self.write();self.assertEqual(self.verify(),0)
+    def test_negative_owned_session_refused(self):
+        self.data['cases'][-1]['owned_session_id']=17;self.write()
         with self.assertRaises(H.Refused):self.verify()
     def test_missing_single_process_proof(self):
         self.data['flutter_launches']=2;self.write()

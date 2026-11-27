@@ -11,6 +11,9 @@ R00='scripts/ci/r00_source_contract.py'
 R00_TEST='scripts/ci/test_r00_source_contract.py'
 SOURCE_WF='.github/workflows/obtainx-r00-contracts.yml'
 WF='.github/workflows/obtainx-r02-rt02c.yml'
+FLUTTER_WF='.github/workflows/obtainx-r00-flutter.yml'
+RT02_WF='.github/workflows/obtainx-r02-rt02.yml'
+RT02B_WF='.github/workflows/obtainx-r02-rt02b.yml'
 FIX='scripts/ci/r02_rt02c_fixture.py'
 HOST='scripts/ci/r02_rt02c_hosted.py'
 SINGLE='scripts/ci/r02_rt02c_single_session.py'
@@ -22,7 +25,7 @@ DART='integration_test/r02c_archive_install_test.dart'
 DOC='docs/R02_RT02C_ARCHIVE_RUNTIME_ACCEPTANCE.md'
 BASE_HOST='scripts/ci/r02_rt02_hosted.py'
 BASE_FIX='scripts/ci/r02_rt02_fixture.py'
-PATHS=(R00,R00_TEST,SOURCE_WF,WF,FIX,HOST,SINGLE,POLL,TEST,DART,DOC,BASE_HOST,BASE_FIX,WATCHDOG,WATCHDOG_TEST)
+PATHS=(R00,R00_TEST,SOURCE_WF,WF,FLUTTER_WF,RT02_WF,RT02B_WF,FIX,HOST,SINGLE,POLL,TEST,DART,DOC,BASE_HOST,BASE_FIX,WATCHDOG,WATCHDOG_TEST)
 CASES=('apks','apkm','xapk','zip','tar.gz','traversal','ambiguous')
 
 def inspect(root:Path=ROOT)->list[str]:
@@ -32,13 +35,15 @@ def inspect(root:Path=ROOT)->list[str]:
         if not p.is_file():errors.append('missing source '+rel);docs[rel]=''
         else:docs[rel]=p.read_text('utf8')
     f=docs[FIX];w=docs[WF];h=docs[HOST];d=docs[DART]
+    if w.count('test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"') != 2:
+        errors.append("exact source guard must exist in planner and runtime job")
     anchors={
       R00:("'obtainx-r02-rt02c.yml'",'unexpected = names - EXPECTED_WORKFLOWS',
            'missing = EXPECTED_WORKFLOWS - names'),
       R00_TEST:("'obtainx-r02-rt02c.yml'",'test_valid_strict_workflows'),
       SOURCE_WF:('python3 scripts/ci/r02_rt02c_contract.py --check',),
       WF:('permissions:\n  contents: read','persist-credentials: false',
-          'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
+          'test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"',
           'flutter analyze integration_test lib test',
           'python3 -B scripts/ci/r02_rt02_fixture.py --out',
           'python3 -B scripts/ci/r02_rt02c_fixture.py --out',
@@ -63,6 +68,9 @@ def inspect(root:Path=ROOT)->list[str]:
             "'publication_allowed':False", 'sha(fixtures/name)',
             'not called and taps==0', 'installed_signed_members_verified',
             'len(cases)==7', 'rt02c-progress.json',
+            "'installer_route':'owned_foreground_session'",
+            "actual['android_confirmations']==1", 'session_id not in session_ids',
+            "'owned_session_id' not in actual", 'def native_session_observation(text:str)',
             "obj.get('runner_probe_count')",
             "obj.get('runner_probe_skipped')",
             'controller.run()', "obj.get('flutter_launches')==1",
@@ -71,10 +79,16 @@ def inspect(root:Path=ROOT)->list[str]:
       SINGLE:('class SingleSession:', 'class ControlHandler(FixtureServer):',
               "self.base.adb('install', '-t', str(self.fixtures / 'base_v1.apk')",
               'not self.called and self.taps == 0',
+              'self.taps == 1', "data['owned_session_id']",
+              'type(session_id) is int', 'owned_session_id=session_id',
+              "self.H.sha(self.fixtures / 'base_v1.apk')",
+              "details['native_session_observation'] = self.H.native_session_observation(text)",
               'subprocess.Popen(args', 'self.next_index += 1', 'self.launches = 1',
               'self.base.installed_state(2, True, self.fixtures)',
               'self.H.baseline_v1(self.fixtures)',
-              'self.base._tap_confirmed_install_dialog()',
+              'self.base._tap_confirmed_install_dialog(',
+               'on_observation=observation, authorize_tap=authorize_tap',
+               'self.record_failure(p.returncode)', 'self.H.flutter_failure(text, phase=phase, approvals=taps)',
               'self.need(self.next_index == len(CASES)',
               "self.headers.get('X-RT02C-Token')",
               'from obtainx_ci_optimization_opt06_rt02c_polling import should_probe_runner',
@@ -96,6 +110,16 @@ def inspect(root:Path=ROOT)->list[str]:
             'extractZipOffIsolate(', 'extractTarballOffIsolate(',
             'resolveInstallBundlePlan(', 'installArtifactFormat(fileName)',
             'StockInstaller(SettingsProvider()).installApk(',
+            'R02fP03CancellableStock.instance', 'InstallPrecommitGate(listing,',
+            'owner.sealForHandoff(nativeCancelable: true)',
+            "installOptions: {'r02fP03Gate': owner}",
+            "expect(terminal['listingKey'], listing)",
+            "expect(terminal['detail'], 'ANDROID_STATUS_0')",
+            "expect(baseline['baseSha256'], v1Sha)",
+            "expect(after['baseSha256'], baseSha)",
+            "expect(after['splitSha256'], [splitSha])",
+            "expect(state['active'], isNull",
+            'return sessionId;', 'sessionId: sessionId',
             'sha256.convert(bytes).toString() != archiveSha',
             'actual.toString() != expected', 'expect(plan.sessionPaths.length, 2)',
             "caseName == 'traversal'", "caseName == 'ambiguous'",
@@ -117,11 +141,24 @@ def inspect(root:Path=ROOT)->list[str]:
             'test_opt06_missing_probe_count_refused',
             'test_opt06_missing_skipped_count_refused',
             'test_opt06_boolean_probe_count_refused',
-            'test_opt06_excessive_skipped_count_refused'),
+            'test_opt06_excessive_skipped_count_refused',
+             'test_installer_timeout_is_not_gradle_failure',
+             'test_failed_dump_never_reads_stale_xml_or_taps',
+             'test_uncertain_tap_fails_closed'),
     }
     for p,markers in anchors.items():
         for m in markers:
             if m not in docs[p]:errors.append(p+': protected source evidence missing '+m)
+    # Keep strict analysis in each installer lane and the main full Flutter lane.
+    # An exact command, not a comment or a substring, must cover all three trees.
+    for wf in (WF, RT02_WF, RT02B_WF):
+        if len(re.findall(r'(?m)^ *flutter analyze integration_test lib test *$', docs[wf])) != 1:
+            errors.append('HF13: strict installer integration analysis missing: '+wf)
+    if len(re.findall(r'(?m)^ *run: flutter analyze lib test integration_test *$', docs[FLUTTER_WF])) != 1:
+        errors.append('HF13: main Flutter analysis must include integration_test')
+    for wf in (WF, RT02_WF, RT02B_WF, FLUTTER_WF):
+        if re.search(r'--no-fatal-(?:warnings|infos)\b', docs[wf]):
+            errors.append('HF13: fatal analyzer diagnostics must remain enabled: '+wf)
     if any(w.count(token)!=1 for token in ('python3 -B scripts/ci/r02_rt02_fixture.py --out',
                                             'python3 -B scripts/ci/r02_rt02c_fixture.py --out')):
         errors.append('one pre-emulator build per fixture category required')
@@ -131,6 +168,23 @@ def inspect(root:Path=ROOT)->list[str]:
         errors.append('GitHub workflow write permission forbidden')
     if re.search(r'(?i)gh\s+release\s+create|flutter\s+build\s+apk.*--release',w):
         errors.append('publication forbidden')
+    # A set literal triggers equal_elements_in_set with the default empty
+    # environment constants; list.toSet() triggers prefer_collection_literals.
+    # Require each real pairwise assertion exactly once before the case loop.
+    pairs=(('v1Sha','baseSha'),('v1Sha','splitSha'),('baseSha','splitSha'))
+    pre_loop=d.split('for (final name in scenarios)',1)[0]
+    for left,right in pairs:
+        pair=rf'(?m)^ *expect\(\s*{left}\s*,\s*isNot\(\s*{right}\s*\)\s*\); *$'
+        if len(re.findall(pair,pre_loop)) != 1 or len(re.findall(pair,d)) != 1:
+            errors.append(f'HF13: missing or duplicate pre-case digest comparison: {left}/{right}')
+    names=r'(?:v1Sha|baseSha|splitSha)'
+    items=rf'{names}(?:\s*,\s*{names})+\s*,?'
+    if re.search(rf'\{{\s*{items}\s*\}}',d):
+        errors.append('HF13: compile-time environment digest set literal forbidden')
+    if re.search(rf'\[\s*{items}\s*\]\s*\.\s*toSet\s*\(',d):
+        errors.append('HF13: environment digest list.toSet lint regression forbidden')
+    if re.search(r'//\s*ignore(?:_for_file)?\s*:[^\n]*(?:equal_elements_in_set|prefer_collection_literals)\b',d):
+        errors.append('HF13: analyzer warning/info suppression forbidden')
     if d.count('extractZipOffIsolate(')!=2 or d.count('resolveInstallBundlePlan(')!=2 or d.count('OX_R02C_DART_STAGE=PREINSTALL_REFUSED')!=2:
         errors.append('archive scenario redundancy or negative path missing')
     if docs[R00_TEST].count("'obtainx-r02-rt02c.yml'") < 5:
@@ -173,7 +227,10 @@ def inspect(root:Path=ROOT)->list[str]:
         errors.append('HF09 runner must consume the same atomic clock snapshot')
     if docs[SINGLE].count('subprocess.Popen(')!=1:
         errors.append('HF01 must launch exactly one Flutter process')
-    if docs[SINGLE].count('self.H.baseline_v1(self.fixtures)')!=2:
+    transition=docs[SINGLE].split('    def transition(',1)[-1].split('    def ',1)[0]
+    if transition.count('self.base.installed_state(2, True, self.fixtures)')!=1:
+        errors.append('HF01 must verify signed v2 in the success boundary')
+    if transition.count('self.H.baseline_v1(self.fixtures)')!=2:
         errors.append('HF01 must verify v1 before and after negative')
     if docs[SINGLE].count('self.next_index += 1')!=1:
         errors.append('HF01 must independently advance every Android boundary')

@@ -46,7 +46,7 @@ class R01Contracts(unittest.TestCase):
         self.assertEqual(module.inspect(self.root, git_check=False), [])
     def test_native_unbounded_zip_is_refused(self):
         self.mutate('lib/providers/apps_provider_install.dart',
-                    'await extractZipOffIsolate(filePath, destinationPath);',
+                    'await extractZipOffIsolate(filePath, destinationPath,\n        checkCancellation: token?.throwIfCancelled);',
                     'await ZipFile.extractToDirectory(zipFile: File(filePath), destinationDir: Directory(destinationPath));')
         self.assertTrue(module.inspect(self.root, git_check=False))
     def test_archive_limit_removed_is_refused(self):
@@ -54,8 +54,43 @@ class R01Contracts(unittest.TestCase):
         self.assertTrue(module.inspect(self.root, git_check=False))
     def test_zip_crc_verification_bypass_is_refused(self):
         self.mutate('lib/services/artifact_file_work.dart',
-                    '_fileCrc32(file) != entry.crc32',
+                    '_fileCrc32(file) != entry.crc',
                     'false')
+        self.assertTrue(module.inspect(self.root, git_check=False))
+    def test_watchdog_cannot_be_disabled(self):
+        self.mutate('lib/services/artifact_file_work.dart',
+                    'elapsed.elapsed >= limits.maxWallTime', 'false')
+        self.assertTrue(module.inspect(self.root, git_check=False))
+    def test_worker_exit_observation_is_mandatory(self):
+        self.mutate('lib/services/artifact_file_work.dart',
+                    'await exited.future;', 'await Future<void>.value();')
+        self.assertTrue(module.inspect(self.root, git_check=False))
+    def test_worker_kill_cannot_be_removed(self):
+        self.mutate('lib/services/artifact_file_work.dart',
+                    'worker?.kill(priority: Isolate.immediate);', '/* no kill */')
+        self.assertTrue(module.inspect(self.root, git_check=False))
+    def test_intermediate_tar_must_not_escape_owned_staging(self):
+        self.mutate('lib/services/artifact_file_work.dart',
+                    "Directory('$work/decoded')..createSync()",
+                    "Directory.systemTemp.createTempSync('obtainx-decoded-')")
+        self.assertTrue(module.inspect(self.root, git_check=False))
+    def test_xz_dictionary_limit_removed_is_refused(self):
+        self.mutate('lib/services/artifact_file_work.dart', 'header[p] > 24', 'false')
+        self.assertTrue(module.inspect(self.root, git_check=False))
+    def test_xz_preflight_output_limit_removed_is_refused(self):
+        self.mutate('lib/services/artifact_file_work.dart', 'decodedBytes > limits.maxExpandedBytes - total - outputLength', 'false')
+        self.assertTrue(module.inspect(self.root, git_check=False))
+    def test_bzip_requires_real_end_marker(self):
+        self.mutate('lib/services/artifact_file_work.dart', 'bool get isEOS => false', 'bool get isEOS => fileRemaining <= 0')
+        self.assertTrue(module.inspect(self.root, git_check=False))
+    def test_bzip_refuses_trailing_bytes(self):
+        self.mutate('lib/services/artifact_file_work.dart', 'strict.fileRemaining != 0', 'false')
+        self.assertTrue(module.inspect(self.root, git_check=False))
+    def test_decoder_readback_must_be_refused(self):
+        self.mutate('lib/services/artifact_file_work.dart', "throw const FormatException('Decoder whole-output readback is forbidden')", 'output.subset(start, end)')
+        self.assertTrue(module.inspect(self.root, git_check=False))
+    def test_xz_stream_count_limit_cannot_be_removed(self):
+        self.mutate('lib/services/artifact_file_work.dart', '++streams > limits.maxEntries', 'false')
         self.assertTrue(module.inspect(self.root, git_check=False))
     def test_tampered_adversarial_fixture_is_refused(self):
         (self.root / module.FIXTURE_DIR / 'traversal.zip').write_bytes(b'forged fixture')

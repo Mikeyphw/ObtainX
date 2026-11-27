@@ -10,6 +10,7 @@ const base = InstallApkMember(
 
 InstallApkMember split(String name) => InstallApkMember(
   path: '$root/$name', packageName: pkg, versionCode: 22,
+  splitName: name.replaceFirst(RegExp(r'^split_'), '').replaceFirst(RegExp(r'\.apk$'), ''),
 );
 
 InstallBundlePlan plan(List<InstallApkMember> files, {

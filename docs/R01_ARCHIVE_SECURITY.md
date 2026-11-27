@@ -22,3 +22,31 @@ Scope: replaces the previous native ZIP extraction entry point and TAR extractio
 The current ZIP/TAR format parser is the pinned `archive: ^4.0.9` library. Its decoder allocation behavior still warrants Android-device memory/resource acceptance; no runtime claim is made until that gate passes.
 
 R02 must introduce complete APK/split planning; do not interpret the R01 extraction tests as proof that APKS/APKM/XAPK installation is correct. Release signing remains prohibited by `docs/SECURITY_RELEASE_POLICY.md`.
+
+### GAP-02-HF02: independently generated XZ regression fixtures
+
+The pinned archive 4.3.0 encoder's `_writeMultibyteInteger` (upstream commit
+`b48a841b586af8b41c67ce2cbeebc8db632ed13e`, encoder blob
+`82a778fbc27a9c6bb9ca39531953bd5c6597c521`) writes reversed multi-byte VLI
+values in the index. Do not relax `_preflightXz`, change decoder verification,
+or interpret this fixture defect as permission to accept noncanonical XZ.
+The original 2048-byte nested-APK TAR requires unpadded size 2072 in the stored
+block: canonical index prefix `000198108010`, malformed prefix `000190189000`.
+The frozen malformed fixture uses this exact encoder mechanism with deterministic
+USTAR metadata, not the original transient runner bytes. Correcting only the
+index and its CRC makes it independently readable; malformed index and corrupted
+block-check inputs must be refused with no published or orphan staging tree.
+
+Positive fixtures are independently compressed using Python `tarfile` (USTAR,
+`nested/app.apk`, mode 0644, uid/gid 0, mtime 0, two 512-byte terminating zero
+blocks) and `lzma` (FORMAT_XZ, LZMA2 only, 1 MiB dictionary, CRC32/CRC64/SHA256).
+Small payload is `test apk content`; large payload is 196608+37 bytes with byte
+`(i*31)%251`. The malformed fixture is the small TAR in one stored LZMA2 chunk
+with an 8 MiB dictionary, valid metadata CRCs and CRC64 block check, but the
+reversed legacy index fields. The corrupted block-check fixture is the valid
+large CRC64 fixture with the last check byte toggled by 1. All new bytes are
+pinned in `docs/R01_FIXTURE_SHA256.json`. The independent Python regression
+`test_gap02_hf02_contract.py` verifies decoded payload, compression, index
+mechanism, and refusal by liblzma. The maintained Flutter tests exercise the
+actual application extractor (including cleanup and byte budget). Python
+fixture verification is not Flutter/runtime qualification.

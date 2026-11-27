@@ -11,9 +11,11 @@ import 'package:expressive_loading_indicator/expressive_loading_indicator.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
+import 'package:obtainium/components/r10_settings_context.dart';
 import 'package:obtainium/app_distribution.dart';
 import 'package:obtainium/layout_breakpoints.dart';
 import 'package:obtainium/widgets/help_hint_icon.dart';
+import 'package:obtainium/widgets/r10_settings_navigation.dart';
 import 'package:obtainium/components/app_bottom_sheet.dart';
 import 'package:obtainium/components/app_dropdown_field.dart';
 import 'package:obtainium/components/custom_app_bar.dart';
@@ -26,6 +28,9 @@ import 'package:obtainium/components/ui_widgets.dart'
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/installers/shizuku_plugin.dart';
 import 'package:obtainium/main.dart';
+import 'package:obtainium/widgets/r07_activity_center_page.dart';
+import 'package:obtainium/widgets/r11_schedule_settings.dart';
+import 'package:obtainium/services/r11_external_requests.dart';
 import 'package:obtainium/widgets/r05_install_activity_page.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/app_sources/gitlab.dart';
@@ -59,6 +64,7 @@ IconData _swipeActionIcon(SwipeAction action) => switch (action) {
   SwipeAction.appInfo => Icons.info_rounded,
   SwipeAction.edit => Icons.edit_rounded,
   SwipeAction.none => Icons.block_rounded,
+  SwipeAction.openSource => Icons.language_rounded,
 };
 
 String get _aboutObtainXWebsiteUrl => tr('aboutObtainXWebsiteUrl');
@@ -103,6 +109,44 @@ class SettingsPageState extends State<SettingsPage> {
   bool _expandedSettingsSectionsLoaded = false;
 
   String? _selectedCategory;
+  bool _wasLargeScreen = false;
+  final Map<String, GlobalKey> _sectionAnchors = {};
+  final Map<String, FocusNode> _sectionFocus = {};
+
+  GlobalKey _sectionAnchor(String key) =>
+      _sectionAnchors.putIfAbsent(key, () => GlobalKey());
+  FocusNode _sectionFocusNode(String key) =>
+      _sectionFocus.putIfAbsent(key, () => FocusNode());
+
+  static const _expertSettings = {'integrations', 'warnings', 'sourceSpecific'};
+
+  // Public, localized setting labels only. A hit opens its owning section;
+  // platform/backend-dependent controls remain gated there.
+  static const _searchLabels = <String, List<String>>{
+    'updates': ['r11Schedule', 'bgUpdateCheckInterval', 'runBgCheckNow', 'foregroundServiceForUpdateChecking',
+      'enableBackgroundUpdates', 'bgUpdatesOnWiFiOnly', 'bgUpdatesWhileChargingOnly',
+      'checkOnStart', 'checkUpdateOnDetailPage', 'includePrereleasesByDefault',
+      'onlyCheckInstalledOrTrackOnlyApps', 'removeOnExternalUninstall', 'parallelDownloads', 'r10SettingsActivityCenter'],
+    'themes': ['followSystem', 'light', 'dark', 'useBlackTheme', 'settingsGradientBackground',
+      'settingsProgressiveBlur', 'matchAppPageToIconColors', 'settingsReduceVisualEffects',
+      'settingsShadingIntensity', 'settingsThemeColorsHint', 'settingsPaletteStyle',
+      'settingsCustomSeedDialogTitle', 'accentSource_materialYou', 'accentSource_custom',
+      'accentSource_appDefault', 'accentSource_presetSapphire', 'accentSource_presetEmerald',
+      'accentSource_presetAmber', 'accentSource_presetViolet', 'accentSource_presetCoral',
+      'accentSource_presetTeal', 'accentSource_presetLime', 'accentSource_presetRose',
+      'accentSource_presetSlate'],
+    'appearance': ['language', 'settingsCustomFontTitle', 'uiScale', 'cardCorners',
+      'updateButtonsAtTopOfAppPage', 'alwaysUsePhoneLayout', 'showWebInAppView', 'highlightTouchTargets'],
+    'interaction': ['leftSwipeAction', 'rightSwipeAction', 'tactileFeedbackEnabled', 'swipeAction_openSource'],
+    'warnings': ['showAPKOriginWarnings', 'showAppDowngradeError', 'showBatteryOptimizationPrompt', 'showTrackOnlyWarnings'],
+    'integrations': ['r11Automation', 'r11AppManagerInspect', 'openAppInfoInAppManager', 'beforeNewInstallsShareToAppVerifier',
+      'enableDowngradeModules', 'enableVirusTotalScanning', 'virusTotalApiKeyLabel',
+      'installerMode', 'installerModeStock', 'installerModeShizuku', 'installerModeDhizuku',
+      'installerModeThirdParty', 'shizukuPretendToBeGooglePlay'],
+    'sourceSpecific': ['personalAccessTokenPAT', 'githubPATLabel', 'gitlabPATLabel',
+      'GHReqPrefix', 'GHReqPrefixUseToken', 'repoRenamedCheck'],
+    'about': ['appLogs', 'aboutOpenWiki', 'aboutWebsite', 'aboutPrivacyPolicy', 'aboutTerms'],
+  };
 
   // ── Scaffold-level subscriptions ────────────────────────────────────
   // We deliberately avoid `context.watch<SettingsProvider>()`: that would
@@ -115,6 +159,7 @@ class SettingsPageState extends State<SettingsPage> {
     sp.progressiveBlurEnabled,
     sp.cardCornerScale,
     sp.alwaysUsePhoneLayout,
+    sp.reduceVisualEffects,
   );
 
   static const List<String> _settingsSectionKeys = [
@@ -130,19 +175,25 @@ class SettingsPageState extends State<SettingsPage> {
 
   @override
   void dispose() {
+    for (final node in _sectionFocus.values) {
+      node.dispose();
+    }
     _expandedSettingsSections.dispose();
     super.dispose();
   }
 
-  Future<bool> confirmDiscardUnsavedChanges() async {
+  bool get _hasUnsavedChanges {
     final sourceSpecificState = _sourceSpecificKey.currentState;
     final integrationsState = _integrationsKey.currentState;
-    final bool hasUnsavedChanges =
+    return
         (sourceSpecificState != null &&
             (sourceSpecificState.isGithubDirty ||
                 sourceSpecificState.isGitlabDirty)) ||
         (integrationsState?.isVirusTotalApiKeyDirty ?? false);
-    if (hasUnsavedChanges) {
+  }
+
+  Future<bool> confirmDiscardUnsavedChanges() async {
+    if (_hasUnsavedChanges) {
       final bool? discard = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -167,9 +218,9 @@ class SettingsPageState extends State<SettingsPage> {
           );
         },
       );
-      if (discard == true) {
-        sourceSpecificState?.discardChanges();
-        integrationsState?.discardChanges();
+      if (discard == true && mounted) {
+        _sourceSpecificKey.currentState?.discardChanges();
+        _integrationsKey.currentState?.discardChanges();
         return true;
       }
       return false;
@@ -200,6 +251,9 @@ class SettingsPageState extends State<SettingsPage> {
     final SettingsProvider sp = context.read<SettingsProvider>();
     final ColorScheme cs = Theme.of(context).colorScheme;
     final SourceProvider sourceProvider = SourceProvider();
+    final reducedMotion = sp.reduceVisualEffects || MediaQuery.disableAnimationsOf(context);
+    final sectionDuration = reducedMotion ? Duration.zero : const Duration(milliseconds: 360);
+    final opacityDuration = reducedMotion ? Duration.zero : const Duration(milliseconds: 180);
 
     // One-time initialization guard.
     if (sp.prefs == null) sp.initializeSettings();
@@ -251,16 +305,15 @@ class SettingsPageState extends State<SettingsPage> {
     }
 
     Widget collapsibleCard(String key, Widget child) {
-      // RepaintBoundary: see settingsCard above for why each section is its own
-      // cached layer.
+      // Keep the form mounted, including unsaved credentials, while collapsed.
       return RepaintBoundary(
         child: ValueListenableBuilder<Map<String, bool>>(
           valueListenable: _expandedSettingsSections,
           child: child,
           builder: (context, expandedState, child) {
-            final bool expanded = _sectionExpanded(expandedState, key);
+            final expanded = _sectionExpanded(expandedState, key);
             return AnimatedPadding(
-              duration: const Duration(milliseconds: 360),
+              duration: sectionDuration,
               curve: Curves.easeInOutCubicEmphasized,
               padding: EdgeInsets.only(
                 bottom: expanded ? SettingsProvider.collapsedHeaderGap : 0,
@@ -268,159 +321,18 @@ class SettingsPageState extends State<SettingsPage> {
               child: ClipRect(
                 clipper: _SettingsSectionShadowClipper(expanded: expanded),
                 child: AnimatedAlign(
-                  duration: const Duration(milliseconds: 360),
+                  duration: sectionDuration,
                   curve: Curves.easeInOutCubicEmphasized,
                   alignment: Alignment.topCenter,
                   heightFactor: expanded ? 1.0 : 0.0,
                   child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeInOutCubicEmphasized,
+                    duration: opacityDuration,
                     opacity: expanded ? 1.0 : 0.0,
-                    child: child!,
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      );
-    }
-
-    Widget sectionHeader(String title, IconData icon, String key) {
-      const Duration headerTransitionDuration = Duration(milliseconds: 300);
-      const Curve headerTransitionCurve = Curves.easeInOutCubicEmphasized;
-      final Color collapsedHeaderColor = m3eCollapsedGroupHeaderFill(cs);
-      final Color collapsedHeaderContentColor = cs.onSecondaryContainer;
-
-      // RepaintBoundary: see settingsCard above for why each section is its own
-      // cached layer.
-      return RepaintBoundary(
-        child: ValueListenableBuilder<Map<String, bool>>(
-          valueListenable: _expandedSettingsSections,
-          builder: (context, expandedState, _) {
-            final bool expanded = _sectionExpanded(expandedState, key);
-            final Color headerContentColor = expanded
-                ? cs.primary
-                : collapsedHeaderContentColor;
-            final BorderSide outlineSide = expanded
-                ? BorderSide.none
-                : m3ePureBlackOutlineSide(cs, alpha: 0.16);
-
-            final double collapsedRadius =
-                SettingsProvider.cardCornerRadiusForScale(
-                  SettingsProvider.baseCollapsedHeaderRadius,
-                  context.select<SettingsProvider, double>(
-                    (s) => s.cardCornerScale,
-                  ),
-                );
-
-            return Padding(
-              padding: const EdgeInsets.only(
-                top: SettingsProvider.collapsedHeaderGap,
-              ),
-              child: AnimatedContainer(
-                duration: headerTransitionDuration,
-                curve: headerTransitionCurve,
-                decoration: BoxDecoration(
-                  color: expanded ? Colors.transparent : collapsedHeaderColor,
-                  borderRadius: BorderRadius.circular(
-                    expanded ? 8 : collapsedRadius,
-                  ),
-                  border: outlineSide == BorderSide.none
-                      ? null
-                      : Border.fromBorderSide(outlineSide),
-                ),
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: InkWell(
-                    onTap: () => setSectionExpanded(key, !expanded),
-                    borderRadius: BorderRadius.circular(
-                      expanded ? 8 : collapsedRadius,
-                    ),
-                    splashFactory: NoSplash.splashFactory,
-                    splashColor: Colors.transparent,
-                    highlightColor: Colors.transparent,
-                    hoverColor: Colors.transparent,
-                    child: SizedBox(
-                      height: SettingsProvider.collapsedHeaderHeight,
-                      child: AnimatedPadding(
-                        duration: headerTransitionDuration,
-                        curve: headerTransitionCurve,
-                        padding: EdgeInsets.symmetric(
-                          horizontal: expanded ? 4 : 12,
-                          vertical: expanded ? 4 : 8,
-                        ),
-                        child: Center(
-                          child: Row(
-                            children: [
-                              AnimatedContainer(
-                                duration: headerTransitionDuration,
-                                curve: headerTransitionCurve,
-                                width: expanded ? 20 : 30,
-                                height: expanded ? 20 : 30,
-                                decoration: BoxDecoration(
-                                  color: expanded
-                                      ? Colors.transparent
-                                      : cs.primary.withValues(alpha: 0.16),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  icon,
-                                  color: headerContentColor,
-                                  size: expanded ? 16 : 17,
-                                ),
-                              ),
-                              SizedBox(width: expanded ? 8 : 10),
-                              Expanded(
-                                child: AnimatedDefaultTextStyle(
-                                  duration: headerTransitionDuration,
-                                  curve: headerTransitionCurve,
-                                  style: TextStyle(
-                                    fontFamily: Theme.of(
-                                      context,
-                                    ).textTheme.bodyLarge?.fontFamily,
-                                    fontWeight: expanded
-                                        ? FontWeight.w600
-                                        : FontWeight.w700,
-                                    color: headerContentColor,
-                                    fontSize: 13,
-                                    letterSpacing: expanded ? 0 : 0.1,
-                                    decoration: TextDecoration.none,
-                                  ),
-                                  child: Text(
-                                    title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                              AnimatedContainer(
-                                duration: headerTransitionDuration,
-                                curve: headerTransitionCurve,
-                                width: expanded ? 20 : 32,
-                                height: expanded ? 20 : 32,
-                                decoration: BoxDecoration(
-                                  color: expanded
-                                      ? Colors.transparent
-                                      : cs.surfaceContainerHighest,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: AnimatedRotation(
-                                  turns: expanded ? 0.25 : 0,
-                                  duration: headerTransitionDuration,
-                                  curve: headerTransitionCurve,
-                                  child: Icon(
-                                    Icons.chevron_right_rounded,
-                                    color: expanded
-                                        ? cs.primary
-                                        : cs.onSurfaceVariant,
-                                    size: expanded ? 18 : 20,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                    child: ExcludeFocus(
+                      excluding: !expanded,
+                      child: ExcludeSemantics(
+                        excluding: !expanded,
+                        child: IgnorePointer(ignoring: !expanded, child: child!),
                       ),
                     ),
                   ),
@@ -432,11 +344,41 @@ class SettingsPageState extends State<SettingsPage> {
       );
     }
 
-    Widget aboutSectionHeader() {
+    Widget sectionHeader(_SettingsCategory category) {
+      return Padding(
+        key: _sectionAnchor(category.key),
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: ValueListenableBuilder<Map<String, bool>>(
+          valueListenable: _expandedSettingsSections,
+          builder: (context, expandedState, _) {
+            final expanded = _sectionExpanded(expandedState, category.key);
+            return R10SettingsNavigationTile(
+              title: category.title,
+              icon: category.icon,
+              expanded: expanded,
+              radius: sp.cardCornerRadiusFor(SettingsProvider.baseCollapsedHeaderRadius),
+              focusNode: _sectionFocusNode(category.key),
+              onTap: () => setSectionExpanded(category.key, !expanded),
+            );
+          },
+        ),
+      );
+    }
+
+    Widget groupHeading(String label) => Semantics(
+      header: true,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
+        child: Text(label, style: Theme.of(context).textTheme.titleMedium),
+      ),
+    );
+
+    Widget aboutSectionHeader({bool anchor = true}) {
       // RepaintBoundary: see settingsCard above for why each section is its own
       // cached layer.
       return RepaintBoundary(
         child: Padding(
+          key: anchor ? _sectionAnchor('about') : null,
           padding: const EdgeInsets.fromLTRB(0, 20, 0, 4),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
@@ -465,8 +407,8 @@ class SettingsPageState extends State<SettingsPage> {
                   color: cs.primary,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints.tightFor(
-                    width: 40,
-                    height: 40,
+                    width: 48,
+                    height: 48,
                   ),
                   style: IconButton.styleFrom(
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -479,9 +421,13 @@ class SettingsPageState extends State<SettingsPage> {
       );
     }
 
-    final double screenWidth = MediaQuery.sizeOf(context).width;
-    final bool isLargeScreen =
-        screenWidth >= kLargeScreenWidthBreakpoint && !sp.alwaysUsePhoneLayout;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    // At larger font scales the detail pane needs the full available width.
+    final scale = MediaQuery.textScalerOf(context).scale(16) / 16;
+    final isLargeScreen =
+        screenWidth >= kLargeScreenWidthBreakpoint * scale.clamp(1.0, 2.0) &&
+        !sp.alwaysUsePhoneLayout && (_wasLargeScreen || !_hasUnsavedChanges);
+    _wasLargeScreen = isLargeScreen;
 
     final List<_SettingsCategory> categoriesList = [
       _SettingsCategory(
@@ -543,100 +489,82 @@ class SettingsPageState extends State<SettingsPage> {
       ),
     ];
 
-    Widget buildCategoryTile(_SettingsCategory categoryObj) {
-      final String key = categoryObj.key;
-      final String title = categoryObj.title;
-      final IconData icon = categoryObj.icon;
-      final bool selected = _selectedCategory == key;
+    final routine = categoriesList.where((c) => !_expertSettings.contains(c.key) && c.key != 'about').toList();
+    final expert = categoriesList.where((c) => _expertSettings.contains(c.key)).toList();
+    final about = categoriesList.firstWhere((c) => c.key == 'about');
 
-      final Color containerColor = selected
-          ? cs.secondaryContainer
-          : m3eCollapsedGroupHeaderFill(cs);
-      final Color contentColor = cs.onSecondaryContainer;
-
-      final Color iconBoxColor = cs.primary.withValues(alpha: 0.16);
-
-      final Color iconColor = cs.onSecondaryContainer;
-
-      final Color chevronColor = cs.onSurfaceVariant;
-
-      final double categoryTileRadius = sp.cardCornerRadiusFor(
-        SettingsProvider.baseCollapsedHeaderRadius,
-      );
-
-      return Padding(
-        padding: const EdgeInsets.only(
-          bottom: SettingsProvider.collapsedHeaderGap,
-        ),
-        child: Container(
-          decoration: BoxDecoration(
-            color: containerColor,
-            borderRadius: BorderRadius.circular(categoryTileRadius),
-          ),
-          child: Material(
-            type: MaterialType.transparency,
-            child: InkWell(
-              onTap: () async {
-                if (await confirmDiscardUnsavedChanges()) {
-                  setState(() {
-                    _selectedCategory = key;
-                  });
-                }
-              },
-              borderRadius: BorderRadius.circular(categoryTileRadius),
-              child: SizedBox(
-                height: SettingsProvider.collapsedHeaderHeight,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: iconBoxColor,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(icon, color: iconColor, size: 18),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: TextStyle(
-                            fontFamily: Theme.of(
-                              context,
-                            ).textTheme.bodyLarge?.fontFamily,
-                            fontWeight: selected
-                                ? FontWeight.w600
-                                : FontWeight.w500,
-                            color: contentColor,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                      Container(
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: cs.surfaceContainerHighest,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.chevron_right_rounded,
-                          color: chevronColor,
-                          size: 20,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
+    Future<void> openSection(String key) async {
+      if (isLargeScreen && _selectedCategory != key) {
+        if (!await confirmDiscardUnsavedChanges() || !mounted) return;
+        setState(() => _selectedCategory = key);
+      } else if (!isLargeScreen && key != 'about') {
+        setSectionExpanded(key, true);
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final anchor = _sectionAnchors[key]?.currentContext;
+        if (anchor != null) {
+          unawaited(Scrollable.ensureVisible(anchor, alignment: 0.15, duration: sectionDuration));
+          _sectionFocus[key]?.requestFocus();
+        }
+      });
+      WidgetsBinding.instance.ensureVisualUpdate();
     }
+
+    Future<void> openSearch() async {
+      final entries = <R10SettingsSearchEntry>[
+        for (final category in categoriesList) ...[
+          R10SettingsSearchEntry(category.key, category.title, category.title),
+          for (final label in _searchLabels[category.key] ?? const <String>[])
+            R10SettingsSearchEntry(category.key, tr(label), category.title),
+          if (category.key == 'updates')
+            R10SettingsSearchEntry(category.key, 'Extra install approval', category.title),
+        ],
+      ];
+      final key = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => R10SettingsSearchDialog(
+          entries: entries,
+          searchLabel: tr('r10SettingsSearch'),
+          hint: tr('r10SettingsSearchHint'),
+          noMatch: tr('r10SettingsNoMatch'),
+          closeLabel: MaterialLocalizations.of(dialogContext).closeButtonLabel,
+        ),
+      );
+      if (mounted && key != null && categoriesList.any((c) => c.key == key)) {
+        await openSection(key);
+      }
+    }
+
+    Widget searchButton() => IconButton(
+      tooltip: tr('r10SettingsSearch'),
+      icon: const Icon(Icons.search),
+      onPressed: sp.prefs == null ? null : openSearch,
+    );
+
+    Widget buildCategoryTile(_SettingsCategory category) => Padding(
+      key: _sectionAnchor(category.key),
+      padding: const EdgeInsets.only(bottom: SettingsProvider.collapsedHeaderGap),
+      child: R10SettingsNavigationTile(
+        title: category.title,
+        icon: category.icon,
+        selected: _selectedCategory == category.key,
+        radius: sp.cardCornerRadiusFor(SettingsProvider.baseCollapsedHeaderRadius),
+        focusNode: _sectionFocusNode(category.key),
+        onTap: () { unawaited(openSection(category.key)); },
+      ),
+    );
+
+    Widget buildGroupedSections(List<_SettingsCategory> categories, String label) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        groupHeading(label),
+        for (final category in categories) ...[
+          sectionHeader(category),
+          collapsibleCard(category.key, category.widget),
+        ],
+      ],
+    );
 
     if (isLargeScreen) {
       _selectedCategory ??= categoriesList.first.key;
@@ -717,6 +645,7 @@ class SettingsPageState extends State<SettingsPage> {
                               slivers: [
                                 CustomAppBar(
                                   title: tr('settings'),
+                                  actions: [searchButton()],
                                   matchGradientBackground:
                                       sp.useGradientBackground,
                                   progressiveBlurOverlayColor: isLargeScreen
@@ -725,12 +654,16 @@ class SettingsPageState extends State<SettingsPage> {
                                 ),
                                 SliverPadding(
                                   padding: const EdgeInsets.all(16),
-                                  sliver: SliverList(
-                                    delegate: SliverChildBuilderDelegate(
-                                      (context, index) => buildCategoryTile(
-                                        categoriesList[index],
-                                      ),
-                                      childCount: categoriesList.length,
+                                  sliver: SliverToBoxAdapter(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: [
+                                        groupHeading(tr('r10SettingsRoutine')),
+                                        for (final category in routine) buildCategoryTile(category),
+                                        groupHeading(tr('r10SettingsExpert')),
+                                        for (final category in expert) buildCategoryTile(category),
+                                        buildCategoryTile(about),
+                                      ],
                                     ),
                                   ),
                                 ),
@@ -789,7 +722,9 @@ class SettingsPageState extends State<SettingsPage> {
                               sliver: SliverPadding(
                                 padding: const EdgeInsets.all(16),
                                 sliver: SliverToBoxAdapter(
-                                  child: selectedCategoryObj.widget,
+                                  child: selectedCategoryObj.key == 'about'
+                                      ? Column(children: [aboutSectionHeader(anchor: false), selectedCategoryObj.widget])
+                                      : selectedCategoryObj.widget,
                                 ),
                               ),
                             ),
@@ -845,6 +780,7 @@ class SettingsPageState extends State<SettingsPage> {
                   title: tr('settings'),
                   matchGradientBackground: sp.useGradientBackground,
                   actions: [
+                    searchButton(),
                     ValueListenableBuilder<Map<String, bool>>(
                       valueListenable: _expandedSettingsSections,
                       builder: (context, expandedState, _) {
@@ -879,102 +815,10 @@ class SettingsPageState extends State<SettingsPage> {
                         : Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // ── Updates ───────────────────────────────────
-                              sectionHeader(
-                                tr('updates'),
-                                Icons.update_rounded,
-                                'updates',
-                              ),
-                              collapsibleCard(
-                                'updates',
-                                _UpdatesSection(
-                                  cs: cs,
-                                  androidInfo: _androidInfo,
-                                ),
-                              ),
-                              // ── Integrations ─────────────────────────────
-                              sectionHeader(
-                                tr('integrations'),
-                                Icons.extension_rounded,
-                                'integrations',
-                              ),
-                              collapsibleCard(
-                                'integrations',
-                                _IntegrationsSection(key: _integrationsKey),
-                              ),
-                              // ── Warnings ─────────────────────────────────
-                              sectionHeader(
-                                tr('warnings'),
-                                Icons.warning_rounded,
-                                'warnings',
-                              ),
-                              collapsibleCard(
-                                'warnings',
-                                const _WarningsSection(),
-                              ),
-                              // ── Source-specific ───────────────────────────
-                              if (sourceProvider.sourceTemplates.any(
-                                (s) =>
-                                    s.sourceConfigSettingFormItems.isNotEmpty,
-                              )) ...[
-                                sectionHeader(
-                                  tr('sourceSpecific'),
-                                  Icons.dns_rounded,
-                                  'sourceSpecific',
-                                ),
-                                collapsibleCard(
-                                  'sourceSpecific',
-                                  _SourceSpecificSection(
-                                    key: _sourceSpecificKey,
-                                  ),
-                                ),
-                              ],
-                              // ── Themes ───────────────────────────────────
-                              sectionHeader(
-                                tr('settingsThemesSection'),
-                                Icons.palette_rounded,
-                                'themes',
-                              ),
-                              collapsibleCard(
-                                'themes',
-                                _ThemesSettingsSection(
-                                  androidInfoFuture: _androidInfo,
-                                ),
-                              ),
-                              // ── Appearance ────────────────────────────────
-                              sectionHeader(
-                                tr('appearance'),
-                                Icons.tune_rounded,
-                                'appearance',
-                              ),
-                              collapsibleCard(
-                                'appearance',
-                                const _AppearanceSection(),
-                              ),
-                              // ── Interaction ──────────────────────────────
-                              sectionHeader(
-                                tr('interaction'),
-                                Icons.touch_app_rounded,
-                                'interaction',
-                              ),
-                              collapsibleCard(
-                                'interaction',
-                                const _InteractionSection(),
-                              ),
-                              // ── Categories ───────────────────────────────
-                              sectionHeader(
-                                tr('categories'),
-                                Icons.label_rounded,
-                                'categories',
-                              ),
-                              collapsibleCard(
-                                'categories',
-                                const _CategoriesSection(),
-                              ),
+                              buildGroupedSections(routine, tr('r10SettingsRoutine')),
+                              buildGroupedSections(expert, tr('r10SettingsExpert')),
                               aboutSectionHeader(),
-                              settingsCard([
-                                AboutSectionContent(colorScheme: cs),
-                              ]),
+                              about.widget,
                             ],
                           ),
                   ),
@@ -1047,6 +891,7 @@ class _UpdatesSection extends StatelessWidget {
     sp.enableBackgroundUpdates,
     sp.bgUpdatesOnWiFiOnly,
     sp.bgUpdatesWhileChargingOnly,
+    sp.r11QuietStart, sp.r11QuietEnd, sp.r11RateMinutes,
     sp.checkOnStart,
     sp.checkUpdateOnDetailPage,
     sp.onlyCheckInstalledOrTrackOnlyApps,
@@ -1070,12 +915,13 @@ class _UpdatesSection extends StatelessWidget {
         // eligible apps), as opposed to pull-to-refresh's foreground check of
         // only the currently visible list.
         const _RunBgUpdateCheckNowButton(),
-        ListTile(key: const ValueKey('r05-install-activity'),
+        R11ScheduleSettings(settings: sp),
+        ListTile(key: const ValueKey('r07-activity-center'),
           leading: const Icon(Icons.receipt_long_rounded),
-          title: const Text('Install activity and approvals'),
-          subtitle: const Text('Review unknown, pending and handed-off installation attempts'),
+          title: Text(tr('r10SettingsActivityCenter')),
+          subtitle: Text(tr('r07SettingsSummary')),
           onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-            builder: (_) => const R05InstallActivityPage())),
+            builder: (_) => const R07ActivityCenterPage())),
         ),
         const R05ExtraApprovalTile(),
         FutureBuilder<AndroidDeviceInfo>(
@@ -1144,8 +990,9 @@ class _UpdatesSection extends StatelessWidget {
                 sp.enableBackgroundUpdates = !sp.enableBackgroundUpdates,
           ),
         );
-      if (sp.enableBackgroundUpdates) {
-        rows
+    }
+    if (sp.updateInterval > 0) {
+      rows
           ..add(
             AppSwitchListTile(
               key: const ValueKey<String>('background_install_wifi_only'),
@@ -1162,7 +1009,6 @@ class _UpdatesSection extends StatelessWidget {
               onChanged: (bool value) => sp.bgUpdatesWhileChargingOnly = value,
             ),
           );
-      }
     }
     rows.addAll(<Widget>[
       AppSwitchListTile(
@@ -1550,10 +1396,12 @@ class _SourceSpecificSectionState extends State<_SourceSpecificSection> {
             children: [
               Row(
                 children: [
-                  Text(
-                    tr('personalAccessTokenPAT'),
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
+                  Expanded(
+                    child: Text(
+                      tr('personalAccessTokenPAT'),
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   HelpHintIcon(
@@ -1563,6 +1411,7 @@ class _SourceSpecificSectionState extends State<_SourceSpecificSection> {
                   ),
                 ],
               ),
+              const R10ContextHint('r10TokenHint'),
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -1751,12 +1600,20 @@ class _SourceSpecificSectionState extends State<_SourceSpecificSection> {
             sp.setSettingBool(GitHub.githubReqPrefixUseTokenKey, val);
           },
         ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: kM3eSettingsCardHorizontalInset),
+          child: R10ContextHint('r10ProxyTokenHint'),
+        ),
         AppSwitchListTile(
           title: Text(tr('repoRenamedCheck')),
           value: sp.getSettingBool('checkRepoRename') ?? false,
           onChanged: (val) {
             sp.setSettingBool('checkRepoRename', val);
           },
+        ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: kM3eSettingsCardHorizontalInset),
+          child: R10ContextHint('r10TokenHint'),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(
@@ -2559,7 +2416,7 @@ class _InteractionSection extends StatelessWidget {
             children: [
               Icon(_swipeActionIcon(action), size: 18, color: cs.primary),
               const SizedBox(width: 12),
-              Text(tr('swipeAction_${action.name}')),
+              Flexible(child: Text(tr('swipeAction_${action.name}'))),
             ],
           ),
         );
@@ -2712,6 +2569,7 @@ class _IntegrationsSectionState extends State<_IntegrationsSection>
 
   static int _integrationsSettingsHash(SettingsProvider sp) => Object.hash(
     sp.openAppInfoInAppManager,
+    sp.r11AutomationEnabled,
     sp.beforeNewInstallsShareToAppVerifier,
     sp.enableVirusTotalScanning,
     sp.enableDowngradeModules,
@@ -2734,6 +2592,16 @@ class _IntegrationsSectionState extends State<_IntegrationsSection>
     return M3eExpressiveSettingsCard(
       colorScheme: cs,
       items: [
+        AppSwitchListTile(
+          title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(tr('r11Automation')),
+            Text(tr('r11AutomationDisclosure'), style: Theme.of(context).textTheme.bodySmall),
+          ]),
+          value: sp.r11AutomationEnabled,
+          onChanged: (value) => sp.r11AutomationEnabled = value,
+        ),
+        if (_appManagerInstalled) ListTile(title: Text(tr('r11AppManagerInspect')),
+          subtitle: Text(tr('r11AppManagerHelp'))),
         ExplainedWhenOff(
           reason: !_loading && !_appManagerInstalled
               ? tr('appManagerNotInstalledSnackbar')
@@ -2882,6 +2750,10 @@ class _IntegrationsSectionState extends State<_IntegrationsSection>
               ),
             );
           },
+        ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: kM3eSettingsCardHorizontalInset),
+          child: R10ContextHint('r10VirusTotalHint'),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(
@@ -3096,6 +2968,7 @@ class _IntegrationsSectionState extends State<_IntegrationsSection>
                   }
                 },
               ),
+              R10ContextHint(r10InstallerExplanationKey(sp.installerMode)),
               if (sp.installerMode == 'shizuku')
                 AppSwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -4218,6 +4091,15 @@ class _ExternalInstallerTileState extends State<_ExternalInstallerTile> {
                   tr('chooseExternalInstaller'),
                   style: Theme.of(builderContext).textTheme.titleLarge,
                 ),
+                for (final target in targets.where((target) =>
+                    target.package == r11AppManagerPackage &&
+                    target.activity == '$r11AppManagerPackage.apk.installer.PackageInstallerActivity').take(1))
+                  ListTile(
+                    leading: _targetIcon(target, size: 36),
+                    title: Text(target.label),
+                    subtitle: Text(tr('r11AppManagerHelp')),
+                    onTap: () => Navigator.of(sheetContext).pop(target),
+                  ),
                 const SizedBox(height: 12),
                 M3eExpressiveSettingsCard(
                   items: [

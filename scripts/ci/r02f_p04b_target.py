@@ -97,7 +97,7 @@ def build(out:Path):
     need(out.is_absolute() and out.is_dir() and not out.is_symlink(), 'absolute fixture output directory required')
     need(os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('RUNNER_OS')=='Linux',
          'disposable Android fixture restricted to hosted GitHub runner')
-    sha=os.environ.get('GITHUB_SHA','')
+    sha=os.environ.get('OX_EXPECTED_SHA','')
     need(re.fullmatch(r'[0-9a-f]{40}',sha) is not None,'exact source SHA missing')
     sdk=Path(os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT') or '/')
     tools=sdk/'build-tools'/'35.0.0'; platform=sdk/'platforms'/'android-36'/'android.jar'

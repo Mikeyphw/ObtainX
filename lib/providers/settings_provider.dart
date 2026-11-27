@@ -69,9 +69,10 @@ enum SortColumnSettings {
 
 enum SortOrderSettings { ascending, descending }
 
-enum AppsListGroupBy { none, category, source, appType, updateStatus }
+enum AppsListGroupBy { none, category, source, appType, updateStatus, package }
 
-enum SwipeAction { update, pin, appOptions, delete, open, appInfo, edit, none }
+// Append new actions: persisted historical integer indices must never move.
+enum SwipeAction { update, pin, appOptions, delete, open, appInfo, edit, none, openSource }
 
 // Installer selection, converged with upstream Obtainium: same pref key
 // (`installMethod`) and same values (these names). ObtainX drives it through the
@@ -345,7 +346,7 @@ class SettingsProvider with ChangeNotifier {
       if (prefs!.containsKey(nameKey)) return;
       final int raw = prefs!.getInt(intKey) ?? defaultIndex;
       final SwipeAction action =
-          SwipeAction.values[raw.clamp(0, SwipeAction.values.length - 1)];
+          SwipeAction.values[raw.clamp(0, SwipeAction.none.index)];
       prefs!.setString(nameKey, action.name);
     }
 
@@ -365,7 +366,9 @@ class SettingsProvider with ChangeNotifier {
       }
     }
     final int index = prefs?.getInt(intKey) ?? defaultIndex;
-    return SwipeAction.values[index.clamp(0, SwipeAction.values.length - 1)];
+    // The name is authoritative for new actions; old numeric preferences
+    // can only select the historical range.
+    return SwipeAction.values[index.clamp(0, SwipeAction.none.index)];
   }
 
   /// Converges the installer setting onto upstream Obtainium's representation:
@@ -1478,6 +1481,32 @@ class SettingsProvider with ChangeNotifier {
 
   set enableBackgroundUpdates(bool val) {
     prefs?.setBool('enableBackgroundUpdates', val);
+    notifyListeners();
+  }
+
+  // Only the local Settings UI can authorize incoming automation requests.
+  bool get r11AutomationEnabled => prefs?.get('r11AutomationEnabled') == true;
+
+  set r11AutomationEnabled(bool enabled) {
+    prefs?.setBool('r11AutomationEnabled', enabled);
+    notifyListeners();
+  }
+
+  int _r11Int(int index, int max) {
+    final value = prefs?.get('r11ScheduleV1');
+    return value is List && value.length == 3
+        ? (int.tryParse(value[index].toString()) ?? 0).clamp(0, max) : 0;
+  }
+  int get r11QuietStart => _r11Int(0, 1439);
+  int get r11QuietEnd => _r11Int(1, 1439);
+  int get r11RateMinutes => _r11Int(2, 1440);
+
+  Future<void> setR11Schedule(int start, int end, int minutes) async {
+    await prefs?.setStringList('r11ScheduleV1', [
+      start.clamp(0, 1439).toString(), end.clamp(0, 1439).toString(),
+      minutes.clamp(0, 1440).toString(),
+    ]);
+    bgNextCheckDue = null;
     notifyListeners();
   }
 

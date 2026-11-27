@@ -57,7 +57,7 @@ class R02Api36SafetyContracts(unittest.TestCase):
     def test_runner_action_pinned(self):self.mutate(audit.WORKFLOW,'@a421e43855164a8197daf9d8d40fe71c6996bb0d','@main')
     def test_kvm_gate_not_skippable(self):self.mutate(audit.WORKFLOW,'test -c /dev/kvm','echo kvm-not-required')
     def test_disk_gate_not_skippable(self):self.mutate(audit.WORKFLOW,'(( available_kib >= 4 * 1024 * 1024 ))','true')
-    def test_gh_source_pinned(self):self.mutate(audit.WORKFLOW,'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"','true')
+    def test_gh_source_pinned(self):self.mutate(audit.WORKFLOW,'test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"','true')
     def test_release_build_forbidden(self):self.mutate(audit.WORKFLOW,'flutter build apk --debug --flavor normal --no-pub','flutter build apk --release --flavor normal --no-pub')
     def test_emulator_proof_mandatory(self):self.mutate(audit.SMOKE,"adb('shell', 'getprop', 'ro.kernel.qemu') == '1'",'True')
     def test_sdk_verification_mandatory(self):self.mutate(audit.SMOKE,"adb('shell', 'getprop', 'ro.build.version.sdk') == '36'",'True')

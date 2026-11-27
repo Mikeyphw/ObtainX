@@ -69,8 +69,10 @@ class ProbeSafety(unittest.TestCase):
         self.assertIn("self.receipt['runner_probe_count'] = self.runner_probe_count",s)
         self.assertIn("self.receipt['runner_probe_skipped'] = self.runner_probe_skipped",s)
         self.assertIn('should_probe_runner(now, self.runner_probe_last, runner_stage)',s)
-        self.assertIn("self.base.adb('shell', 'appops', 'set', self.base.APP,",s)
-        self.assertIn('self.base._tap_confirmed_install_dialog()',s)
+        self.assertIn('self.app_installed = self.base.grant_runner_install_eligibility()',s)
+        self.assertIn('REQUEST_INSTALL_PACKAGES', (ROOT/'scripts/ci/r02_rt02_hosted.py').read_text())
+        self.assertIn('self.base._tap_confirmed_install_dialog(',s)
+        self.assertIn('on_observation=observation, authorize_tap=authorize_tap',s)
         self.assertIn('self.base.installed_state(2, True, self.fixtures)',s)
 
     def test_contract_refuses_missing_probe_integration(self):

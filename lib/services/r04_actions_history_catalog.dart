@@ -37,6 +37,9 @@ class R04ActionsHistoryItem {
 
   bool get canSelect => status == 'completed/success' &&
       reason == 'eligible' && artifactId != null && archiveSha256 != null;
+
+  bool canSelectAt(DateTime now) => canSelect && expiresAt != null &&
+      expiresAt!.isAfter(now.toUtc());
 }
 
 extension R04ActionsManualHistory on R04GitHubActionsCatalog {

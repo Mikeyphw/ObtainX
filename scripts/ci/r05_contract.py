@@ -11,7 +11,9 @@ FILES={
     'lib/services/r05_operation_receipt.dart':(
         'enum R05InstallStage {','pending, awaitingApproval, handedOff, confirmed, failed, cancelled, unknown',
         'R05AndroidEvidence','exactAttemptMatches','evidence.packageName != packageId',
-        'expectedVersionCode != null','verifiedUtc','if (time.isBefore(updatedUtc))',
+        'expectedVersionCode == null', 'evidence.attemptId != id',
+        '_r05SameDigests(selectedApkSha256, evidence.installedApkSha256)',
+        '_r05SameDigests(archiveSignerSet, evidence.installedSignerSet)','verifiedUtc','if (time.isBefore(updatedUtc))',
         'downloadSha256','archiveSignerSha256','installedSignerSha256',
         'sourceHost','workflow','runAttempt','artifactId','fileNames'),
     'lib/services/r05_operation_journal.dart':(
@@ -21,27 +23,40 @@ FILES={
         'recoverInterruptedOnce()', 'settleIfOpen(', 'uniqueUnresolved(', 'R05InstallStage.unknown',
         'R05InstallStage.awaitingApproval','Random.secure()'),
     'lib/widgets/r05_install_activity_page.dart':(
-        'class R05InstallActivityPage','class R05ExtraApprovalTile',
-        'R05OperationJournal.instance.list()', 'reconcileR05OperationReceipts()',
-        'Review / retry','not independently verified','r05ExtraApprovalPreference'),
+        'class R05ExtraApprovalTile', 'r05ExtraApprovalPreference'),
+    'lib/widgets/r07_activity_center_page.dart':(
+        'class R07ActivityCenterPage', 'R05OperationJournal.instance.list()',
+        'reconcileR05OperationReceipts()', "tr('r07Unconfirmed')"),
     'lib/providers/apps_provider_install.dart':(
         '_r05BeginAttempt(', 'sha256FileOffIsolate(primary.path)',
         '_r05AdditionalApproval(', '_r05CloseAttempt(',
         'Future<void> _r05TrackBackgroundInstall(', '_r05MarkUnknownIfStillPending(',
         'R05InstallStage.handedOff','R05InstallStage.confirmed',
         'p04PendingMatchesInstalledPackage(',
-        'R05OperationJournal.instance.uniqueUnresolved(listingKey)',
-        'expectedRelease != null', 'result.isCancelled',
+        'if (pending != null) continue;', 'provenance.archiveSha256 != (containerDigest ?? digest)',
+        'provenance.channelFingerprint != r11ChannelFingerprint(app)',
+        'entry.value.sha256 == plan.selectedMembers[entry.key].sha256',
+        'plannedMembers[i].sha256 != hashes[i]',
+        '_r05CheckHandoff(r05, allAPKs', 'installedEvidence',
+        'settled.exactBytesConfirmed', 'r11ChannelFingerprint(app) == attempt.channelFingerprint',
+        'downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(app)) == attempt.releaseFingerprint',
+        'return _r05ListingStillBound(attempt);',
+        'commitGuard: () => identical(apps[attempt.listingKey]?.app, current)',
+        '_r05PersistBoundConfirmation(r05, installedRelease, newInfo)',
+        '_r05PersistBoundConfirmation(r05Container, release, packageInfo)',
+        '_r05MarkUnknownIfStillPending(attempt.id,', 'if (!_r05ListingStillBound(attempt) || getInstaller().modeKey != attempt.backend)', 'expectedRelease == null || p04PendingMatchesInstalledPackage', 'result.isCancelled',
         'result.isAlreadyInstalled','result.isHandedOff','result.isError'),
     'lib/services/r02_local_archive_import.dart':(
         'if (confirmed)', 'r02LocalObservedInstallConfirmed(',
-        'R05OperationJournal.instance.uniqueUnresolved(listing)',
-        'R05InstallStage.confirmed', 'exactAttemptMatches: true'),
+        'approvedPlan: plan', "'verifyInstalled'", 'byteEvidenceQualified: exactBytes'),
     'lib/providers/apps_provider_lifecycle.dart':(
-        'R05OperationJournal.instance.recoverInterruptedOnce()',),
+        'R05OperationJournal.instance.recoverInterruptedOnce()',
+        'if (!commitGuard()) return false;\n        tmpFile.renameSync(filePath);',
+        'if (commitGuard != null && !commitGuard()) return;',
+        'if (commitGuard == null && !updateInstalledInfo &&',),
     'lib/pages/settings.dart':(
-        'R05InstallActivityPage()', 'R05ExtraApprovalTile()',
-        "ValueKey('r05-install-activity')"),
+        'R07ActivityCenterPage()', 'R05ExtraApprovalTile()',
+        "ValueKey('r07-activity-center')"),
     'test/r05_operation_receipt_test.dart':(
         'installer success and timer are never independent Android proof',
         'pending, approval, handoff and unknown are distinct durable states',
@@ -79,15 +94,17 @@ def verify(root:Path=ROOT)->int:
         for marker in markers:
             if marker not in content:errors.append(f'{path}: marker missing: {marker}')
     for path in ANDROID_CI:
-        try: content=(root/path).read_text(encoding='utf8')
-        except (OSError, UnicodeError):errors.append(f'{path}: missing/unreadable');continue
-        for marker in ("- 'lib/services/r05_*'", "- 'lib/widgets/r05_*'", "- 'test/r05_*'"):
-            if marker not in content:errors.append(f'{path}: R05 risk path missing {marker}')
+        try: content=(root/path).read_text(encoding='utf-8')
+        except (OSError,UnicodeError):errors.append(f'{path}: missing');continue
+        if ('    paths:' in content or '    paths-ignore:' in content or 'scripts/ci/obtainx_ci_policy.py plan --head' not in content):
+            errors.append(f'{path}: risk path routing missing')
     try:
         code=(root/'lib/providers/apps_provider_install.dart').read_text(encoding='utf8')
         first=code.index('final r05 = await _r05BeginAttempt(')
         native=code.index('result = await activeInstaller.installApk(')
         if first>native:errors.append('R05 intent must be durable before native handoff')
+        if 'journal.latestUnresolved(listingKey)' in code or '_r05MarkUnknownIfStillPending(id,' in code:
+            errors.append('Generic callback cannot settle an unbound receipt')
         if 'unawaited(\n            installApk(' in code or 'unawaited(\n            installApkDir(' in code:
             errors.append('Raw untracked background install future survives')
     except (OSError,ValueError): errors.append('Cannot prove R05 pre-handoff journal ordering')

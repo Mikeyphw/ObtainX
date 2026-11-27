@@ -2,8 +2,6 @@ import 'dart:ui' show DisplayFeature;
 
 import 'package:flutter/widgets.dart';
 
-const double maxSystemTextScaleFactor = 1.2;
-
 /// Scales the app's complete widget tree while keeping it inside the physical
 /// viewport.
 ///
@@ -44,9 +42,8 @@ class AppUiScaler extends StatelessWidget {
             ),
           )
           .toList(growable: false),
-      textScaler: mediaQuery.textScaler.clamp(
-        maxScaleFactor: maxSystemTextScaleFactor,
-      ),
+      // Retain the platform text scale independently of custom UI scaling.
+      textScaler: mediaQuery.textScaler,
     );
 
     return CustomSingleChildLayout(

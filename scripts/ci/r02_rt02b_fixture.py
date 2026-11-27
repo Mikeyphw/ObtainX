@@ -50,7 +50,7 @@ def wrong_signed_fixture(out: Path) -> dict:
     need(out.is_absolute() and out.is_dir(), 'absolute existing fixture folder required')
     need(os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('RUNNER_OS')=='Linux'
          and os.environ.get('RUNNER_ARCH')=='X64', 'CI Linux x64 only')
-    sha=os.environ.get('GITHUB_SHA','')
+    sha=os.environ.get('OX_EXPECTED_SHA','')
     need(bool(re.fullmatch('[0-9a-f]{40}',sha)), 'exact source SHA required')
     previous=json.loads((out/'fixture_inventory.json').read_text())
     need(previous.get('source_sha')==sha and previous.get('fixture_package')==PKG,

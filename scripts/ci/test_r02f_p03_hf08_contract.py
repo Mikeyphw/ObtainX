@@ -65,6 +65,6 @@ class P03LiveAuditOrdering(unittest.TestCase):
                'scripts/ci/r02f_p03_hosted.py audit --out']
         positions=[runner.index(k) for k in order]
         self.assertEqual(positions,sorted(positions))
-        self.assertEqual(self.workflow.count('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"'),1)
+        self.assertEqual(self.workflow.count('test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"'),2)
 
 if __name__=='__main__':unittest.main()

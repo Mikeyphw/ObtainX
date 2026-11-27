@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:android_package_manager/android_package_manager.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:easy_localization/src/localization.dart';
@@ -469,6 +471,10 @@ void main() {
   testWidgets('an unconfirmed store shows no chip', (tester) async {
     // Nothing has scanned this package, so F-Droid and APKMirror are not
     // listed on a guess - the tracked source is the only chip.
+    BulkScanCache.setCacheForTesting({});
+    addTearDown(() => BulkScanCache.setCacheForTesting({}));
+    final lookup = Completer<Map<String, String>?>();
+    var lookupCalls = 0;
     final settings = SettingsProvider()..prefs = preferences;
     Localization.load(
       const Locale('en'),
@@ -489,23 +495,44 @@ void main() {
           ChangeNotifierProvider<AppsProvider>.value(value: provider),
           ChangeNotifierProvider<SettingsProvider>.value(value: settings),
         ],
-        child: MaterialApp(home: AppPage(appId: model.id)),
+        child: MaterialApp(
+          home: AppPage(
+            appId: model.id,
+            storeLookup: (apps, listingKey) {
+              expect(apps, same(provider));
+              expect(listingKey, model.listingKey);
+              lookupCalls++;
+              return lookup.future;
+            },
+          ),
+        ),
       ),
     );
     await tester.pumpAndSettle();
 
-    for (final String assetPath in [
-      StoreSourceIconPaths.fdroid,
-      StoreSourceIconPaths.apkmirror,
-    ]) {
-      expect(
-        find.byWidgetPredicate(
-          (Widget widget) =>
-              widget is StoreSourceIconImage && widget.assetPath == assetPath,
-        ),
-        findsNothing,
-      );
+    expect(lookupCalls, 1);
+    void expectNoUnconfirmedChips() {
+      for (final String assetPath in [
+        StoreSourceIconPaths.fdroid,
+        StoreSourceIconPaths.apkmirror,
+      ]) {
+        expect(
+          find.byWidgetPredicate(
+            (Widget widget) =>
+                widget is StoreSourceIconImage && widget.assetPath == assetPath,
+          ),
+          findsNothing,
+        );
+      }
     }
+
+    // The automatic scan has started but has not answered yet.
+    expectNoUnconfirmedChips();
+    lookup.complete({'F-Droid': '', 'APKMirror': ''});
+    await tester.pumpAndSettle();
+    // A negative response must not manufacture a confirmed store chip.
+    expectNoUnconfirmedChips();
+    expect(lookupCalls, 1);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

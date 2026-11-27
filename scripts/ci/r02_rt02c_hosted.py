@@ -72,12 +72,86 @@ def baseline_v1(fixtures:Path)->dict:
     return {'version_code':1,'installed_path_count':1,'base_sha256':expected,
             'installed_original_intact':True}
 
-def flutter_failure(text:str)->str:
-    lower=text.lower()
-    if 'failed to install' in lower or 'adb exited' in lower:return 'FLUTTER_INSTALL_BRIDGE_FAILED'
-    if 'gradle task' in lower and ('failed' in lower or 'exception' in lower):return 'GRADLE_BUILD_FAILED'
-    if 'expect(' in lower or 'test failed' in lower or 'test failure' in lower:return 'DART_TEST_FAILED'
-    if 'timeout' in lower:return 'TEST_TIMEOUT'
+def native_session_observation(text:str)->dict:
+    # Never export raw logs or previous-case native state. Only fixed enums.
+    current=text.rsplit('OX_R02C_DART_STAGE=SCENARIO_STARTED',1)[-1]
+    matches=re.findall(r'(?m)^.*?OX_R02C_NATIVE_STATE=(STAGED|COMMITTING|APPROVAL|CANCEL_UNCERTAIN|NO_ACTIVE_SESSION|UNVERIFIED_ACTIVE|UNAVAILABLE) TERMINAL=(SUCCESS|CANCELLED|UNKNOWN|ERROR|NO_MATCHING_TERMINAL|UNAVAILABLE)\s*$',current)
+    if len(matches)!=1:
+        return {'active':'NOT_OBSERVED','terminal':'NOT_OBSERVED'}
+    active,terminal=matches[0]
+    return {'active':active,'terminal':terminal}
+
+DIAGNOSTIC_STEPS = frozenset({
+    'SCENARIO_SETUP', 'DOWNLOAD_ARCHIVE', 'EXTRACT_ARCHIVE', 'EXTRACTED_INVENTORY',
+    'SIGNED_MEMBER_DIGESTS', 'BUNDLE_PLAN', 'R09_STAGE', 'R09_BASE_SIGNERS',
+    'R09_INSTALLED_QUERY', 'R09_INSTALLED_VERSION', 'R09_INSTALLED_SIGNERS',
+    'R09_REVIEW_PLAN', 'R09_REVIEW_REFUSALS', 'R09_REVIEW_SIGNER_MATCH',
+    'R09_REVIEW_SELECTION', 'R09_REVIEW_ELIGIBILITY', 'HOST_INSTALL_AUTHORIZATION',
+    'OWNED_INSTALL_SESSION', 'R09_STAGE_CLEANUP', 'SCENARIO_CLEANUP',
+} | {'R09_'+member+'_'+step for member in ('BASE','SPLIT')
+     for step in ('COPY','INSPECT','PACKAGE','VERSION','SDK','DIGEST','ROLE')})
+DIAGNOSTIC_ERRORS = frozenset({
+    'R09_APK_PATH_REFUSED', 'R09_APK_MANIFEST_REFUSED', 'R09_APK_PLATFORM_METADATA_REFUSED',
+    'R09_APK_IDENTITY_MISMATCH', 'R09_APK_SIGNERS_REFUSED', 'R09_APK_INSPECTION_REFUSED',
+    'PACKAGE_QUERY_FAILED', 'PLATFORM_EXCEPTION', 'MISSING_PLUGIN', 'FORMAT_EXCEPTION',
+    'TIMEOUT', 'FILESYSTEM_EXCEPTION', 'STATE_ERROR', 'ASSERTION_FAILED', 'OTHER_ERROR',
+})
+
+REVIEW_REFUSALS = frozenset({
+    'r09ReviewBaseRequired', 'r09ReviewSplitIdentity', 'r09ReviewPackageMismatch',
+    'r09ReviewBundleRefused', 'r09ReviewSdkMismatch', 'r09ReviewAbiMismatch',
+    'r09ReviewMissingSplits', 'r09ReviewSplitSignerMismatch',
+    'r09ReviewSignerUnavailable', 'r09ReviewSignerDiffers', 'UNKNOWN_REFUSAL',
+})
+
+def dart_diagnostic(text:str, case:str)->dict:
+    # Bound observations to the latest scenario marker and exact active case.
+    # Only allowlisted enums survive, even if private output contains secrets.
+    parts = text.rsplit('OX_R02C_DART_STAGE=SCENARIO_STARTED case=', 1)
+    if len(parts) != 2 or not parts[1] or parts[1].splitlines()[0].strip() != case or case not in CASES:
+        return {'checkpoint':'NOT_OBSERVED','error':'NOT_OBSERVED'}
+    checkpoint = 'NOT_OBSERVED'; error = 'NOT_OBSERVED'; refusals = set()
+    for line in parts[1].splitlines()[1:]:
+        match = re.search(r'OX_RT02C_CHECKPOINT case=([a-z.]+) step=([A-Z_0-9]+)\s*$',line)
+        if match and match[1] == case and match[2] in DIAGNOSTIC_STEPS:
+            checkpoint = match[2]; error = 'NOT_OBSERVED'; refusals.clear()
+        match = re.search(r'OX_RT02C_FAILURE case=([a-z.]+) step=([A-Z_0-9]+) error=([A-Z_0-9]+)\s*$',line)
+        if match and match[1] == case and match[2] == checkpoint and match[3] in DIAGNOSTIC_ERRORS:
+            error = match[3]
+        reason = re.search(r'OX_RT02C_REVIEW_REFUSAL case=([a-z.]+) code=([A-Za-z_0-9]+)\s*$',line)
+        if (reason and reason[1] == case and checkpoint == 'R09_REVIEW_REFUSALS'
+                and reason[2] in REVIEW_REFUSALS):
+            refusals.add(reason[2])
+    result = {'checkpoint':checkpoint,'error':error}
+    if refusals:
+        result['review_refusals'] = sorted(refusals)
+    return result
+
+def flutter_failure(text:str, *, phase:str|None=None, approvals:int=0)->str:
+    """Classify the failing phase, never a historical successful build line."""
+    markers={'SCENARIO_STARTED':'DART_TEST_STARTED',
+             'INSTALL_CALL':'STOCK_INSTALLER_CALL',
+             'INSTALL_RETURNED':'STOCK_INSTALLER_RETURNED',
+             'PREINSTALL_REFUSED':'PREINSTALL_REFUSED'}
+    if phase is None:
+        events=re.findall(r'OX_R02C_DART_STAGE=([A-Z_]+)',text)
+        phase=next((markers[e] for e in reversed(events) if e in markers),None)
+    current=text.rsplit('OX_R02C_DART_STAGE=SCENARIO_STARTED',1)[-1]
+    timed_out=bool(re.search(r'(?i)\b(?:TimeoutException|timed out|test timeout)\b',current))
+    if phase=='STOCK_INSTALLER_CALL':
+        if timed_out:
+            return 'INSTALLER_TIMEOUT_AFTER_APPROVAL' if approvals else 'INSTALLER_TIMEOUT_NO_APPROVAL'
+        return 'INSTALLER_INCOMPLETE_AFTER_APPROVAL' if approvals else 'INSTALLER_INCOMPLETE_NO_APPROVAL'
+    if phase in ('DART_TEST_STARTED','STOCK_INSTALLER_RETURNED','PREINSTALL_REFUSED',
+                 'ANDROID_V1_BASELINE_VERIFIED','ANDROID_V2_SPLIT_VERIFIED'):
+        return 'DART_TEST_TIMEOUT' if timed_out else 'DART_TEST_FAILED'
+    if phase in (None,'FLUTTER_STARTING','GRADLE_BUILD','TEST_APK_INSTALL'):
+        if re.search(r'(?im)failed to install|adb exited',text):
+            return 'FLUTTER_INSTALL_BRIDGE_FAILED'
+        if re.search(r'(?im)^.*(?:Gradle task [^\r\n]+ failed with exit code [1-9]\d*|FAILURE: Build failed with an exception)\s*$',text):
+            return 'GRADLE_BUILD_FAILED'
+        if timed_out:
+            return 'TEST_TIMEOUT'
     return 'UNKNOWN_PRECISE_FAILURE'
 
 def run_case(out:Path,fixtures:Path,inv:dict,case:str)->dict:
@@ -102,10 +176,7 @@ def run_case(out:Path,fixtures:Path,inv:dict,case:str)->dict:
                 if phase=='STOCK_INSTALLER_CALL' and not called:
                     called=True;deadline=min(deadline,now+240)
                 if not installed:
-                    probe=base.command(['adb','-s',base.SERIAL,'shell','pm','path',base.APP],allow_failure=True)
-                    if probe.returncode==0 and probe.stdout.strip().startswith(b'package:'):
-                        base.adb('shell','appops','set',base.APP,'REQUEST_INSTALL_PACKAGES','allow')
-                        installed=True
+                    installed=base.grant_runner_install_eligibility()
                 # Never probe installer UI during compilation or before Dart calls it.
                 if installed and called and phase=='STOCK_INSTALLER_CALL' and taps==0:
                     if base._tap_confirmed_install_dialog():taps=1
@@ -173,7 +244,7 @@ def execute(out:Path)->int:
              'hosted_emulator_only':True,'physical_device_qualified':False,
              'full_r02_matrix_qualified':False,'user_facing_import_qualified':False,
              'release_qualified':False,'publication_allowed':False,
-             'backend':'production StockInstaller','cases':[]}
+             'backend':'production StockInstaller','installer_route':'owned_foreground_session','cases':[]}
     rp=out/RECEIPT;rp.write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
     fixtures=out/'fixtures'
     inv=json.loads((fixtures/'rt02c_inventory.json').read_text())
@@ -213,7 +284,8 @@ def verify(out:Path)->int:
         'source_sha':source,'run_id':run,'hosted_emulator_only':True,
         'physical_device_qualified':False,'full_r02_matrix_qualified':False,
         'user_facing_import_qualified':False,'release_qualified':False,
-        'publication_allowed':False,'backend':'production StockInstaller'}
+        'publication_allowed':False,'backend':'production StockInstaller',
+        'installer_route':'owned_foreground_session'}
     for key,value in expected.items():need(obj.get(key)==value,'source-bound receipt invalid: '+key)
     need(obj.get('flutter_launches')==1,'exactly one Flutter test launch required')
     for key,count in (('runner_probe_count',obj.get('runner_probe_count')),
@@ -224,6 +296,7 @@ def verify(out:Path)->int:
          'missing single-session log digest')
     cases=obj.get('cases')
     need(isinstance(cases,list) and len(cases)==7,'seven distinct archive scenarios required')
+    session_ids=set()
     for index,(actual,case) in enumerate(zip(cases,CASES)):
         need(isinstance(actual,dict) and actual.get('case')==case,'missing or reordered scenario')
         need(actual.get('process_launch')==1 and actual.get('boundary_index')==index,
@@ -236,13 +309,17 @@ def verify(out:Path)->int:
                  actual.get('version_code')==2 and actual.get('installed_path_count')==2 and
                  actual.get('config_x86_64_present') is True and
                  type(actual.get('android_confirmations')) is int and
-                 actual['android_confirmations'] in (0,1),
-                 'Android committed base+split evidence missing')
+                 actual['android_confirmations']==1,
+                 'Android committed base+split and explicit approval evidence missing')
+            session_id=actual.get('owned_session_id')
+            need(type(session_id) is int and 0<session_id<=2147483647 and session_id not in session_ids,
+                 'missing, invalid or reused owned session identity')
+            session_ids.add(session_id)
         else:
             need(actual.get('preinstall_refused') is True and
                  actual.get('installed_original_intact') is True and
                  actual.get('version_code')==1 and actual.get('installed_path_count')==1 and
-                 actual.get('android_confirmations')==0,
+                 actual.get('android_confirmations')==0 and 'owned_session_id' not in actual,
                  'unsafe archive mutated installed package or reached installer')
     need(len(set(x['archive_sha256'] for x in cases))==7,
          'archive case input digests are not independently unique')
@@ -262,7 +339,11 @@ def main()->int:
                     data=json.loads(rp.read_text());data['status']='FAILED'
                     data['failure_category']=type(e).__name__
                     progress_file=a.out/'rt02c-progress.json'
-                    if progress_file.is_file():
+                    details=data.get('failure_details')
+                    if isinstance(details,dict):
+                        if details.get('case') in CASES:data['failure_case']=details['case']
+                        if details.get('phase') in PHASES:data['failure_phase']=details['phase']
+                    elif progress_file.is_file():
                         p=json.loads(progress_file.read_text())
                         if p.get('case') in CASES:data['failure_case']=p['case']
                         if p.get('phase') in PHASES:data['failure_phase']=p['phase']

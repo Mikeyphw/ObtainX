@@ -60,8 +60,8 @@ class P04SourceMutations(unittest.TestCase):
 
     def test_06_cannot_bypass_confirmation_guard(self):
         self.mutate(C.PROVIDER,
-          'if (p04PendingMatchesInstalledPackage(entry.app, pending, installedInfo)) {',
-          'if (true) {')
+          'if (pending != null) continue;',
+          'recordConfirmedInstall(entry.app, pending, installedInfo);')
 
     def test_07_cannot_drop_multi_listing_lookup(self):
         self.mutate(C.PROVIDER, 'final listingKeys = apps.values', 'final listingKeys = apps.entries')
@@ -72,7 +72,7 @@ class P04SourceMutations(unittest.TestCase):
 
     def test_09_cannot_drop_install_observation_fallback(self):
         self.mutate(C.PROVIDER,
-          'getCorrectedInstallStatusAppIfPossible(\n          entry.app, installedInfo,\n        )',
+          'getCorrectedInstallStatusAppIfPossible(entry.app, installedInfo)',
           'null')
 
     def test_10_cannot_omit_source_workflow_guard(self):

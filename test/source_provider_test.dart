@@ -361,7 +361,7 @@ class _StubGitHub extends GitHub {
                 'url':
                     'https://api.github.com/repos/example/app/releases/assets/1',
                 'size': 123,
-                'digest': 'sha256:abc123',
+                'digest': 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
               },
             ],
           },
@@ -369,7 +369,10 @@ class _StubGitHub extends GitHub {
         200,
       );
     }
-    if (url.endsWith('/attestations/sha256:abc123')) {
+    if (url.endsWith('/attestations/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')) {
+      return Response(jsonEncode({'attestations': [{'bundle': {'mediaType': 'application/vnd.dev.sigstore.bundle.v0.3+json', 'dsseEnvelope': {'payload': 'forged'}, 'verificationMaterial': {'certificate': 'wrong'}}}]}), 200);
+    }
+    if (url.endsWith('/attestations/sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd')) {
       return Response(
         jsonEncode({
           'attestations': [{}],
@@ -377,10 +380,10 @@ class _StubGitHub extends GitHub {
         200,
       );
     }
-    if (url.endsWith('/attestations/sha256:empty123')) {
+    if (url.endsWith('/attestations/sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')) {
       return Response(jsonEncode({'attestations': []}), 200);
     }
-    if (url.endsWith('/attestations/sha256:error123')) {
+    if (url.endsWith('/attestations/sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc')) {
       return Response('', 500);
     }
     return Response('', 404);
@@ -830,19 +833,37 @@ void main() {
     },
   );
 
-  test('APK filters also match the download URL', () async {
+  test('APK filters match asset labels only, including inversion', () async {
     const MapEntry<String, String> ironFoxApk = MapEntry(
       'IronFox-153.0.1.apk',
       'https://example.com/arm64-v8a/ironfox-153.0.1-arm64-v8a.apk',
     );
 
-    final App app = await SourceProvider().getApp(
-      _StubSource(apkUrls: const [ironFoxApk]),
-      'https://example.com/releases',
-      <String, dynamic>{'apkFilterRegEx': 'arm64-v8a'},
-    );
+    Future<App> filtered(String pattern, {bool invert = false}) =>
+        SourceProvider().getApp(
+          _StubSource(apkUrls: const [ironFoxApk]),
+          'https://example.com/releases',
+          <String, dynamic>{
+            'apkFilterRegEx': pattern,
+            'invertAPKFilter': invert,
+            'autoApkFilterByArch': false,
+          },
+        );
 
-    expect(app.apkUrls, const [ironFoxApk]);
+    await expectLater(filtered('arm64-v8a'), throwsA(isA<NoAPKError>()));
+    expect(
+      (await filtered('arm64-v8a', invert: true)).apkUrls,
+      const [ironFoxApk],
+    );
+    expect(
+      (await filtered(r'^IronFox-.*\.apk$')).apkUrls,
+      const [ironFoxApk],
+    );
+    await expectLater(
+      filtered(r'^IronFox-', invert: true),
+      throwsA(isA<NoAPKError>()),
+    );
+    expect((await filtered('')).apkUrls, const [ironFoxApk]);
   });
 
   test(
@@ -1054,15 +1075,15 @@ void main() {
     expect(details.reproducibleStatus, reproducibleBuildStatusNoData);
   });
 
-  test('GitHub verifies release asset attestation from digest', () async {
+  test('GitHub discovers a bundle but never verifies release asset trust', () async {
     final attestationStatus = await _StubGitHub()
         .getAttestationStatusForSha256Digest(
           'https://github.com/example/app',
-          'sha256:abc123',
+          'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
           <String, dynamic>{},
         );
 
-    expect(attestationStatus, githubAttestationStatusVerified);
+    expect(attestationStatus, githubAttestationStatusPresent);
   });
 
   test(
@@ -1071,7 +1092,7 @@ void main() {
       final attestationStatus = await _StubGitHub()
           .getAttestationStatusForSha256Digest(
             'https://github.com/example/app',
-            'sha256:empty123',
+            'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
             <String, dynamic>{},
           );
 
@@ -1079,11 +1100,19 @@ void main() {
     },
   );
 
+  test('GitHub rejects empty objects and invalid digest formats', () async {
+    for (final digest in ['sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd', 'sha256:abc123']) {
+      expect(await _StubGitHub().getAttestationStatusForSha256Digest(
+        'https://github.com/example/app', digest, <String, dynamic>{}),
+        githubAttestationStatusError);
+    }
+  });
+
   test('GitHub marks attestation API failures as error', () async {
     final attestationStatus = await _StubGitHub()
         .getAttestationStatusForSha256Digest(
           'https://github.com/example/app',
-          'sha256:error123',
+          'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
           <String, dynamic>{},
         );
 

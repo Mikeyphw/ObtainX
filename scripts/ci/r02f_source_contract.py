@@ -41,7 +41,7 @@ def inspect(root:Path=ROOT)->list[str]:
     block=provider[a:b] if a>=0 and b>a else ''
     need('pendingInstallReleaseKey' in block and
          'if (pending != null)' in block and
-         '_awaitThirdPartyInstallConfirmation(dir.appId)' in block,
+         '_awaitThirdPartyInstallConfirmation(r05Container)' in block,
          'external indicator must not resurrect after broadcast already confirmed pending')
     need('classifyUnverifiedThirdPartyHandoff(true)' in txt[TEST] and
          'classifyUnverifiedThirdPartyHandoff(false)' in txt[TEST] and
@@ -62,12 +62,13 @@ def inspect(root:Path=ROOT)->list[str]:
          'exact SHA/source-only scope boundary weakened')
     for path in HEAVY:
         data=txt[path]
-        need('  pull_request:\n    paths:' in data and
-             '  workflow_dispatch:' in data, path+': selective/forced event route missing')
-        for key in ('lib/installers/**','lib/providers/apps_provider_install.dart',
-                    '.github/workflows/**','integration_test/**',
-                    'lib/services/verified_obb_delivery.dart'):
-            need("      - '"+key+"'" in data,path+': critical high-risk path missing '+key)
+        need('    paths:' not in data and '    paths-ignore:' not in data and
+             '  workflow_dispatch:' in data and 'ready_for_review, converted_to_draft' in data and
+             'scripts/ci/obtainx_ci_policy.py plan --head' in data,
+             path+': exact scope/full event route missing')
+    for key in ('lib/installers/**','lib/providers/apps_provider_install.dart',
+                '.github/workflows/**','integration_test/**','lib/services/verified_obb_delivery.dart'):
+        need(repr(key) in txt[POLICY], 'critical high-risk path missing '+key)
     need('not full Android runtime' in txt[DOC] and 'R03' in txt[DOC] and
          'AuroraStore-Standalone' in txt[DOC], 'scope and roadmap disclosure missing')
     return problems

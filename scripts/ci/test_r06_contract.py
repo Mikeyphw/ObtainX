@@ -35,8 +35,8 @@ class R06SourceMutationTests(unittest.TestCase):
  def test_changelog_navigation(self):
   self.mutated('lib/pages/app.dart',"ValueKey('r06-whats-new-action')")
  def test_history_package_filter(self):
-  self.mutated('lib/widgets/r05_install_activity_page.dart',
-   'record.packageId == widget.packageId')
+  self.mutated('lib/widgets/r07_activity_center_page.dart',
+   'widget.packageId != null && widget.packageId != x.packageId')
  def test_roadmap_digest(self):
   # A JSON-aware mutation must change only the active roadmap digest value.
   # Historic receipt fields may contain the same key suffix, unchanged.
@@ -68,8 +68,8 @@ class R06SourceMutationTests(unittest.TestCase):
  def test_r06_changelog_null_aware(self):
   self.mutated('lib/pages/app.dart','?changeLogCard,')
  def test_negative_no_r06_api36_trigger(self):
-  self.mutated('.github/workflows/obtainx-r02-api36.yml',"- 'lib/components/r06_*'")
+  self.mutated('.github/workflows/obtainx-r02-api36.yml',"scripts/ci/obtainx_ci_policy.py plan --head")
  def test_negative_no_r06_rt02_trigger(self):
-  self.mutated('.github/workflows/obtainx-r02-rt02.yml',"- 'lib/pages/app.dart'")
+  self.mutated('.github/workflows/obtainx-r02-rt02.yml',"scripts/ci/obtainx_ci_policy.py plan --head")
 
 if __name__=='__main__':unittest.main(verbosity=2)

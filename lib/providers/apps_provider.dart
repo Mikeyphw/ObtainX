@@ -19,13 +19,16 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/io_client.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/http/obtainx_user_agent.dart';
 import 'package:obtainium/http/response_bytes.dart';
 import 'package:obtainium/services/app_check_store.dart';
+import 'package:obtainium/services/r11_schedule.dart';
 import 'package:obtainium/services/r03_download_engine.dart';
+import 'package:obtainium/services/r03_download_history.dart';
+import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/install_precommit_gate.dart';
+import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/installers/r02f_p03_cancellable_stock.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/notifications_provider.dart';
@@ -275,7 +278,12 @@ class DownloadedApk {
   String appId;
   File file;
   final InstallReleaseSnapshot? release;
-  DownloadedApk(this.appId, this.file, {this.release});
+  final R05DownloadProvenance? provenance;
+  final File? container;
+  String? installTimelineId;
+  String? get timelineId => installTimelineId ?? provenance?.timelineId;
+  DownloadedApk(this.appId, this.file, {this.release, this.provenance, this.container,
+    this.installTimelineId});
 }
 
 enum DownloadedDirType { xapk, apks, apkm, zip, tarball }
@@ -286,12 +294,16 @@ class DownloadedDir {
   Directory extracted;
   DownloadedDirType type;
   final InstallReleaseSnapshot? release;
+  final R05DownloadProvenance? provenance;
+  final InstallBundlePlan? inspectedPlan;
+  String? installTimelineId;
+  String? get timelineId => installTimelineId ?? provenance?.timelineId;
   DownloadedDir(
     this.appId,
     this.file,
     this.extracted,
     this.type, {
-    this.release,
+    this.release, this.provenance, this.inspectedPlan,
   });
 }
 
@@ -334,6 +346,9 @@ Future<File> downloadFileWithRetry(
   bool allowInsecure = false,
   LogsProvider? logs,
   CancellationToken? cancellationToken,
+  R03HistoryBinding? historyBinding,
+  R03DownloadRecord? resumeRecord,
+  void Function(R03DownloadRecord)? onVerified,
 }) async {
   int remaining = retries;
   while (true) {
@@ -342,7 +357,8 @@ Future<File> downloadFileWithRetry(
       return await downloadFile(
         url, fileName, fileNameHasExt, onProgress, destDir,
         useExisting: useExisting, headers: headers, allowInsecure: allowInsecure,
-        logs: logs, cancellationToken: cancellationToken,
+        logs: logs, cancellationToken: cancellationToken, historyBinding: historyBinding, onVerified: onVerified,
+        resumeRecord: resumeRecord,
       );
     } catch (error) {
       final int? code = error is ObtainiumError && error.code == 'HTTP_ERROR'
@@ -350,7 +366,7 @@ Future<File> downloadFileWithRetry(
           : null;
       final transient = error is ClientException || error is SocketException ||
           error is TimeoutException || (code != null && r03CanRetryHttpStatus(code));
-      if (!transient || remaining <= 0) rethrow;
+      if (resumeRecord != null || !transient || remaining <= 0) rethrow;
       final int attempt = retries - remaining;
       remaining--;
       final int jitter = Random().nextInt(800);
@@ -381,13 +397,6 @@ class DownloadResponseMetadata {
       extractDownloadFileNameFromContentDisposition(
         headers['content-disposition'],
       );
-}
-
-Uri _finalResponseUri(StreamedResponse response, Uri originalUri) {
-  if (response case BaseResponseWithUrl(:final Uri url)) {
-    return url;
-  }
-  return response.request?.url ?? originalUri;
 }
 
 String? sanitizeDownloadFileName(String? rawFileName) {
@@ -446,12 +455,13 @@ String? extractDownloadFileNameFromContentDisposition(
 }
 
 DownloadResponseMetadata _downloadResponseMetadata(
-  StreamedResponse response,
-  Uri originalUri,
-) => DownloadResponseMetadata(
-  finalUri: _finalResponseUri(response, originalUri),
-  headers: response.headers,
-);
+  Uri finalUri,
+  HttpClientResponse response,
+) {
+  final headers = <String, String>{};
+  response.headers.forEach((name, values) => headers[name] = values.join(', '));
+  return DownloadResponseMetadata(finalUri: finalUri, headers: headers);
+}
 
 /// Fetches only enough of a download response to inspect headers and redirects.
 Future<DownloadResponseMetadata?> probeDownloadResponseMetadata(
@@ -459,21 +469,18 @@ Future<DownloadResponseMetadata?> probeDownloadResponseMetadata(
   Map<String, String>? headers,
   bool allowInsecure = false,
 }) async {
-  final Uri originalUri = Uri.parse(url);
-  final Request request = Request('GET', originalUri);
-  request.headers.addAll(withDefaultObtainXUserAgent(headers));
-  request.headers[HttpHeaders.rangeHeader] = 'bytes=0-0';
-  final IOClient client = IOClient(createHttpClient(allowInsecure));
+  final requestHeaders = {...?headers, HttpHeaders.rangeHeader: 'bytes=0-0'};
+  final streamed = await HttpService().sourceRequestStreamResponse(
+    'GET', url, requestHeaders, {'allowInsecure': allowInsecure},
+  );
   try {
-    final StreamedResponse response = await client
-        .send(request)
-        .timeout(sourceResponseTimeout);
+    final response = streamed.value.value;
     if (response.statusCode < 200 || response.statusCode >= 300) {
       return null;
     }
-    return _downloadResponseMetadata(response, originalUri);
+    return _downloadResponseMetadata(streamed.key, response);
   } finally {
-    client.close();
+    streamed.value.key.close(force: true);
   }
 }
 
@@ -527,24 +534,27 @@ Future<String> checkPartialDownloadHash(
   bool allowInsecure = false,
   void Function(DownloadResponseMetadata metadata)? onResponseMetadata,
 }) async {
-  final Uri originalUri = Uri.parse(url);
-  final req = Request('GET', originalUri);
-  req.headers.addAll(withDefaultObtainXUserAgent(headers));
-  if (bytesToGrab <= 0) throw ArgumentError.value(bytesToGrab, 'bytesToGrab');
-  req.headers[HttpHeaders.rangeHeader] = 'bytes=0-${bytesToGrab - 1}';
-  final client = IOClient(createHttpClient(allowInsecure));
+  if (bytesToGrab <= 0) {
+    throw ArgumentError.value(bytesToGrab, 'bytesToGrab');
+  }
+  final requestHeaders = {
+    ...?headers,
+    HttpHeaders.rangeHeader: 'bytes=0-${bytesToGrab - 1}',
+  };
+  final streamed = await HttpService().sourceRequestStreamResponse(
+    'GET', url, requestHeaders, {'allowInsecure': allowInsecure},
+  );
   try {
-    final response = await client.send(req).timeout(sourceResponseTimeout);
+    final response = streamed.value.value;
     if (response.statusCode < 200 || response.statusCode > 299) {
-      throw ObtainiumError(response.reasonPhrase ?? tr('unexpectedError'))
-        ..url = url;
+      throw ObtainiumError(response.reasonPhrase);
     }
-    onResponseMetadata?.call(_downloadResponseMetadata(response, originalUri));
-    final bytes = await readBytePrefix(response.stream, bytesToGrab);
+    onResponseMetadata?.call(_downloadResponseMetadata(streamed.key, response));
+    final bytes = await readBytePrefix(response, bytesToGrab);
     if (bytes.isEmpty) throw NoVersionError();
     return 'sha256:$bytesToGrab:${sha256.convert(bytes)}';
   } finally {
-    client.close();
+    streamed.value.key.close(force: true);
   }
 }
 
@@ -554,25 +564,21 @@ Future<String?> checkETagHeader(
   bool allowInsecure = false,
   void Function(DownloadResponseMetadata metadata)? onResponseMetadata,
 }) async {
-  final reqHeaders = withDefaultObtainXUserAgent(headers);
-  final Uri originalUri = Uri.parse(url);
-  final req = Request('GET', originalUri);
-  req.headers.addAll(reqHeaders);
-  final client = IOClient(createHttpClient(allowInsecure));
+  final streamed = await HttpService().sourceRequestStreamResponse(
+    'GET', url, headers, {'allowInsecure': allowInsecure},
+  );
   try {
-    final StreamedResponse response = await client
-        .send(req)
-        .timeout(sourceResponseTimeout);
+    final response = streamed.value.value;
     if (response.statusCode < 200 || response.statusCode >= 300) {
       return null;
     }
-    onResponseMetadata?.call(_downloadResponseMetadata(response, originalUri));
-    final etag = response.headers[HttpHeaders.etagHeader]?.replaceAll('"', '');
+    onResponseMetadata?.call(_downloadResponseMetadata(streamed.key, response));
+    final etag = response.headers.value(HttpHeaders.etagHeader)?.replaceAll('"', '');
     return etag != null
         ? sha256.convert(utf8.encode(etag)).toString().substring(0, 12)
         : null;
   } finally {
-    client.close();
+    streamed.value.key.close(force: true);
   }
 }
 
@@ -600,6 +606,12 @@ Future<File> downloadFile(
   bool allowInsecure = false,
   LogsProvider? logs,
   CancellationToken? cancellationToken,
+  int maxBytes = r03MaximumBytes,
+  Directory? privateJournalDirectory,
+  bool reviewHttpsOnly = false,
+  R03HistoryBinding? historyBinding,
+  R03DownloadRecord? resumeRecord,
+  void Function(R03DownloadRecord)? onVerified,
 }) async {
   final bool keepAwakeAcquired =
       await NativeFeatures.acquireDownloadKeepAwake();
@@ -615,6 +627,11 @@ Future<File> downloadFile(
       allowInsecure: allowInsecure,
       logs: logs,
       cancellationToken: cancellationToken,
+      maxBytes: maxBytes,
+      privateJournalDirectory: privateJournalDirectory,
+      reviewHttpsOnly: reviewHttpsOnly,
+      historyBinding: historyBinding, onVerified: onVerified,
+      resumeRecord: resumeRecord,
     );
   } finally {
     if (keepAwakeAcquired) {
@@ -634,22 +651,32 @@ Future<File> _downloadFile(
   bool allowInsecure = false,
   LogsProvider? logs,
   CancellationToken? cancellationToken,
+  int maxBytes = r03MaximumBytes,
+  Directory? privateJournalDirectory,
+  bool reviewHttpsOnly = false,
+  R03HistoryBinding? historyBinding,
+  R03DownloadRecord? resumeRecord,
+  void Function(R03DownloadRecord)? onVerified,
 }) async {
   final requestHeaders = withDefaultObtainXUserAgent(headers);
   if (requestHeaders.keys.any((key) =>
       key.toLowerCase() == 'range' || key.toLowerCase() == 'if-range')) {
     throw const FormatException('R03 cannot accept a source-defined byte range');
   }
-  final responseClient = createHttpClient(allowInsecure);
+  final responseClient = createHttpClient(allowInsecure && !reviewHttpsOnly);
   void abortDownload() => responseClient.close(force: true);
   cancellationToken?.addListener(abortDownload);
   try {
     cancellationToken?.throwIfCancelled();
-    Future<HttpClientResponse> fetch(Map<String, String> requestHeaders) async =>
-        (await HttpService().sourceRequestStreamResponse(
+    final resolvedOrigins = Expando<Uri>('R03 response origin');
+    Future<HttpClientResponse> fetch(Map<String, String> requestHeaders) async {
+      final streamed = await HttpService().sourceRequestStreamResponse(
           'GET', url, requestHeaders, {'allowInsecure': allowInsecure},
-          sharedClient: responseClient,
-        )).value.value;
+          sharedClient: responseClient, reviewHttpsOnly: reviewHttpsOnly);
+      final response = streamed.value.value;
+      resolvedOrigins[response] = streamed.key;
+      return response;
+    }
     final firstResponse = await fetch(requestHeaders);
     final suggested = extractDownloadFileNameFromContentDisposition(
       firstResponse.headers.value('content-disposition'));
@@ -678,7 +705,8 @@ Future<File> _downloadFile(
     final downloadedFile = File('$destDir/$finalName');
     final privateSupport = await getApplicationSupportDirectory();
     final engine = R03DownloadEngine(
-      journalDirectory: Directory('${privateSupport.path}/r03-download-journal'),
+      journalDirectory: privateJournalDirectory ?? Directory('${privateSupport.path}/r03-download-journal'),
+      maxBytes: maxBytes,
     );
     try {
       return await engine.download(
@@ -686,6 +714,8 @@ Future<File> _downloadFile(
         headers: requestHeaders, firstResponse: firstResponse, fetch: fetch,
         isCancelled: () => cancellationToken?.isCancelled ?? false,
         useExisting: useExisting,
+        historyBinding: historyBinding, resolvedUri: (response) => resolvedOrigins[response],
+        onVerified: onVerified, resumeRecord: resumeRecord,
         onProgress: (progress, received, total) {
           onProgress?.call(progress, received, total);
         },
@@ -726,35 +756,23 @@ Future<int?> getDownloadSize(
   Map<String, String>? headers,
   bool allowInsecure = false,
 }) async {
-  final reqHeaders = withDefaultObtainXUserAgent(headers);
-  final client = IOClient(createHttpClient(allowInsecure));
   try {
-    final getReq = Request('GET', Uri.parse(url));
-    getReq.headers.addAll(reqHeaders);
-    final response = await client.send(getReq).timeout(sourceResponseTimeout);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      return null;
-    }
-    final length = response.contentLength;
-    return (length != null && length > 0) ? length : null;
-  } on SocketException {
-    return null;
-  } on TimeoutException {
-    return null;
-  } on ClientException {
-    return null;
-  } on HandshakeException {
-    return null;
-  } catch (e) {
-    unawaited(
-      LogsProvider().add(
-        'Unexpected error in getDownloadSize: $e',
-        level: LogLevel.error,
-      ),
+    final streamed = await HttpService().sourceRequestStreamResponse(
+      'GET', url, headers, {'allowInsecure': allowInsecure},
     );
+    try {
+      final response = streamed.value.value;
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return null;
+      }
+      final length = response.contentLength;
+      return length > 0 ? length : null;
+    } finally {
+      streamed.value.key.close(force: true);
+    }
+  } catch (_) {
+    // A refused or failed probe is unknown; never log credential-bearing URLs.
     return null;
-  } finally {
-    client.close();
   }
 }
 
@@ -797,6 +815,23 @@ String? formatDownloadSize(int? receivedBytes, int? totalBytes) {
   return formatBytes(receivedBytes);
 }
 
+// The pinned android_package_manager native SigningInfo.toMap emits
+// apkContentsSigners (Android's getter name), but SigningInfoImpl consumes
+// apkContentSigners. Normalize at the native device-apps decoding boundary.
+// Never substitute the historical signing lineage for current signers.
+PackageInfo decodeDevicePackageInfo(Map<Object?, Object?> data) {
+  final package = Map<String, dynamic>.from(data);
+  final nativeSigning = package['signingInfo'];
+  if (nativeSigning is Map) {
+    final signing = Map<String, dynamic>.from(nativeSigning);
+    if (signing.containsKey('apkContentsSigners')) {
+      signing['apkContentSigners'] = signing.remove('apkContentsSigners');
+    }
+    package['signingInfo'] = signing;
+  }
+  return PackageInfoImpl(package);
+}
+
 Future<List<PackageInfo>> getAllInstalledInfo({bool light = false}) async {
   try {
     final packages = await NativeFeatures._deviceAppsChannel.invokeListMethod(
@@ -804,7 +839,7 @@ Future<List<PackageInfo>> getAllInstalledInfo({bool light = false}) async {
       {'includeSigningCertificates': !light},
     );
     return packages
-            ?.map((entry) => PackageInfoImpl(Map<String, dynamic>.from(entry)))
+            ?.map((entry) => decodeDevicePackageInfo(Map<Object?, Object?>.from(entry)))
             .toList() ??
         [];
   } on MissingPluginException {
@@ -887,7 +922,7 @@ Future<PackageInfo?> getInstalledInfo(
             {'packageName': name, 'includeSigningCertificates': !light},
           );
           if (data != null) {
-            info = PackageInfoImpl(Map<String, dynamic>.from(data));
+            info = decodeDevicePackageInfo(data);
           }
         } on MissingPluginException {
           // Preserve the headless-engine fallback: this pinned plugin's
@@ -1287,14 +1322,17 @@ class AppsProvider with ChangeNotifier {
 
   /// Registers a cancellation token for an in-flight download of [appId].
   CancellationToken registerDownloadCancellation(String appId) {
+    if (_downloadCancellations.containsKey(appId)) {
+      throw StateError('Another transfer owns this listing');
+    }
     final token = CancellationToken();
     _downloadCancellations[appId] = token;
     return token;
   }
 
   /// Clears the cancellation token once a download of [appId] finishes.
-  void clearDownloadCancellation(String appId) {
-    _downloadCancellations.remove(appId);
+  void clearDownloadCancellation(String appId, CancellationToken token) {
+    if (identical(_downloadCancellations[appId], token)) _downloadCancellations.remove(appId);
   }
 
   /// Requests cancellation of an ongoing download for [appId], if any.
@@ -1587,15 +1625,12 @@ class AppsProvider with ChangeNotifier {
         // path so it never delays the first app-list render. It also self-skips
         // on later launches via a prefs flag (see the method).
         unawaited(migrateUserIconsFromLegacyCacheDir());
-        final cutoff = DateTime.now().subtract(const Duration(days: 7));
-        await for (var entity in apkDir.list()) {
-          if (entity is File &&
-              entity.path.endsWith('.part') &&
-              (await entity.stat()).modified.isBefore(cutoff)) {
-            if (!areDownloadsRunning()) {
-              await entity.delete();
-            }
-          }
+        // R03 owns resumable partials. Age or an isolate-local progress map
+        // cannot establish that they are disposable after process death.
+        try {
+          await R03DownloadHistory(cache: apkDir).archiveTerminalWithoutBytes();
+        } catch (_) {
+          unawaited(logs.add('Transfer history archival deferred; recovery data preserved'));
         }
       } else {
         await migrateUserIconsFromLegacyCacheDir();
@@ -1800,6 +1835,22 @@ Future<void> bgUpdateCheck(
   params ??= {};
   final SettingsProvider settingsProvider = settings ?? SettingsProvider();
   await settingsProvider.initializeSettings();
+  Future<void> observeSchedule(R11ScheduleReason reason) async {
+    if (forceAll) { return; }
+    try {
+      await r11RecordScheduleObservation(reason, DateTime.now());
+    } catch (_) {
+      // Observation failure cannot override a scheduling refusal or imply
+      // that Android allowed work. Keep the original policy authoritative.
+      unawaited(bgLogs.add('R11 scheduling observation unavailable.'));
+    }
+  }
+  if (!forceAll && r11InQuietHours(DateTime.now(), settingsProvider.r11QuietStart,
+      settingsProvider.r11QuietEnd)) {
+    unawaited(bgLogs.add('R11 automatic work postponed: quiet hours.'));
+    await observeSchedule(R11ScheduleReason.quietHours);
+    return;
+  }
 
   // This task wakes every 15 minutes, not once per update interval, so most
   // wake-ups have nothing to do: no check is due and no background install is
@@ -1817,6 +1868,7 @@ Future<void> bgUpdateCheck(
     unawaited(
       bgLogs.add('BG task $taskId: Nothing due before $nextDue; skipped.'),
     );
+    await observeSchedule(R11ScheduleReason.notDue);
     return;
   }
 
@@ -1839,12 +1891,14 @@ Future<void> bgUpdateCheck(
       netResult.isEmpty ||
       (netResult.contains(ConnectivityResult.vpn) && netResult.length == 1)) {
     unawaited(bgLogs.add('BG update task: No network.'));
+    await observeSchedule(R11ScheduleReason.noNetwork);
     return;
   }
 
   if (appsProvider.settingsProvider.updateInterval == 0) {
     if (!forceAll) {
       unawaited(bgLogs.add('BG update task: Skipped (interval=0)'));
+      await observeSchedule(R11ScheduleReason.disabled);
       return;
     }
     unawaited(
@@ -1898,6 +1952,28 @@ Future<void> bgUpdateCheck(
     unawaited(bgLogs.add('BG update task: Charging restriction in effect.'));
   }
 
+  if (!forceAll) {
+    if (networkRestricted || chargingRestricted) {
+      unawaited(bgLogs.add('R11 automatic work postponed: network or charging restriction.'));
+      await observeSchedule(networkRestricted ? R11ScheduleReason.networkRestriction : R11ScheduleReason.chargingRestriction);
+      await appsProvider.appCheckStore?.close();
+      return;
+    }
+    try {
+      if (!await r11ClaimAutomaticRun(settingsProvider.r11RateMinutes, DateTime.now())) {
+        unawaited(bgLogs.add('R11 automatic work postponed: minimum interval.'));
+      await observeSchedule(R11ScheduleReason.minimumInterval);
+        await appsProvider.appCheckStore?.close();
+        return;
+      }
+    } catch (_) {
+      unawaited(bgLogs.add('R11 automatic work postponed: scheduling policy unavailable.'));
+      await observeSchedule(R11ScheduleReason.policyUnavailable);
+      await appsProvider.appCheckStore?.close();
+      return;
+    }
+  }
+  await observeSchedule(R11ScheduleReason.allowed);
   final canInstall = !networkRestricted && !chargingRestricted;
   final silentlyInstallable = <String>[];
 
@@ -2029,7 +2105,17 @@ Future<void> bgUpdateCheck(
   // failed or was postponed for the screen, or one held back by the charging or
   // Wi-Fi limit. That last case is the foreground service's: WorkManager does
   // not start this task until both limits are met.
-  final bool installWaiting = canInstall
+  final bool installStillAllowed = canInstall &&
+      ((forceAll || !r11InQuietHours(DateTime.now(), settingsProvider.r11QuietStart, settingsProvider.r11QuietEnd)) &&
+       (!settingsProvider.bgUpdatesOnWiFiOnly || (await Connectivity().checkConnectivity()).any(
+           (network) => network == ConnectivityResult.wifi || network == ConnectivityResult.ethernet)) &&
+       (!settingsProvider.bgUpdatesWhileChargingOnly || const {BatteryState.charging,
+         BatteryState.full, BatteryState.connectedNotCharging}.contains(await Battery().batteryState)));
+  if (canInstall && !installStillAllowed) {
+    unawaited(bgLogs.add('R11 automatic installation postponed: policy changed during check.'));
+    await observeSchedule(R11ScheduleReason.policyChanged);
+  }
+  final bool installWaiting = installStillAllowed
       ? await _runBGInstallMode(
           silentlyInstallable,
           appsProvider,

@@ -69,25 +69,25 @@ class R02InstallContracts(unittest.TestCase):
         self.refused()
     def test_container_handoff_not_validated(self):
         self.mutate('lib/providers/apps_provider_install.dart',
-                    'expectedPackageName: dir.appId','expectedPackageName: null')
+                    'expectedPackageName: apps[dir.appId]?.app.id','expectedPackageName: null')
         self.refused()
     def test_bad_archive_inventory_cleanup_removed(self):
         self.mutate('lib/providers/apps_provider_install.dart',
-                    'extracted.deleteSync(recursive: true)', '/* leak discarded archive */')
+                    'apkDir.deleteSync(recursive: true)', '/* leak discarded archive */')
         self.refused()
     def test_bad_archive_inventory_cleanup_guard_disabled(self):
         self.mutate('lib/providers/apps_provider_install.dart',
-                    'if (extracted.existsSync()) {', 'if (false) {')
+                    'if (apkDir != null && apkDir.existsSync()) {', 'if (false) {')
         self.refused()
     def test_bad_archive_inventory_error_swallowed(self):
         self.mutate('lib/providers/apps_provider_install.dart',
-                    '            extracted.deleteSync(recursive: true);\n          }\n          rethrow;',
-                    '            extracted.deleteSync(recursive: true);\n          }\n          // error incorrectly ignored')
+                    '            apkDir.deleteSync(recursive: true);\n          }\n          rethrow;',
+                    '            apkDir.deleteSync(recursive: true);\n          }\n          // error incorrectly ignored')
         self.refused()
     def test_unsafe_cleanup_with_decoy_token_elsewhere_refused(self):
         self.mutate('lib/providers/apps_provider_install.dart',
-                    'extracted.deleteSync(recursive: true)',
-                    '/* removed: extracted.deleteSync(recursive: true) */')
+                    'apkDir.deleteSync(recursive: true)',
+                    '/* removed: apkDir.deleteSync(recursive: true) */')
         self.refused()
     def test_obbs_moved_before_confirmation(self):
         self.mutate('lib/providers/apps_provider_install.dart',

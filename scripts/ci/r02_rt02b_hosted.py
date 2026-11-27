@@ -150,11 +150,7 @@ def run_one_session(out:Path,fixtures:Path,initial:dict,extra:dict)->tuple[list[
                 need(now<deadline,'bounded Flutter negative-test timeout')
                 sequence=events_from_log(log)
                 if not installed:
-                    probe=base.command(['adb','-s',base.SERIAL,'shell','pm','path',base.APP],
-                                       allow_failure=True)
-                    if probe.returncode==0 and probe.stdout.strip().startswith(b'package:'):
-                        base.adb('shell','appops','set',base.APP,'REQUEST_INSTALL_PACKAGES','allow')
-                        installed=True
+                    installed=base.grant_runner_install_eligibility()
                 pending=next((case for case in CASES if case not in done),None)
                 if pending is None:
                     time.sleep(1);continue

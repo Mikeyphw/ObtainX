@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:obtainium/services/r05_operation_journal.dart';
+import 'package:obtainium/services/r07_operation_timeline.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -16,6 +17,7 @@ import 'package:obtainium/folders/app_folder.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/components/generated_form_renderer.dart';
 import 'package:obtainium/providers/apps_provider.dart';
+import 'package:obtainium/services/r11_external_requests.dart';
 import 'package:obtainium/providers/notifications_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -657,6 +659,15 @@ extension AppsProviderLifecycle on AppsProvider {
       await R05OperationJournal.instance.recoverInterruptedOnce();
       unawaited(recoverNativeInstallSessions());
     }
+    if (singleId == null) {
+      try {
+        await R07OperationTimeline.instance.recoverInterrupted();
+      } catch (_) {
+        // An unreadable timeline cannot qualify a new recovery action.
+        // Do not hide the otherwise readable app library.
+        unawaited(logs.add('Operation timeline recovery remains unresolved'));
+      }
+    }
     // Deliberately after the load has been reported as finished, and not awaited:
     // nothing on screen waits for these writes.
     if (correctedInstallStatusIds.isNotEmpty) {
@@ -1194,11 +1205,12 @@ extension AppsProviderLifecycle on AppsProvider {
   }
 
   /// Atomically replaces one app record and invalidates older checkpoints.
-  Future<void> _writeAppRecord(
+  Future<bool> _writeAppRecord(
     Directory directory,
     App app,
-    AppCheckStore checks,
-  ) async {
+    AppCheckStore checks, {
+    bool Function()? commitGuard,
+  }) async {
     final String listingKey = app.listingKey;
     final filePath = '${directory.path}/$listingKey.json';
     final tmpFile = File(
@@ -1209,8 +1221,15 @@ extension AppsProviderLifecycle on AppsProvider {
       final Map<String, dynamic> record = app.toJson()
         ..[appRecordRevisionKey] = revision;
       await tmpFile.writeAsString(jsonEncode(record), flush: true);
-      await tmpFile.rename(filePath);
+      // Guard and atomic publication must have no intervening await.
+      if (commitGuard != null) {
+        if (!commitGuard()) return false;
+        tmpFile.renameSync(filePath);
+      } else {
+        await tmpFile.rename(filePath);
+      }
       checks.rememberRecord(listingKey, revision, record);
+      return true;
     } finally {
       try {
         if (await tmpFile.exists()) await tmpFile.delete();
@@ -1235,8 +1254,12 @@ extension AppsProviderLifecycle on AppsProvider {
     bool updateInstalledInfo = true,
     bool autoExportAfterSave = true,
     Map<String, PackageInfo>? prefetchedInstalledInfo,
+    bool Function()? commitGuard,
   }) async {
     if (apps.isEmpty) return;
+    if (commitGuard != null && apps.length != 1) {
+      throw ArgumentError('Guarded save requires exactly one listing');
+    }
     final List<App> uniqueApps = <App>[];
     final Set<String> seenListingKeys = <String>{};
     for (int appIndex = apps.length - 1; appIndex >= 0; appIndex--) {
@@ -1261,6 +1284,7 @@ extension AppsProviderLifecycle on AppsProvider {
     });
     try {
       await pendingSaves;
+      if (commitGuard != null && !commitGuard()) return;
       stage = 'reading installed package information';
       Map<String, PackageInfo>? installedInfoSnapshot = prefetchedInstalledInfo;
       if (installedInfoSnapshot == null &&
@@ -1304,6 +1328,7 @@ extension AppsProviderLifecycle on AppsProvider {
         );
         await Future.wait(
           effectiveApps.sublist(chunkStart, chunkEnd).map((a) async {
+            if (commitGuard != null && !commitGuard()) return;
             var app = a.copyWith();
             final String listingKey = app.listingKey;
             final AppInMemory? cached = this.apps[listingKey];
@@ -1375,7 +1400,7 @@ extension AppsProviderLifecycle on AppsProvider {
               final revision = checks.revisions[listingKey];
               // Compared with what's on disk, not with [cached]: a caller may
               // already have put this very change into the in-memory app.
-              if (!updateInstalledInfo &&
+              if (commitGuard == null && !updateInstalledInfo &&
                   checks.isAvailable &&
                   cached != null &&
                   revision != null &&
@@ -1387,9 +1412,13 @@ extension AppsProviderLifecycle on AppsProvider {
                 });
                 checkpointApps.add(app);
               } else {
-                await _writeAppRecord(appsDirectory, app, checks);
+                if (!await _writeAppRecord(appsDirectory, app, checks,
+                    commitGuard: commitGuard)) {
+                  return;
+                }
               }
             }
+            if (commitGuard != null && !commitGuard()) return;
             if (cached != null) {
               this.apps[listingKey] = AppInMemory(
                 app,
@@ -1762,18 +1791,9 @@ extension AppsProviderLifecycle on AppsProvider {
     // When enabled, open the app's info in the App Manager app instead of the
     // system settings screen (parity with fork main). Falls back to system
     // settings if App Manager isn't installed or the launch fails.
-    if (settingsProvider.openAppInfoInAppManager) {
-      try {
-        final AndroidIntent intent = AndroidIntent(
-          action: 'android.intent.action.VIEW',
-          data: 'app-manager://details?id=$appId',
-        );
-        await intent.launch();
-        return;
-      } catch (_) {
-        // Fall through to standard settings below.
-      }
-    }
+    if (apps.containsListingKey(appId)) appId = apps[appId]!.app.id;
+    if (!r11ValidPackage(appId)) return;
+    if (settingsProvider.openAppInfoInAppManager && await r11OpenAppManager(appId)) return;
     final AndroidIntent intent = AndroidIntent(
       action: 'action_application_details_settings',
       data: 'package:$appId',

@@ -7,18 +7,23 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:obtainium/layout_breakpoints.dart';
+import 'package:obtainium/components/r10_accessibility.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/pages/add_app.dart';
-import 'package:obtainium/pages/app.dart' show loadIconsAndScanStoresFor;
+import 'package:obtainium/pages/app.dart' show AppPage, loadIconsAndScanStoresFor;
 import 'package:obtainium/pages/apps.dart';
 import 'package:obtainium/pages/import_export.dart';
 import 'package:obtainium/pages/import_from_url_list.dart'
     show importUrlListEntries, urlImportEntriesFromLink;
+import 'package:obtainium/widgets/r07_activity_center_page.dart';
 import 'package:obtainium/pages/settings.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/services/shared_url_receiver.dart';
+import 'package:obtainium/services/r08_source_policy.dart';
+import 'package:obtainium/services/r11_external_requests.dart';
+import 'package:obtainium/services/r11_automation.dart';
 import 'package:provider/provider.dart';
 
 /// The link import that pasted [text] holds, as one `obtainium://` link, or
@@ -117,7 +122,7 @@ class NavigationPageItem {
 
   NavigationPageItem(this.titleKey, this.icon, this.widget);
 
-  String get title => tr(titleKey);
+  String get title => tr(titleKey == 'activityCenter' ? 'r10SettingsActivityCenter' : titleKey);
 }
 
 /// Keeps the system navigation-bar padding stable while Android animates the
@@ -149,11 +154,13 @@ class _DirectionalIndexedStack extends StatefulWidget {
     super.key,
     required this.index,
     required this.axis,
+    required this.reduceMotion,
     required this.children,
   });
 
   final int index;
   final Axis axis;
+  final bool reduceMotion;
   final List<Widget> children;
 
   @override
@@ -201,6 +208,13 @@ class _DirectionalIndexedStackState extends State<_DirectionalIndexedStack>
           _previousIndex = null;
         });
       }
+      return;
+    }
+    if (widget.reduceMotion) {
+      _controller.stop();
+      _previousIndex = null;
+      _currentIndex = widget.index;
+      _controller.value = 1;
       return;
     }
     _direction = widget.index > _currentIndex ? 1 : -1;
@@ -280,7 +294,13 @@ class _DirectionalIndexedStackState extends State<_DirectionalIndexedStack>
                         ignoring: _pageIgnoresPointer(index),
                         child: FractionalTranslation(
                           translation: _offsetFor(index, _animation.value),
-                          child: widget.children[index],
+                          child: ExcludeFocus(
+                            excluding: index != _currentIndex,
+                            child: ExcludeSemantics(
+                              excluding: index != _currentIndex,
+                              child: widget.children[index],
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -351,6 +371,10 @@ class HomePageState extends State<HomePage> {
       'settings',
       Icons.settings,
       SettingsPage(key: GlobalKey<SettingsPageState>()),
+    ),
+    NavigationPageItem(
+      'activityCenter', Icons.pending_actions_rounded,
+      const R07ActivityCenterPage(),
     ),
   ];
 
@@ -444,12 +468,120 @@ class HomePageState extends State<HomePage> {
       }
     }
 
+    Future<App?> chooseExternalListing(String package) async {
+      await appsProvider.waitForInitialLoad();
+      if (!mounted || !navigator.mounted) return null;
+      final candidates = r11PackageListings(appsProvider.apps, package);
+      if (candidates.isEmpty) {
+        showMessage(tr('r11ListingNotFound'));
+        return null;
+      }
+      final App? selected = candidates.length == 1
+          ? candidates.single
+          : await showDialog<App>(
+              context: navigator.context,
+              builder: (dialog) => SimpleDialog(
+                title: Text(tr('r11ChooseListing')),
+                children: [
+                  for (final app in candidates)
+                    SimpleDialogOption(
+                      onPressed: () => Navigator.pop(dialog, app),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(app.finalName),
+                          Text('${Uri.tryParse(app.url)?.host ?? ''} · ${app.listingKey}'),
+                        ],
+                      ),
+                    ),
+                  SimpleDialogOption(
+                    onPressed: () => Navigator.pop(dialog),
+                    child: Text(tr('cancel')),
+                  ),
+                ],
+              ),
+            );
+      if (selected == null || !mounted || !navigator.mounted) return null;
+      final live = r11ExactLiveListing(appsProvider.apps, selected);
+      if (live == null) showMessage(tr('r11ListingChanged'), isError: true);
+      return live?.deepCopy();
+    }
+
+    Future<void> handleOpenPackage(Uri uri) async {
+      final package = r11PackageFromLink(uri);
+      if (package == null) {
+        showMessage(tr('r11InvalidPackage'), isError: true);
+        return;
+      }
+      final selected = await chooseExternalListing(package);
+      if (selected == null || !mounted || !navigator.mounted) return;
+      // Standalone route: never substitute a visible row in a filtered,
+      // wide-layout or folder list. Keep the caller's current tab/draft intact.
+      unawaited(navigator.push(MaterialPageRoute<void>(builder: (_) =>
+        Consumer<AppsProvider>(builder: (context, provider, _) {
+          final live = r11ExactLiveListing(provider.apps, selected);
+          return live == null
+              ? Scaffold(appBar: AppBar(), body: Center(child: Text(tr('r11ListingChanged'))))
+              : AppPage(appId: live.listingKey, suppressAutoCheck: true);
+        }),
+      )));
+    }
+
+    Future<void> handleAutomation(Uri uri) async {
+      final request = R11AutomationRequest.parse(uri);
+      final settings = appsProvider.settingsProvider;
+      if (request == null || !settings.r11AutomationEnabled) {
+        showMessage(tr('r11AutomationRefused'), isError: true);
+        return;
+      }
+      final selected = await chooseExternalListing(request.package);
+      if (selected == null || !mounted || !navigator.mounted ||
+          !settings.r11AutomationEnabled || !appsProvider.isForeground) {
+        return;
+      }
+      final approved = await showDialog<bool>(context: navigator.context,
+        builder: (dialog) => AlertDialog(
+          title: Text(tr('r11AutomationConfirm')),
+          content: Text('${selected.finalName}\n${selected.id}\n'
+            '${Uri.tryParse(selected.url)?.host ?? ''}\n'
+            '${selected.latestVersion}\n'
+            '${tr('r11Action_${request.action.name}')}\n\n${tr('r11AutomationDisclosure')}'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false), child: Text(tr('cancel'))),
+            FilledButton(onPressed: () => Navigator.pop(dialog, true), child: Text(tr('continue'))),
+          ],
+        ),
+      );
+      if (approved != true || !mounted || !navigator.mounted ||
+          !settings.r11AutomationEnabled || !appsProvider.isForeground) {
+        return;
+      }
+      try {
+        if (await getInstalledInfo(r11TaskerPackage, printErr: false) == null) {
+          showMessage(tr('r11TaskerMissing'), isError: true);
+          return;
+        }
+        final result = await r11RunAutomation(appsProvider, settings, request, selected);
+        if (!mounted || !settings.r11AutomationEnabled || !appsProvider.isForeground) return;
+        await r11SendTaskerResult(request, result);
+        showMessage(tr(result['status'] == 'queuedNotInstalled'
+            ? 'r11AutomationQueued' : 'r11AutomationResult'));
+      } catch (_) {
+        // Never send raw exceptions, source URLs, or credentials to a caller.
+        if (mounted) showMessage(tr('r11AutomationFailed'), isError: true);
+      }
+    }
+
     Future<void> interpretLink(Uri uri) async {
       final action = uri.host;
-      final data = uri.path.length > 1 ? uri.path.substring(1) : '';
       try {
-        if (action == 'add') {
-          await handleAddUrl(data);
+        if (uri.scheme != 'obtainium') throw UnsupportedURLError();
+        if (action == 'open') {
+          await handleOpenPackage(uri);
+        } else if (action == 'automation') {
+          await handleAutomation(uri);
+        } else if (action == 'add') {
+          await handleAddUrl(obtainiumAddUrl(uri));
         } else if (action == 'app' || action == 'apps') {
           // Added as Import from URL list adds whatever is typed into it
           // (importUrlListEntries): each app fetched while the sheet is open,
@@ -517,27 +649,32 @@ class HomePageState extends State<HomePage> {
       return interpretLink(uri);
     }
 
-    // Check initial link if app was in cold state (terminated)
-    final appLink = await _appLinks.getInitialLink();
-    var initLinked = false;
-    if (appLink != null) {
-      await interpretIncomingLink(appLink);
-      initLinked = true;
+    final linkGate = IncomingSourceLinkGate();
+    Future<void> pendingLink = Future<void>.value();
+    var pendingCount = 0;
+    void enqueueLink(Uri uri) {
+      if (pendingCount >= 8 || !linkGate.accept(uri, DateTime.now())) return;
+      pendingCount++;
+      pendingLink = pendingLink.then((_) async {
+        if (mounted) await interpretIncomingLink(uri);
+      }).catchError((Object error) {
+        if (mounted) showError(error);
+      }).whenComplete(() { pendingCount--; });
     }
+    try {
+      final initial = await _appLinks.getInitialLink();
+      if (!mounted) return;
+      if (initial != null) enqueueLink(initial);
+    } catch (e) {
+      if (mounted) showError(e);
+    }
+    if (!mounted) return;
+    _linkSubscription = _appLinks.uriLinkStream.listen(enqueueLink,
+      onError: (Object error) { if (mounted) showError(error); });
     _sharedUrlReceiver.listen(handleSharedText);
-    final String? initialSharedText = await _sharedUrlReceiver
-        .getInitialSharedText();
-    if (initialSharedText != null) {
-      await handleSharedText(initialSharedText);
-    }
-    // Handle link when app is in warm state (front or background)
-    _linkSubscription = _appLinks.uriLinkStream.listen((uri) async {
-      if (!initLinked) {
-        await interpretIncomingLink(uri);
-      } else {
-        initLinked = false;
-      }
-    });
+    final String? initialSharedText = await _sharedUrlReceiver.getInitialSharedText();
+    if (mounted && initialSharedText != null) await handleSharedText(initialSharedText);
+
   }
 
   Widget _floatingHomeNavigationBar({
@@ -587,6 +724,8 @@ class HomePageState extends State<HomePage> {
       return const SizedBox.shrink();
     }
     final double bottomInset = MediaQuery.paddingOf(context).bottom;
+    final bool reduceMotion = r10ReduceMotion(context, context.read<SettingsProvider>().reduceVisualEffects);
+    final Duration motionDuration = reduceMotion ? Duration.zero : const Duration(milliseconds: 300);
 
     bool isAddAppSubFlowActive = false;
     if (selectedIndex == 1) {
@@ -618,7 +757,7 @@ class HomePageState extends State<HomePage> {
                 hapticSelection();
                 state.runMassObtain();
               },
-              tooltip: null,
+              tooltip: tr('r09UpdateAll'),
               child: const Icon(Icons.file_download_outlined, size: 20),
             );
 
@@ -650,7 +789,7 @@ class HomePageState extends State<HomePage> {
                 hapticSelection();
                 state.openSelectionActionsSheet();
               },
-              tooltip: null,
+              tooltip: tr('r10RowActions'),
               child: const Icon(Icons.checklist, size: 20),
             );
           } else {
@@ -662,7 +801,7 @@ class HomePageState extends State<HomePage> {
                 hapticSelection();
                 state.openViewOptionsSheet();
               },
-              tooltip: null,
+              tooltip: tr('appsViewOptions'),
               child: const Icon(Icons.tune, size: 20),
             );
           }
@@ -692,21 +831,22 @@ class HomePageState extends State<HomePage> {
               : scheme.onSurfaceVariant,
         );
 
-        return InkWell(
-          borderRadius: BorderRadius.circular(22),
-          onTap: () async {
+        return R10NavigationTarget(
+          label: page.title,
+          selected: isSelected,
+          onTap: () {
             hapticSelection();
             unawaited(switchToPage(index));
           },
           child: AnimatedContainer(
             // M3 expressive (emphasized) motion, matched to the page transition
             // above so the selection indicator settles in sync with the page.
-            duration: const Duration(milliseconds: 300),
+            duration: motionDuration,
             curve: Curves.easeInOutCubicEmphasized,
             margin: const EdgeInsets.symmetric(horizontal: 2.0),
             padding: EdgeInsets.symmetric(
               horizontal: isSelected ? 15.0 : 11.0,
-              vertical: 10.0,
+              vertical: 12.0,
             ),
             decoration: BoxDecoration(
               color: isSelected ? scheme.primaryContainer : Colors.transparent,
@@ -718,15 +858,15 @@ class HomePageState extends State<HomePage> {
                 iconWidget,
                 ClipRect(
                   child: AnimatedSize(
-                    duration: const Duration(milliseconds: 300),
+                    duration: motionDuration,
                     curve: Curves.easeInOutCubicEmphasized,
-                    child: isSelected
+                    child: isSelected && MediaQuery.sizeOf(context).width >= 440 &&
+                            MediaQuery.textScalerOf(context).scale(16) <= 19.2
                         ? Padding(
                             padding: const EdgeInsets.only(left: 7.0),
                             child: Text(
                               page.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.clip,
+                              softWrap: false,
                               style: TextStyle(
                                 fontSize: 13.5,
                                 fontWeight: FontWeight.w600,
@@ -772,9 +912,7 @@ class HomePageState extends State<HomePage> {
       ),
     );
 
-    final Widget compositeRow = Row(
-      mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment: MainAxisAlignment.center,
+    final Widget compositeRow = R10NavigationStrip(
       children: [
         SizedBox(
           width: 48,
@@ -794,8 +932,9 @@ class HomePageState extends State<HomePage> {
       ],
     );
 
+    if (isAddAppSubFlowActive) return const SizedBox.shrink();
     return AnimatedSlide(
-      duration: const Duration(milliseconds: 300),
+      duration: motionDuration,
       curve: Curves.easeInOutCubicEmphasized,
       offset: isAddAppSubFlowActive ? const Offset(0, 1.5) : Offset.zero,
       child: Padding(
@@ -806,7 +945,7 @@ class HomePageState extends State<HomePage> {
         ),
         child: Align(
           alignment: Alignment.bottomCenter,
-          child: FittedBox(fit: BoxFit.scaleDown, child: compositeRow),
+          child: compositeRow,
         ),
       ),
     );
@@ -879,7 +1018,7 @@ class HomePageState extends State<HomePage> {
     // Only shell layout settings are watched here; page switching is handled
     // locally by the mounted tab stack.
     context.select<SettingsProvider, int>(
-      (s) => Object.hash(s.progressiveBlurEnabled, s.alwaysUsePhoneLayout),
+      (s) => Object.hash(s.progressiveBlurEnabled, s.alwaysUsePhoneLayout, s.reduceVisualEffects, s.isTV),
     );
     final SettingsProvider settingsProvider = context.read<SettingsProvider>();
 
@@ -966,15 +1105,17 @@ class HomePageState extends State<HomePage> {
       child: Builder(
         builder: (BuildContext context) {
           final ColorScheme scheme = Theme.of(context).colorScheme;
-          final bool blurBottomNav = settingsProvider.progressiveBlurEnabled;
+          final bool reduceMotion = r10ReduceMotion(context, settingsProvider.reduceVisualEffects);
+          final bool blurBottomNav = settingsProvider.progressiveBlurEnabled && !reduceMotion;
           final double screenWidth = MediaQuery.sizeOf(context).width;
           final Orientation orientation = MediaQuery.orientationOf(context);
           final Axis pageTransitionAxis = orientation == Orientation.landscape
               ? Axis.vertical
               : Axis.horizontal;
           final bool isLargeScreen =
-              screenWidth >= kLargeScreenWidthBreakpoint &&
-              !settingsProvider.alwaysUsePhoneLayout;
+              !settingsProvider.alwaysUsePhoneLayout &&
+              (screenWidth >= kLargeScreenWidthBreakpoint ||
+                  (settingsProvider.isTV && screenWidth >= 600));
 
           // Shared icon builder (adds the update-count badge to the first tab),
           // and build only the destination list the current layout actually
@@ -997,7 +1138,7 @@ class HomePageState extends State<HomePage> {
                     .map(
                       (entry) => NavigationRailDestination(
                         icon: navIcon(entry),
-                        label: Text(entry.value.title),
+                        label: SizedBox(width: 112, child: Text(entry.value.title, textAlign: TextAlign.center)),
                       ),
                     )
                     .toList()
@@ -1045,6 +1186,7 @@ class HomePageState extends State<HomePage> {
                                 unawaited(switchToPage(index));
                               },
                               labelType: NavigationRailLabelType.all,
+                              scrollable: true,
                               destinations: homeNavRailDestinations,
                               backgroundColor: scheme.surface,
                             ),
@@ -1064,6 +1206,7 @@ class HomePageState extends State<HomePage> {
                                   key: _pageStackKey,
                                   index: homeNavSelectedIndex,
                                   axis: pageTransitionAxis,
+                          reduceMotion: reduceMotion,
                                   children: pages.map((p) => p.widget).toList(),
                                 ),
                               ),
@@ -1083,6 +1226,7 @@ class HomePageState extends State<HomePage> {
                           key: _pageStackKey,
                           index: homeNavSelectedIndex,
                           axis: pageTransitionAxis,
+                          reduceMotion: reduceMotion,
                           children: pages.map((p) => p.widget).toList(),
                         ),
                       ),

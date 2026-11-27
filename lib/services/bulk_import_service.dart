@@ -9,25 +9,14 @@ import 'package:html/dom.dart' as html_dom;
 import 'package:html/parser.dart' show parse;
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
-import 'package:obtainium/app_sources/apkmirror.dart';
+import 'package:obtainium/services/r08_apkmirror_discovery.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/providers/settings_provider.dart';
+import 'package:obtainium/providers/source_provider.dart' show HttpService;
 import 'package:obtainium/services/html_parse_isolate.dart';
 import 'package:obtainium/services/store_lookup_queue.dart';
 
 const _deviceAppsChannel = MethodChannel('dev.imranr.obtainium/device_apps');
-
-typedef _ApkMirrorAvailability = ({bool exists, String? link, String? iconUrl});
-
-@visibleForTesting
-String? apkMirrorIconUrlFromAvailabilityItem(dynamic item) {
-  if (item is! Map) return null;
-  final dynamic app = item['app'];
-  if (app is! Map) return null;
-  final dynamic iconUrl = app['icon_url'];
-  if (iconUrl is! String || iconUrl.trim().isEmpty) return null;
-  return iconUrl.trim();
-}
 
 class InstalledAppInfo {
   final String packageName;
@@ -79,13 +68,6 @@ class SigningCertificateInfo {
 }
 
 class BulkImportService {
-  static const Map<String, String> _apkMirrorPreferredPackageUrls = {
-    // APKMirror's app_exists endpoint can return Wear OS / Android Automotive
-    // sibling listings for this shared package ID. Prefer the phone listing.
-    'com.google.android.apps.youtube.music':
-        'https://www.apkmirror.com/apk/google-inc/youtube-music/',
-  };
-
   static Future<Map<String, String>> getApplicationLabels(
     List<String> packageNames,
   ) async {
@@ -254,146 +236,18 @@ class BulkImportService {
     return candidates;
   }
 
-  /// Checks APKMirror for a list of package names.
-  /// Returns a map of packageName -> apkmirror URL (null if not found).
-  /// Uses APKMirror's REST API with batch requests of 100 apps.
-  /// When supplied, [resolvedIconUrls] is populated from the same response;
-  /// resolving these URLs does not issue another metadata request.
+  /// Public provider discovery. Previously cached URLs are hints only; no
+  /// borrowed API credentials, synthetic matches or negative cache on refusal.
   static Future<Map<String, String?>> checkApkMirror(
     List<String> packageNames, {
     void Function(int done, int total)? onProgress,
     Map<String, String?>? alreadyKnown,
     Map<String, String>? resolvedIconUrls,
     bool Function()? shouldAbort,
-  }) async {
-    final result = <String, String?>{};
-    if (alreadyKnown != null) {
-      for (final String packageName in packageNames) {
-        if (alreadyKnown.containsKey(packageName)) {
-          result[packageName] =
-              _apkMirrorPreferredPackageUrls[packageName] ??
-              alreadyKnown[packageName];
-        }
-      }
-    }
-    void reportProgress() {
-      int resolved = 0;
-      for (final String packageName in packageNames) {
-        if (result.containsKey(packageName)) resolved++;
-      }
-      onProgress?.call(resolved, packageNames.length);
-    }
-
-    reportProgress();
-    final List<String> toQuery = packageNames
-        .where((String packageName) => !result.containsKey(packageName))
-        .toList();
-    if (toQuery.isEmpty) {
-      return result;
-    }
-
-    final List<String> queryCandidates = [];
-    final Map<String, List<String>> candidateToOriginal = {};
-    final Map<String, Set<String>> pendingCandidates = {};
-
-    for (final String pkg in toQuery) {
-      final candidates = getPackageIdCandidates(pkg);
-      pendingCandidates[pkg] = candidates.toSet();
-      for (final String candidate in candidates) {
-        if (!queryCandidates.contains(candidate)) {
-          queryCandidates.add(candidate);
-        }
-        candidateToOriginal.putIfAbsent(candidate, () => []).add(pkg);
-      }
-    }
-
-    const batchSize = 100;
-    // Authorization header uses APKUpdater credentials to access the API endpoint
-    const auth = 'Basic YXBpLWFwa3VwZGF0ZXI6cm01cmNmcnVVakt5MDRzTXB5TVBKWFc4';
-
-    for (int i = 0; i < queryCandidates.length; i += batchSize) {
-      if (shouldAbort?.call() == true) {
-        return result;
-      }
-      final batch = queryCandidates.sublist(
-        i,
-        min(i + batchSize, queryCandidates.length),
-      );
-      try {
-        final response = await http
-            .post(
-              Uri.parse(
-                'https://www.apkmirror.com/wp-json/apkm/v1/app_exists/',
-              ),
-              headers: {
-                'Authorization': auth,
-                'Content-Type': 'application/json',
-                // Same Cloudflare allowlist as the HTML pages — see
-                // [apkMirrorAllowlistedUserAgentToken].
-                'User-Agent': apkMirrorUserAgent(),
-              },
-              body: jsonEncode({
-                'pnames': batch,
-                'exclude': ['alpha', 'beta'],
-              }),
-            )
-            .timeout(const Duration(seconds: 30));
-
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body) as Map<String, dynamic>;
-          final dataList = data['data'] as List? ?? [];
-
-          final Map<String, _ApkMirrorAvailability> batchResults = {};
-          for (final item in dataList) {
-            final pname = item['pname'] as String?;
-            if (pname != null) {
-              batchResults[pname] = (
-                exists: item['exists'] as bool? ?? false,
-                link: item['app']?['link'] as String?,
-                iconUrl: apkMirrorIconUrlFromAvailabilityItem(item),
-              );
-            }
-          }
-
-          for (final String candidate in batch) {
-            final res = batchResults[candidate];
-            final exists = res?.exists ?? false;
-            final appLink = res?.link;
-
-            final originals = candidateToOriginal[candidate] ?? [];
-            for (final original in originals) {
-              if (exists && appLink != null) {
-                if (result[original] == null || original == candidate) {
-                  result[original] =
-                      _apkMirrorPreferredPackageUrls[candidate] ??
-                      'https://www.apkmirror.com$appLink';
-                  final String? iconUrl = res?.iconUrl;
-                  if (iconUrl != null) {
-                    resolvedIconUrls?[original] = iconUrl;
-                  }
-                }
-              }
-              pendingCandidates[original]?.remove(candidate);
-              if (pendingCandidates[original]?.isEmpty == true) {
-                result.putIfAbsent(original, () => null);
-              }
-            }
-          }
-        }
-      } catch (_) {
-        // Network error or timeout — don't cache; retry next scan.
-      }
-      reportProgress();
-      if (shouldAbort?.call() == true) {
-        return result;
-      }
-      // Small delay between batches to respect rate limits
-      if (i + batchSize < queryCandidates.length) {
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
-    }
-    return result;
-  }
+  }) => r08DiscoverApkMirror(packageNames,
+    (uri) => HttpService().request('GET', uri, null, followRedirects: false),
+    hints: alreadyKnown, resolvedIconUrls: resolvedIconUrls,
+    shouldAbort: shouldAbort, onProgress: onProgress);
 
   /// Checks APKPure for a list of package names using the same per-app endpoint
   /// that the APKPure app source uses (tapi.pureapk.com/v3/get_app_his_version).
@@ -430,7 +284,7 @@ class BulkImportService {
 
     final queue = await StoreLookupQueue.forDevice();
     final chunkSize = queue.concurrency;
-    final client = IOClient(HttpClient()..maxConnectionsPerHost = chunkSize);
+    final client = HttpClient()..maxConnectionsPerHost = chunkSize;
     const headers = {
       'Ual-Access-Businessid': 'projecta',
       'Ual-Access-ProjectA': '{"device_info":{"os_ver":"30"}}',
@@ -455,13 +309,12 @@ class BulkImportService {
               for (final candidate in candidates) {
                 if (shouldAbort?.call() == true) return;
                 try {
-                  final response = await client
-                      .get(
-                        Uri.parse(
+                  final response = await HttpService().request(
+                        'GET', Uri.parse(
                           'https://tapi.pureapk.com/v3/get_app_his_version'
                           '?package_name=$candidate&hl=en',
                         ),
-                        headers: headers,
+                        headers, sharedClient: client,
                       )
                       .timeout(const Duration(seconds: 15));
 
@@ -1001,8 +854,7 @@ class BulkImportService {
             'per_page': '15',
           },
         );
-        http.Response response = await http
-            .get(uri, headers: headers)
+        http.Response response = await HttpService().request('GET', uri, headers, followRedirects: false)
             .timeout(const Duration(seconds: 25));
         // On a throttle (403/429), honour Retry-After / X-RateLimit-Reset and
         // retry the SAME package instead of aborting the scan on the first hit.
@@ -1024,8 +876,7 @@ class BulkImportService {
           if (shouldAbort?.call() == true) {
             return result;
           }
-          response = await http
-              .get(uri, headers: headers)
+          response = await HttpService().request('GET', uri, headers, followRedirects: false)
               .timeout(const Duration(seconds: 25));
         }
         if (aborted) break;

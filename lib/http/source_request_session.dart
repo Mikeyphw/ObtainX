@@ -46,8 +46,13 @@ class SourceRequestSession {
 
   Future<http.Response> repositoryResponse(
     String key,
-    Future<http.Response> Function() load,
-  ) async {
+    Future<http.Response> Function() load, {
+    int? maxEntries,
+  }) async {
+    if (maxEntries != null && _repositoryResponses.length >= maxEntries &&
+        !_repositoryResponses.containsKey(key)) {
+      return load();
+    }
     final pending = _repositoryResponses.putIfAbsent(key, load);
     try {
       final response = await pending;

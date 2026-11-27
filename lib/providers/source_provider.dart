@@ -44,7 +44,10 @@ import 'package:obtainium/components/generated_form_model.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/app_sources/githubstars.dart';
 import 'package:obtainium/http/obtainx_user_agent.dart';
+import 'package:obtainium/http/origin_redirect_policy.dart';
 import 'package:obtainium/http/source_request_session.dart';
+import 'package:obtainium/http/r08_apkmirror_budget.dart';
+import 'package:obtainium/services/r08_source_policy.dart';
 import 'package:obtainium/services/r04_actions_redirect_policy.dart';
 import 'package:obtainium/http/response_bytes.dart';
 import 'package:obtainium/providers/logs_provider.dart';
@@ -66,12 +69,14 @@ class AppNames {
 }
 
 // GitHub build attestation status values (stored in App.latestAttestationStatus).
+// Legacy wire value, never accepted as verified proof by this version.
 const String githubAttestationStatusVerified = 'verified';
+const String githubAttestationStatusPresent = 'present_unverified';
 const String githubAttestationStatusUnsupported = 'unsupported';
 const String githubAttestationStatusError = 'error';
 
 const Set<String> validGitHubAttestationStatuses = {
-  githubAttestationStatusVerified,
+  githubAttestationStatusPresent,
   githubAttestationStatusUnsupported,
   githubAttestationStatusError,
 };
@@ -124,13 +129,15 @@ String? malwareScanStatusFromJsonValue(Object? value) {
 /// Coerces a stored JSON value (string, or legacy bool) into a valid
 /// attestation status, or null.
 String? githubAttestationStatusFromJsonValue(Object? value) {
+  if (value == githubAttestationStatusVerified || value == true) {
+    // Legacy lookup-only claims have no reliable discovery evidence either.
+    return githubAttestationStatusError;
+  }
   if (value is String && validGitHubAttestationStatuses.contains(value)) {
     return value;
   }
   if (value is bool) {
-    return value
-        ? githubAttestationStatusVerified
-        : githubAttestationStatusUnsupported;
+    return githubAttestationStatusUnsupported;
   }
   return null;
 }
@@ -681,9 +688,11 @@ class App {
       latestReproducibleVersionCode: latestReproducibleVersionCode == _sentinel
           ? this.latestReproducibleVersionCode
           : latestReproducibleVersionCode as int?,
-      latestAttestationStatus: latestAttestationStatus == _sentinel
-          ? this.latestAttestationStatus
-          : latestAttestationStatus?.toString(),
+      latestAttestationStatus: githubAttestationStatusFromJsonValue(
+        latestAttestationStatus == _sentinel
+            ? this.latestAttestationStatus
+            : latestAttestationStatus,
+      ),
       latestMalwareScanStatus: latestMalwareScanStatus == _sentinel
           ? this.latestMalwareScanStatus
           : latestMalwareScanStatus?.toString(),
@@ -833,7 +842,7 @@ class App {
     if (latestReproducibleVersionCode != null)
       'latestReproducibleVersionCode': latestReproducibleVersionCode,
     if (latestAttestationStatus != null)
-      'latestAttestationStatus': latestAttestationStatus,
+      'latestAttestationStatus': githubAttestationStatusFromJsonValue(latestAttestationStatus),
     if (latestMalwareScanStatus != null)
       'latestMalwareScanStatus': latestMalwareScanStatus,
     if (latestMalwareScanDetail != null)
@@ -988,6 +997,26 @@ abstract class AppSource {
     return null;
   }
 
+  /// Source-configured HTML headers are scoped to the tracked URL's origin.
+  /// Provider-owned API adapters additionally enforce their own token scopes.
+  Future<Map<String, String>?> getAssetRequestHeaders(
+    Map<String, dynamic> additionalSettings, String trackedUrl, String assetUrl, {
+    bool forAPKDownload = true,
+  }) async {
+    final headers = await getRequestHeaders(additionalSettings, assetUrl,
+      forAPKDownload: forAPKDownload);
+    if (this is HTML || this is DirectAPKLink) {
+      final sourceUri = Uri.parse(trackedUrl);
+      final assetUri = Uri.parse(assetUrl);
+      validateHttpRedirect(sourceUri, assetUri, 'GET',
+        insecureTls: additionalSettings['allowInsecure'] == true);
+      if (!sameRequestOrigin(sourceUri, assetUri)) {
+        return crossOriginDownloadHeaders(headers);
+      }
+    }
+    return headers;
+  }
+
   AppSource() {
     name = runtimeType.toString();
   }
@@ -1039,32 +1068,45 @@ abstract class AppSource {
       additionalSettingsPlusSourceConfig,
       url,
     );
+    final uri = Uri.parse(url);
+    final mirrorRequest = ApkMirrorRequestBudget.isMirrorHost(uri);
+    if (mirrorRequest &&
+        (!ApkMirrorRequestBudget.appliesTo(uri) || method != 'GET')) {
+      throw ObtainiumError('APKMirror requires verified public HTTPS GET access.');
+    }
     final session = SourceRequestSession.current;
     final allowInsecure =
-        additionalSettingsPlusSourceConfig['allowInsecure'] == true;
+        !mirrorRequest && additionalSettingsPlusSourceConfig['allowInsecure'] == true;
     Future<http.Response> loadResponse() async {
       final service = HttpService();
       final streamed = await service.sourceRequestStreamResponse(
         method,
         url,
-        requestHeaders,
-        additionalSettingsPlusSourceConfig,
-        followRedirects: followRedirects,
+        mirrorRequest ? {'User-Agent': apkMirrorUserAgent()} : requestHeaders,
+        mirrorRequest ? {...additionalSettingsPlusSourceConfig, 'allowInsecure': false} : additionalSettingsPlusSourceConfig,
+        followRedirects: followRedirects && !mirrorRequest,
         postBody: postBody,
-        sharedClient: session?.clientFor(allowInsecure),
+        sharedClient: mirrorRequest ? null : session?.clientFor(allowInsecure),
       );
       return service.httpClientResponseStreamToFinalResponse(
         streamed.value.key,
         method,
         streamed.key.toString(),
         streamed.value.value,
-        closeClient: session == null,
+        closeClient: mirrorRequest || session == null,
       );
     }
 
-    if (session != null &&
-        method == 'GET' &&
-        Uri.parse(url).path.endsWith('/index.xml')) {
+    Future<http.Response> loadWithBudget() async {
+      if (!mirrorRequest) return loadResponse();
+      try {
+        return await ApkMirrorRequestBudget.shared.request(loadResponse);
+      } on ApkMirrorRequestDeferred catch (error) {
+        throw ObtainiumError(error.message);
+      }
+    }
+    if (session != null && method == 'GET' &&
+        (uri.path.endsWith('/index.xml') || mirrorRequest)) {
       // Key after URL/header customization so credentials, TLS policy and
       // redirects cannot accidentally share a response across configurations.
       final headerNames = requestHeaders?.keys.toList() ?? <String>[];
@@ -1075,9 +1117,10 @@ abstract class AppSource {
         followRedirects,
         for (final name in headerNames) [name, requestHeaders![name]],
       ]);
-      return session.repositoryResponse(key, loadResponse);
+      return session.repositoryResponse(key, loadWithBudget,
+          maxEntries: mirrorRequest ? 64 : null);
     }
-    return loadResponse();
+    return loadWithBudget();
   }
 
   void runOnAddAppInputChange(String inputUrl) {}
@@ -2088,9 +2131,10 @@ class SourceProvider {
       ),
       latestReproducibleStatus: resolvedReproducibleStatus,
       latestReproducibleVersionCode: apk.versionCode,
-      latestAttestationStatus:
-          apk.attestationStatus ??
+      latestAttestationStatus: githubAttestationStatusFromJsonValue(
+        apk.attestationStatus ??
           (sameVersionAsPrevious ? currentApp.latestAttestationStatus : null),
+      ),
     );
     return source.resolveVersionComparison(source.postProcessApp(finalApp));
   }
@@ -2247,19 +2291,30 @@ class HttpService {
     bool followRedirects = true,
     Object? postBody,
     HttpClient? sharedClient,
+    bool reviewHttpsOnly = false,
   }) async {
     var currentUrl = Uri.parse(url);
-    // Only the exact GitHub artifact API URL enters this narrower redirect
-    // policy. Other app sources retain their existing redirect semantics.
+    validateHttpRequestUri(currentUrl);
+    var crossedOrigin = false;
+    // GitHub Actions retains its additional signed-storage host allowlist.
     final r04Protected = r04IsCanonicalArtifactDownload(currentUrl);
     var r04StorageHop = false;
     var redirectCount = 0;
     List<Cookie> cookies = [];
-    final httpClient =
-        sharedClient ??
-        createHttpClient(additionalSettings['allowInsecure'] == true);
+    final insecureTls = !reviewHttpsOnly && additionalSettings['allowInsecure'] == true;
+    final httpClient = sharedClient ?? createHttpClient(insecureTls);
     try {
       while (redirectCount < maxRedirects) {
+        if (ApkMirrorRequestBudget.isMirrorHost(currentUrl) &&
+            (!ApkMirrorRequestBudget.ownsRequest ||
+             !ApkMirrorRequestBudget.appliesTo(currentUrl) || crossedOrigin ||
+             redirectCount != 0 || method != 'GET' || postBody != null ||
+             insecureTls || sharedClient != null || followRedirects)) {
+          throw ObtainiumError('APKMirror requires an owned public HTTPS request.');
+        }
+        if (reviewHttpsOnly && (currentUrl.scheme != 'https' || currentUrl.host.isEmpty || currentUrl.userInfo.isNotEmpty)) {
+          throw const FormatException('Review requires HTTPS on every hop');
+        }
         bool openTimedOut = false;
         final pendingRequest = httpClient.openUrl(method, currentUrl).then((
           request,
@@ -2278,6 +2333,8 @@ class HttpService {
         // Never forward bearer/cookie/custom headers to signed storage.
         final hopHeaders = r04Protected && r04StorageHop
             ? r04ArtifactStorageHeaders(requestHeaders)
+            : crossedOrigin
+            ? crossOriginDownloadHeaders(requestHeaders)
             : requestHeaders;
         withDefaultObtainXUserAgent(hopHeaders).forEach((
           String headerName,
@@ -2285,7 +2342,7 @@ class HttpService {
         ) {
           request.headers.set(headerName, headerValue);
         });
-        if (!r04Protected || !r04StorageHop) {
+        if ((!r04Protected || !r04StorageHop) && !crossedOrigin) {
           request.cookies.addAll(cookies);
         }
         request.followRedirects = false;
@@ -2302,17 +2359,31 @@ class HttpService {
         );
 
         if (followRedirects &&
-            (response.statusCode >= 300 && response.statusCode <= 399)) {
+            const {301, 302, 303, 307, 308}.contains(response.statusCode)) {
           final location = response.headers.value(HttpHeaders.locationHeader);
           if (location != null) {
-            final nextUrl = Uri.parse(ensureAbsoluteUrl(location, currentUrl));
-            if (r04Protected) {
-              r04ValidateArtifactRedirect(currentUrl, nextUrl);
-              r04StorageHop = true;
+            final Uri nextUrl;
+            try {
+              nextUrl = Uri.parse(ensureAbsoluteUrl(location, currentUrl));
+              validateHttpRedirect(currentUrl, nextUrl, method,
+                hasBody: postBody != null, insecureTls: insecureTls);
+              if (r04Protected) {
+                r04ValidateArtifactRedirect(currentUrl, nextUrl);
+                r04StorageHop = true;
+              }
+            } catch (_) {
+              await response.listen((_) {}).cancel();
+              rethrow;
+            }
+            if (!sameRequestOrigin(currentUrl, nextUrl)) {
+              crossedOrigin = true;
             }
             currentUrl = nextUrl;
             redirectCount++;
-            cookies = r04Protected ? <Cookie>[] : response.cookies;
+            cookies = r04Protected || crossedOrigin
+                ? <Cookie>[]
+                : response.cookies.where((cookie) =>
+                    !cookie.secure || currentUrl.scheme == 'https').toList();
             await response.timeout(responseTimeout).drain<void>();
             continue;
           }
@@ -2325,6 +2396,27 @@ class HttpService {
       if (sharedClient == null) httpClient.close(force: true);
       rethrow;
     }
+  }
+
+  Future<http.Response> request(
+    String method, Uri uri, Map<String, String>? headers, {
+    bool followRedirects = true,
+    Object? postBody,
+    HttpClient? sharedClient,
+  }) async {
+    final mirror = ApkMirrorRequestBudget.isMirrorHost(uri);
+    if (mirror && (!ApkMirrorRequestBudget.appliesTo(uri) || method != 'GET' || postBody != null)) {
+      throw ObtainiumError('APKMirror requires verified public HTTPS GET access.');
+    }
+    Future<http.Response> load() async {
+      final client = mirror ? null : sharedClient;
+      final streamed = await sourceRequestStreamResponse(method, uri.toString(),
+        mirror ? {'User-Agent': apkMirrorUserAgent()} : headers, {},
+        followRedirects: followRedirects && !mirror, postBody: postBody, sharedClient: client);
+      return httpClientResponseStreamToFinalResponse(streamed.value.key, method,
+        streamed.key.toString(), streamed.value.value, closeClient: client == null);
+    }
+    return mirror ? ApkMirrorRequestBudget.shared.request(load) : load();
   }
 
   Future<http.Response> httpClientResponseStreamToFinalResponse(
@@ -2435,9 +2527,14 @@ class ApkFilterService {
 
   List<MapEntry<String, String>> getApkUrlsFromUrls(List<String> urls) =>
       urls.map((e) {
-        final segments = e.split('/').where((el) => el.trim().isNotEmpty);
+        // A signed query or a host name is not an asset filename.
+        final uri = Uri.tryParse(e);
+        final segments = uri?.pathSegments.where((s) => s.isNotEmpty).toList()
+            ?? const <String>[];
         final apkSegs = segments.where((s) => isApkOrContainerFile(s));
-        return MapEntry(apkSegs.isNotEmpty ? apkSegs.last : segments.last, e);
+        final name = apkSegs.isNotEmpty ? apkSegs.last :
+            (segments.isNotEmpty ? segments.last : '');
+        return MapEntry(name, e);
       }).toList();
 
   List<MapEntry<String, String>> filterApks(
@@ -2448,8 +2545,8 @@ class ApkFilterService {
     if (apkFilterRegEx?.isNotEmpty == true) {
       final reg = RegExp(apkFilterRegEx!);
       apkUrls = apkUrls.where((element) {
-        final hasMatch =
-            reg.hasMatch(element.key) || reg.hasMatch(element.value);
+        // Match the source-provided filename/asset label only (#353).
+        final hasMatch = reg.hasMatch(element.key);
         return invert == true ? !hasMatch : hasMatch;
       }).toList();
     }
@@ -2462,17 +2559,9 @@ class ApkFilterService {
     bool preferSplits = true,
   }) async {
     if (apkUrls.length > 1) {
-      for (var abi in abis) {
-        final RegExp architecturePattern = RegExp(
-          '.*$abi.*',
-          caseSensitive: false,
-        );
+      for (final abi in preferredSourceAbis(abis)) {
         final urls2 = apkUrls
-            .where(
-              (element) =>
-                  architecturePattern.hasMatch(element.key) ||
-                  architecturePattern.hasMatch(element.value),
-            )
+            .where((element) => sourceAssetHasAbi(element.key, abi))
             .toList();
         if (urls2.isNotEmpty && urls2.length < apkUrls.length) {
           apkUrls = urls2;

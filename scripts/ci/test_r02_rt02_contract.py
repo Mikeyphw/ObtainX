@@ -41,7 +41,7 @@ class SourceMutations(unittest.TestCase):
     def test_emulator_api36_required(self):self.mutation(C.WORKFLOW,'api-level: 36','api-level: 35')
     def test_kvm_required(self):self.mutation(C.WORKFLOW,'test -c /dev/kvm','echo skip-kvm')
     def test_runner_sha_pinned(self):self.mutation(C.WORKFLOW,'@a421e43855164a8197daf9d8d40fe71c6996bb0d','@main')
-    def test_source_checkout(self):self.mutation(C.WORKFLOW,'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"','true')
+    def test_source_checkout(self):self.mutation(C.WORKFLOW,'test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"','true')
     def test_real_flutter_test(self):self.mutation(C.HOST,"'flutter','test','integration_test/r02_real_installer_test.dart'", "'echo','run fake test'")
     def test_no_mock_installer(self):self.mutation(C.DART, 'StockInstaller(SettingsProvider()).installApk(', 'fakeInstaller(')
     def test_no_skip_confirm(self):self.mutation(C.HOST,'tap_count==1', 'tap_count>=0')
@@ -305,4 +305,76 @@ class RT02FixtureManifestRegression(unittest.TestCase):
             self.assertTrue(any('pre-emulator hard gate' in e for e in C.inspect(root)))
 
 
-if __name__=='__main__':unittest.main()
+
+class RunnerEligibilityRace(unittest.TestCase):
+    """Exercise the production host helper; no Android qualification claimed."""
+    def setUp(self):
+        import r02_rt02_hosted as base
+        from unittest.mock import patch
+        self.base=base
+        self.patch=patch
+        self.path=b'package:/data/app/~~abc/dev.bikram.obtainx.debug-xyz/base.apk\n'
+
+    @staticmethod
+    def response(rc=0, out=b'', err=b''):
+        import subprocess
+        return subprocess.CompletedProcess([],rc,out,err)
+
+    def test_clean_absence_never_sets_appop(self):
+        for rc in (0,1):
+            with self.subTest(rc=rc), self.patch.object(self.base,'command',return_value=self.response(rc)) as cmd:
+                self.assertFalse(self.base.grant_runner_install_eligibility())
+                self.assertEqual(cmd.call_count,1)
+                self.assertEqual(cmd.call_args.args[0][-4:],['path','--user','0',self.base.APP])
+
+    def test_exact_no_uid_race_then_ready(self):
+        absent=('Error: No UID for '+self.base.APP+' in user 0').encode()
+        for rc in (1,255):
+            for stdout,stderr in ((absent,b''),(b'',absent)):
+                with self.subTest(rc=rc,stdout=stdout), self.patch.object(self.base,'command',side_effect=[
+                    self.response(out=self.path), self.response(rc,stdout,stderr),
+                    self.response(out=self.path), self.response()]) as cmd:
+                    self.assertFalse(self.base.grant_runner_install_eligibility())
+                    self.assertTrue(self.base.grant_runner_install_eligibility())
+                    self.assertEqual(cmd.call_count,4)
+                    self.assertEqual(cmd.call_args.args[0][-6:],['set','--user','0',self.base.APP,'REQUEST_INSTALL_PACKAGES','allow'])
+
+    def test_other_package_user_and_errors_are_never_retried(self):
+        for result in (self.response(255,err=b'Error: No UID for another.package in user 0'),
+                       self.response(255,err=('Error: No UID for '+self.base.APP+' in user 10').encode()),
+                       self.response(255,err=('Error: No UID for '+self.base.APP+' in user 0\nPermission denied').encode()),
+                       self.response(1,err=b'device offline'),self.response(0,err=b'Permission denied')):
+            with self.subTest(result=result), self.patch.object(self.base,'command',side_effect=[self.response(out=self.path),result]) as cmd:
+                with self.assertRaisesRegex(self.base.Refused,'RT02_RUNNER_APP_OP_REFUSED'):
+                    self.base.grant_runner_install_eligibility()
+                self.assertEqual(cmd.call_count,2)
+
+    def test_bad_package_probe_fails_closed(self):
+        for result in (self.response(2),self.response(1,err=b'device offline'),
+                       self.response(0,out=b'garbage'),self.response(0,out=b'package:/sdcard/base.apk'),
+                       self.response(0,out=self.path+self.path),self.response(1,out=self.path)):
+            with self.subTest(result=result), self.patch.object(self.base,'command',return_value=result) as cmd:
+                with self.assertRaisesRegex(self.base.Refused,'RT02_RUNNER_PACKAGE_PATH_REFUSED'):
+                    self.base.grant_runner_install_eligibility()
+                self.assertEqual(cmd.call_count,1)
+
+    def test_all_pollers_use_one_shared_boundary_and_keep_p03_evidence(self):
+        from pathlib import Path
+        scripts=Path(__file__).resolve().parent
+        for name in ('r02_rt02_hosted.py','r02_rt02b_hosted.py','r02_rt02c_hosted.py',
+                     'opt05_p02_rt02_session.py','r02_rt02c_single_session.py','r02f_p03_hosted.py'):
+            text=(scripts/name).read_text()
+            self.assertIn('grant_runner_install_eligibility()',text,name)
+            if name!='r02_rt02_hosted.py':
+                self.assertNotIn('REQUEST_INSTALL_PACKAGES',text,name)
+        p03=(scripts/'r02f_p03_hosted.py').read_text()
+        for marker in ('time.monotonic()-started < 1100','eligible_seen = eligible_seen or eligible_now',
+                       "need(eligible_seen, 'P03 runner eligibility was never established')",
+                       'start_new_session=True','base.terminate_flutter_process_group(process)',
+                       'P03Handler.foreground_count == 1','before == after',
+                       "process.returncode != 0 or 'All tests passed!' not in text"):
+            self.assertIn(marker,p03)
+
+
+if __name__ == "__main__":
+    unittest.main()

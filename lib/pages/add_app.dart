@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:expressive_loading_indicator/expressive_loading_indicator.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:obtainium/components/r10_settings_context.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/layout_breakpoints.dart';
 import 'package:obtainium/components/app_page_section_title.dart';
@@ -1440,13 +1441,8 @@ class AddAppPageState extends State<AddAppPage> {
               userPickedTrackOnly,
             ))) {
           if (pickedSource is GitHub) {
-            if (!(pickedSource as GitHub).canVerifyAttestations(
-              additionalSettings,
-              settingsProvider,
-            )) {
-              additionalSettings[GitHub.buildVerificationModeKey] =
-                  GitHub.buildVerificationOff;
-            }
+            additionalSettings[GitHub.buildVerificationModeKey] =
+                GitHub.configuredBuildVerificationMode(additionalSettings);
             additionalSettings[GitHub.enforceAttestationsKey] = false;
           }
           final trackOnly =
@@ -1590,25 +1586,10 @@ class AddAppPageState extends State<AddAppPage> {
         }
       }
       if (pickedSource is GitHub) {
-        final bool canVerifyGitHubBuild = (pickedSource as GitHub)
-            .canVerifyAttestations(additionalSettings, settingsProvider);
         for (final GeneratedFormItem item in items.expand((row) => row)) {
           if (item is GeneratedFormDropdown &&
               item.key == GitHub.buildVerificationModeKey) {
-            if (!canVerifyGitHubBuild) {
-              item.disabledOptKeys = [
-                GitHub.buildVerificationAudit,
-                GitHub.buildVerificationEnforce,
-              ];
-              item.value = GitHub.buildVerificationOff;
-            }
-            final String? legacyMode =
-                additionalSettings[GitHub.buildVerificationModeKey]?.toString();
-            if (legacyMode == null &&
-                additionalSettings[GitHub.enforceAttestationsKey] == true &&
-                canVerifyGitHubBuild) {
-              item.value = GitHub.buildVerificationEnforce;
-            }
+            item.value = GitHub.configuredBuildVerificationMode(additionalSettings);
           }
         }
       }
@@ -1898,6 +1879,7 @@ class AddAppPageState extends State<AddAppPage> {
             ),
           ],
         ),
+        const R10ContextHint('r10SourceOverrideHint'),
         const SizedBox(height: 16),
       ],
     );
@@ -1914,6 +1896,7 @@ class AddAppPageState extends State<AddAppPage> {
             prominentSectionHeaders: true,
             wrapFormSectionsInCards: true,
             items: buildAdditionalSettingsItems(),
+            assistSourceUrl: userInput.trim(),
             onValueChanges: (values, valid, isBuilding) {
               if (!isBuilding) {
                 setState(() {
@@ -2772,10 +2755,11 @@ class _DownloadApkToIdentifyAppDialogState
         return;
       }
       if (!mounted) return;
-      final selectedApkIndex = _currentApp.apkUrls
-          .map((e) => e.value)
-          .toList()
-          .indexOf(apkUrl.value);
+      final selectedApkIndex = _currentApp.apkUrls.indexWhere(
+          (e) => e.key == apkUrl.key && e.value == apkUrl.value);
+      if (selectedApkIndex < 0) {
+        throw ObtainiumError(tr('r09ReviewSelectionChanged'));
+      }
       if (selectedApkIndex >= 0) {
         _currentApp = _currentApp.copyWith(preferredApkIndex: selectedApkIndex);
       }

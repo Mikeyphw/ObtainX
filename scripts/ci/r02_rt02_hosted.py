@@ -49,13 +49,57 @@ def command(args:list[str], timeout:int=30, allow_failure:bool=False)->subproces
 def adb(*args:str, timeout:int=30, allow_failure:bool=False)->str:
     return command(['adb','-s',SERIAL,*args],timeout=timeout,allow_failure=allow_failure).stdout.decode('utf-8','replace').strip()
 
+def runner_apk_present() -> bool:
+    """Only recognize a nonempty, exact user-0 debug APK path response.
+
+    Flutter can remove and reinstall its runner during bootstrap. A clean
+    absent-package observation (including API36 rc=1) is not an ADB failure.
+    Any other diagnostic or malformed reply is a genuine harness refusal.
+    """
+    probe=command(['adb','-s',SERIAL,'shell','pm','path','--user','0',APP],
+                  timeout=25,allow_failure=True)
+    stdout=probe.stdout.decode('utf-8','replace').strip()
+    stderr=probe.stderr.decode('utf-8','replace').strip()
+    if probe.returncode in (0,1) and not stdout and not stderr:
+        return False
+    paths=stdout.splitlines()
+    need(probe.returncode==0 and not stderr and bool(paths) and
+         all(re.fullmatch(r'package:/data/app/[A-Za-z0-9_+./~=-]+\.apk',p) for p in paths) and
+         sum(p.endswith('/base.apk') for p in paths)==1,
+         'RT02_RUNNER_PACKAGE_PATH_REFUSED rc='+str(probe.returncode))
+    return True
+
+
+def grant_runner_install_eligibility() -> bool:
+    """One bounded attempt; callers already own the live-child deadline.
+
+    Only the fixed disposable debug package may receive this app-op. A
+    package-path result is not an atomic UID reservation: the exact Android
+    No UID response can be deferred to the next poll during runner replacement.
+    No other command failure becomes a retry or successful eligibility proof.
+    """
+    if not runner_apk_present():
+        return False
+    result=command(['adb','-s',SERIAL,'shell','appops','set','--user','0',APP,
+                    'REQUEST_INSTALL_PACKAGES','allow'],timeout=25,allow_failure=True)
+    stdout=result.stdout.decode('utf-8','replace').strip()
+    stderr=result.stderr.decode('utf-8','replace').strip()
+    if result.returncode==0 and not stdout and not stderr:
+        return True
+    absent='Error: No UID for '+APP+' in user 0'
+    if result.returncode in (1,255) and (stdout,stderr) in ((absent,''),('',absent)):
+        print('OX_RT02_RUNNER_UID_PENDING',flush=True)
+        return False
+    raise Refused('RT02_RUNNER_APP_OP_REFUSED rc='+str(result.returncode))
+
+
 def sha_file(p:Path)->str: return hashlib.sha256(p.read_bytes()).hexdigest()
 
 def identity_check()->tuple[str,str]:
     need(os.environ.get('GITHUB_ACTIONS')=='true' and
          os.environ.get('RUNNER_OS')=='Linux' and os.environ.get('RUNNER_ARCH')=='X64',
          'hosted Linux x64 runner required')
-    source=os.environ.get('GITHUB_SHA','');run=os.environ.get('GITHUB_RUN_ID','')
+    source=os.environ.get('OX_EXPECTED_SHA','');run=os.environ.get('GITHUB_RUN_ID','')
     need(bool(re.fullmatch('[0-9a-f]{40}',source)) and run.isdigit(),
          'missing hosted source/run pin')
     need(command(['git','rev-parse','HEAD']).stdout.decode().strip()==source,
@@ -117,41 +161,93 @@ class FixtureServer(BaseHTTPRequestHandler):
         self.wfile.write(payload)
     def log_message(self,*args):pass
 
-def _tap_confirmed_install_dialog()->bool:
-    # No blind tap coordinates. Only click an explicit Install/Update action
-    # belonging to the known Android package installer and our fixture label.
-    command(['adb','-s',SERIAL,'shell','uiautomator','dump','--compressed',
-             '/sdcard/ox-rt02-window.xml'], timeout=18,allow_failure=True)
-    p=command(['adb','-s',SERIAL,'shell','cat','/sdcard/ox-rt02-window.xml'],
-              timeout=10,allow_failure=True)
-    if p.returncode or len(p.stdout)>450000 or not p.stdout.lstrip().startswith(b'<?xml'):
+APPROVAL_OBSERVATIONS=frozenset((
+    'DUMP_FAILED','XML_READ_FAILED','XML_INVALID','FIXTURE_NOT_VISIBLE',
+    'ACTION_NOT_VISIBLE','ACTION_AMBIGUOUS','CLEANUP_FAILED','TAP_FAILED',
+    'CONFIRMATION_TAPPED','BOUNDARY_CHANGED'))
+
+def _tap_confirmed_install_dialog(*, on_observation=None, authorize_tap=None)->bool:
+    # Only a fresh, bounded hierarchy can authorize an explicit installer tap.
+    def observed(category):
+        if on_observation is not None:
+            on_observation(category)
         return False
+
+    path='/sdcard/ox-rt02-window-'+str(os.getpid())+'-'+str(time.monotonic_ns())+'.xml'
     try:
-        root=ET.fromstring(p.stdout)
-    except ET.ParseError:
-        return False
+        try:
+            # Uncompressed hierarchy retains fixture identity and button nodes.
+            dump=command(['adb','-s',SERIAL,'shell','uiautomator','dump',path],
+                         timeout=18,allow_failure=True)
+        except Refused:
+            return observed('DUMP_FAILED')
+        if dump.returncode:
+            return observed('DUMP_FAILED')
+        try:
+            p=command(['adb','-s',SERIAL,'shell','cat',path],
+                      timeout=10,allow_failure=True)
+        except Refused:
+            return observed('XML_READ_FAILED')
+        if p.returncode or len(p.stdout)>450000:
+            return observed('XML_READ_FAILED')
+        if not p.stdout.lstrip().startswith(b'<?xml'):
+            return observed('XML_INVALID')
+        try:
+            root=ET.fromstring(p.stdout)
+        except ET.ParseError:
+            return observed('XML_INVALID')
+    finally:
+        # Never reuse a previous hierarchy after an unsuccessful dump.
+        try:
+            cleanup=command(['adb','-s',SERIAL,'shell','rm','-f',path],
+                            timeout=10,allow_failure=True)
+            need(cleanup.returncode==0,'installer hierarchy cleanup failed')
+        except Refused:
+            observed('CLEANUP_FAILED')
+            raise
+
     nodes=list(root.iter('node'))
-    # Validate actual system package installer screen and fixture identity.
-    if not any(NAME in (n.attrib.get('text','')+' '+n.attrib.get('content-desc',''))
-               for n in nodes):
-        return False
+    # Identity and action must belong to the same recognized system UI.
+    # A fixture label in another app is not authority to tap an installer.
+    fixture_packages={n.attrib.get('package') for n in nodes
+                      if n.attrib.get('package') in APPROVERS and
+                      NAME in (n.attrib.get('text','')+' '+n.attrib.get('content-desc',''))}
+    if not fixture_packages:
+        return observed('FIXTURE_NOT_VISIBLE')
     candidates=[]
     for n in nodes:
         a=n.attrib
         label=(a.get('text','')+' '+a.get('content-desc','')).strip()
-        if (a.get('package') in APPROVERS and a.get('enabled')=='true' and
+        if (a.get('package') in fixture_packages and a.get('enabled')=='true' and
             label in ('Install','Update','Install app','Update app')):
             m=re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',a.get('bounds',''))
             if m:
                 x1,y1,x2,y2=map(int,m.groups())
                 if x2>x1 and y2>y1:
                     candidates.append(((x1+x2)//2,(y1+y2)//2))
+    if not candidates:
+        return observed('ACTION_NOT_VISIBLE')
     if len(candidates)!=1:
-        return False
+        return observed('ACTION_AMBIGUOUS')
     x,y=candidates[0]
-    adb('shell','input','tap',str(x),str(y))
-    print('OX_R02_RT02_ANDROID_CONFIRMATION_TAPPED',flush=True)
-    return True
+    def tap_action():
+        try:
+            tap=command(['adb','-s',SERIAL,'shell','input','tap',str(x),str(y)],
+                        timeout=10,allow_failure=True)
+            need(tap.returncode==0,'installer approval tap outcome uncertain')
+        except Refused:
+            observed('TAP_FAILED')
+            raise  # A tap may have happened; never retry an uncertain mutation.
+        observed('CONFIRMATION_TAPPED')
+        print('OX_R02_RT02_ANDROID_CONFIRMATION_TAPPED',flush=True)
+        return True
+    # The controller can re-check its active generation just before mutation.
+    # Do not hold its state lock while dumping or reading the UI hierarchy.
+    if authorize_tap is not None:
+        if not authorize_tap(tap_action):
+            return observed('BOUNDARY_CHANGED')
+        return True
+    return tap_action()
 
 # Only allowlisted progress phases are emitted or retained; raw Flutter logs remain
 # local to the ephemeral runner and are deliberately excluded from artifacts.
@@ -348,10 +444,7 @@ def one_scenario(out:Path,inventory:dict,scenario:str)->dict:
                         last_progress=now
                     # This is only app-op eligibility, not Android approval.
                     if not installed_app:
-                        r=command(['adb','-s',SERIAL,'shell','pm','path',APP],allow_failure=True)
-                        if r.returncode==0 and r.stdout.strip().startswith(b'package:'):
-                            adb('shell','appops','set',APP,'REQUEST_INSTALL_PACKAGES','allow')
-                            installed_app=True
+                        installed_app=grant_runner_install_eligibility()
                     # CRITICAL: uiautomator.dump can disrupt Flutter startup. Do
                     # not probe Android UI during Gradle/test APK installation.
                     # Probe only after Dart has reached the real installer call.

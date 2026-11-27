@@ -2,6 +2,8 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:obtainium/components/app_bottom_sheet.dart';
 import 'package:obtainium/components/generated_form_renderer.dart';
+import 'package:obtainium/components/r10_regex_preview.dart';
+import 'package:obtainium/components/r10_settings_context.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/theme/app_form_field_styles.dart';
 import 'package:obtainium/widgets/app_toast.dart';
@@ -293,6 +295,13 @@ List<List<GeneratedFormItem>> attachRegexAssistToItems(
   );
   for (final List<GeneratedFormItem> row in items) {
     for (final GeneratedFormItem element in row) {
+      if (element.key == 'versionDetection' || element.key == 'versionStringSource') {
+        element.belowWidgets = [
+          ...element.belowWidgets,
+          R10ContextHint(element.key == 'versionDetection'
+              ? 'r10VersionDetectionHint' : 'r10VersionSourceHint'),
+        ];
+      }
       if (element is! GeneratedFormTextField) {
         continue;
       }
@@ -324,18 +333,6 @@ List<List<GeneratedFormItem>> attachRegexAssistToItems(
                   resolvedInitialRaw = liveRaw;
                 }
               }
-              String? initialDesired;
-              if (resolvedInitialRaw?.trim().isNotEmpty == true) {
-                try {
-                  initialDesired = extractVersion(
-                    currentValues['versionExtractionRegEx'] as String?,
-                    currentValues['matchGroupToUse'] as String?,
-                    resolvedInitialRaw!,
-                  );
-                } catch (_) {
-                  initialDesired = null;
-                }
-              }
               if (!context.mounted) {
                 return;
               }
@@ -343,9 +340,10 @@ List<List<GeneratedFormItem>> attachRegexAssistToItems(
                 context: context,
                 kind: RegexAssistKind.versionExtraction,
                 initialRaw: resolvedInitialRaw,
-                initialDesired: initialDesired,
                 rawLineSuggestions: versionRawLines,
                 filterFieldKey: null,
+                initialPattern: currentValues['versionExtractionRegEx']?.toString(),
+                initialMatchGroup: currentValues['matchGroupToUse']?.toString(),
                 patch: patch,
               );
             };
@@ -362,6 +360,8 @@ List<List<GeneratedFormItem>> attachRegexAssistToItems(
                 initialRaw: apkRawLines.isNotEmpty ? apkRawLines.first : null,
                 rawLineSuggestions: apkRawLines,
                 filterFieldKey: 'apkFilterRegEx',
+                initialPattern: currentValues['apkFilterRegEx']?.toString(),
+                initialInvert: currentValues['invertAPKFilter'] == true,
                 patch: patch,
               );
             };
@@ -380,6 +380,7 @@ List<List<GeneratedFormItem>> attachRegexAssistToItems(
                     : null,
                 rawLineSuggestions: titleRawLines,
                 filterFieldKey: 'filterReleaseTitlesByRegEx',
+                initialPattern: currentValues['filterReleaseTitlesByRegEx']?.toString(),
                 patch: patch,
               );
             };
@@ -393,11 +394,13 @@ List<List<GeneratedFormItem>> attachRegexAssistToItems(
               return showRegexAssistDialog(
                 context: context,
                 kind: RegexAssistKind.versionFilter,
+                // F-Droid stores its fetched version-name candidates in the
+                // shared rawReleaseTitlesFromSource snapshot.
                 initialRaw: titleRawLines.isNotEmpty
-                    ? titleRawLines.first
-                    : rawLatestVersionFromSource,
+                    ? titleRawLines.first : rawLatestVersionFromSource,
                 rawLineSuggestions: titleRawLines,
                 filterFieldKey: 'filterVersionsByRegEx',
+                initialPattern: currentValues['filterVersionsByRegEx']?.toString(),
                 patch: patch,
               );
             };
@@ -443,6 +446,9 @@ Future<void> showRegexAssistDialog({
   String? initialDesired,
   required List<String> rawLineSuggestions,
   required String? filterFieldKey,
+  String? initialPattern,
+  String? initialMatchGroup,
+  bool initialInvert = false,
   required FormValuesTextPatch patch,
 }) async {
   await showAppModalSheet<void>(
@@ -452,8 +458,12 @@ Future<void> showRegexAssistDialog({
         kind: kind,
         initialRaw: initialRaw,
         initialDesired: initialDesired,
-        rawLineSuggestions: rawLineSuggestions,
+        rawLineSuggestions: rawLineSuggestions
+            .where((line) => line.length <= 2048).take(40).toList(),
         filterFieldKey: filterFieldKey,
+        initialPattern: initialPattern,
+        initialMatchGroup: initialMatchGroup,
+        initialInvert: initialInvert,
         patch: patch,
       );
     },
@@ -467,6 +477,9 @@ class _RegexAssistSheetBody extends StatefulWidget {
     required this.initialDesired,
     required this.rawLineSuggestions,
     required this.filterFieldKey,
+    required this.initialPattern,
+    required this.initialMatchGroup,
+    required this.initialInvert,
     required this.patch,
   });
 
@@ -475,6 +488,9 @@ class _RegexAssistSheetBody extends StatefulWidget {
   final String? initialDesired;
   final List<String> rawLineSuggestions;
   final String? filterFieldKey;
+  final String? initialPattern;
+  final String? initialMatchGroup;
+  final bool initialInvert;
   final FormValuesTextPatch patch;
 
   @override
@@ -483,6 +499,9 @@ class _RegexAssistSheetBody extends StatefulWidget {
 
 class _RegexAssistSheetBodyState extends State<_RegexAssistSheetBody> {
   late final TextEditingController _rawController;
+  late final TextEditingController _patternController;
+  late final TextEditingController _groupController;
+  late bool _manualPattern;
   late List<String> _candidates;
   String? _selectedCandidate;
   late final TextEditingController _customController;
@@ -493,6 +512,9 @@ class _RegexAssistSheetBodyState extends State<_RegexAssistSheetBody> {
   void initState() {
     super.initState();
     _rawController = TextEditingController(text: widget.initialRaw ?? '');
+    _patternController = TextEditingController(text: widget.initialPattern ?? '');
+    _groupController = TextEditingController(text: widget.initialMatchGroup ?? '');
+    _manualPattern = _patternController.text.isNotEmpty;
     _customController = TextEditingController();
     _customFocusNode = FocusNode();
     _customFocusNode.addListener(_onCustomFocusChange);
@@ -529,7 +551,9 @@ class _RegexAssistSheetBodyState extends State<_RegexAssistSheetBody> {
   }
 
   void _rebuildCandidates() {
-    _candidates = candidateVersionStringsFromRaw(_rawController.text);
+    _candidates = _rawController.text.length <= 2048
+        ? candidateVersionStringsFromRaw(_rawController.text)
+        : <String>[];
     _selectedCandidate = _candidates.isNotEmpty ? _candidates.first : null;
     _customController.clear();
   }
@@ -548,6 +572,8 @@ class _RegexAssistSheetBodyState extends State<_RegexAssistSheetBody> {
     _customFocusNode.removeListener(_onCustomFocusChange);
     _customFocusNode.dispose();
     _rawController.dispose();
+    _patternController.dispose();
+    _groupController.dispose();
     _customController.dispose();
     super.dispose();
   }
@@ -603,57 +629,111 @@ class _RegexAssistSheetBodyState extends State<_RegexAssistSheetBody> {
     }
   }
 
-  void _applySelection() {
-    final String raw = _rawController.text.trim();
-    if (raw.isEmpty) {
-      showAppToast(
-        tr('versionRegexAssistNeedRaw'),
-        context: context,
-        type: ToastType.error,
-      );
-      return;
+  String get _desired => _customController.text.trim().isNotEmpty
+      ? _customController.text.trim()
+      : (_selectedCandidate ?? '').trim();
+
+  Map<String, String>? _effectivePatch() {
+    if (_manualPattern) {
+      return widget.kind == RegexAssistKind.versionExtraction
+          ? {
+              'versionExtractionRegEx': _patternController.text,
+              'matchGroupToUse': _groupController.text,
+            }
+          : widget.filterFieldKey == null
+          ? null
+          : {widget.filterFieldKey!: _patternController.text};
     }
-    final String desired = _customController.text.trim().isNotEmpty
-        ? _customController.text.trim()
-        : (_selectedCandidate ?? '').trim();
-    if (desired.isEmpty) {
-      showAppToast(
-        tr('versionRegexAssistPickOrType'),
-        context: context,
-        type: ToastType.error,
-      );
-      return;
-    }
+    final raw = _rawController.text.trim();
+    final desired = _desired;
+    if (raw.isEmpty || desired.isEmpty || raw.length > 2048 || desired.length > 2048) return null;
     if (widget.kind == RegexAssistKind.versionExtraction) {
-      final Map<String, String>? built = tryBuildRegexForExtractedVersion(
-        raw: raw,
-        desired: desired,
-      );
-      if (built == null) {
-        showAppToast(
-          tr('versionRegexAssistCouldNotBuild'),
-          context: context,
-          type: ToastType.error,
-        );
-        return;
-      }
-      widget.patch(built);
-    } else {
-      final String? pattern = tryBuildFilterRegExFromSelection(
-        raw: raw,
-        desired: desired,
-      );
-      if (pattern == null || widget.filterFieldKey == null) {
-        showAppToast(
-          tr('versionRegexAssistCouldNotBuild'),
-          context: context,
-          type: ToastType.error,
-        );
-        return;
-      }
-      widget.patch(<String, String>{widget.filterFieldKey!: pattern});
+      return tryBuildRegexForExtractedVersion(raw: raw, desired: desired);
     }
+    final pattern = tryBuildFilterRegExFromSelection(raw: raw, desired: desired);
+    return pattern == null || widget.filterFieldKey == null
+        ? null
+        : {widget.filterFieldKey!: pattern};
+  }
+
+  void _applySelection() {
+    final patch = _effectivePatch();
+    if (patch == null) {
+      showAppToast(
+        tr('versionRegexAssistCouldNotBuild'),
+        context: context,
+        type: ToastType.error,
+      );
+      return;
+    }
+    final pattern = patch[widget.filterFieldKey ?? 'versionExtractionRegEx']!;
+    if (pattern.length > 2048 || (patch['matchGroupToUse']?.length ?? 0) > 256) {
+      showAppToast(tr('r10RegexLimit'), context: context, type: ToastType.error);
+      return;
+    }
+    try {
+      RegExp(pattern);
+    } on FormatException {
+      showAppToast(tr('invalidRegEx'), context: context, type: ToastType.error);
+      return;
+    }
+    widget.patch(patch);
     Navigator.of(context).pop();
+  }
+
+  Widget _livePatternPreview() {
+    final patch = _effectivePatch();
+    final pattern = patch?[widget.filterFieldKey ?? 'versionExtractionRegEx'];
+    final samples = <String>{
+      if (_rawController.text.trim().isNotEmpty) _rawController.text,
+      ...widget.rawLineSuggestions,
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(tr('r10RegexManualPattern')),
+          value: _manualPattern,
+          onChanged: (value) => setState(() {
+            if (value) {
+              _patternController.text = pattern ?? '';
+              _groupController.text = patch?['matchGroupToUse'] ?? '';
+            }
+            _manualPattern = value;
+          }),
+        ),
+        if (_manualPattern) ...[
+          TextField(
+            key: const ValueKey('r10-regex-pattern'),
+            controller: _patternController,
+            decoration: InputDecoration(labelText: tr('r10RegexPattern')),
+            onChanged: (_) => setState(() {}),
+          ),
+          if (widget.kind == RegexAssistKind.versionExtraction)
+            TextField(
+              controller: _groupController,
+              decoration: InputDecoration(labelText: tr('r10RegexGroup')),
+              onChanged: (_) => setState(() {}),
+            ),
+          const R10ContextHint('r10RegexEmptyPattern'),
+        ] else if (pattern != null)
+          SelectableText(pattern),
+        const SizedBox(height: 8),
+        R10RegexPreview(
+          request: pattern == null ? null : R10RegexPreviewRequest(
+            pattern: pattern,
+            group: patch?['matchGroupToUse'] ?? '',
+            extraction: widget.kind == RegexAssistKind.versionExtraction,
+            apkNames: widget.kind == RegexAssistKind.apkFilter,
+            invert: widget.initialInvert,
+            samples: samples,
+          ),
+          hasFetchedSamples: widget.rawLineSuggestions.isNotEmpty ||
+              widget.initialRaw?.isNotEmpty == true,
+        ),
+      ],
+    );
   }
 
   @override
@@ -799,6 +879,7 @@ class _RegexAssistSheetBodyState extends State<_RegexAssistSheetBody> {
             });
           },
         ),
+        _livePatternPreview(),
         const SizedBox(height: 16),
       ],
       footer: Row(

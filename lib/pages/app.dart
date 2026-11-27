@@ -12,6 +12,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:obtainium/components/r10_settings_context.dart';
+import 'package:obtainium/components/r10_accessibility.dart';
+import 'package:obtainium/services/r11_external_requests.dart';
 import 'package:obtainium/app_sources/apkmirror.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/components/app_bottom_sheet.dart';
@@ -34,7 +37,7 @@ import 'package:obtainium/pages/apps.dart';
 import 'package:obtainium/pages/settings.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/widgets/r02f_p03_cancel_button.dart';
-import 'package:obtainium/widgets/r05_install_activity_page.dart';
+import 'package:obtainium/widgets/r07_activity_center_page.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -908,6 +911,8 @@ class AppPage extends StatefulWidget {
     this.openInEditMode = false,
     this.appsListHeroFolderId,
     this.isEmbedded = false,
+    this.suppressAutoCheck = false,
+    this.storeLookup = checkAndCacheStoresForListing,
   });
 
   final String appId;
@@ -920,6 +925,12 @@ class AppPage extends StatefulWidget {
   final bool openInEditMode;
 
   final bool isEmbedded;
+  final bool suppressAutoCheck;
+
+  /// The existing store service is the default for every details-page scan.
+  /// An explicit dependency allows controlled asynchronous lookup completion
+  /// without replacing the application's secure HTTP transport.
+  final Future<Map<String, String>?> Function(AppsProvider, String) storeLookup;
 
   @override
   State<AppPage> createState() => _AppPageState();
@@ -1806,20 +1817,16 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              appPageCardSectionHeaderLabel(
+              Flexible(child: appPageCardSectionHeaderLabel(
                 ctx,
                 sectionTitle,
                 color: sectionTitleColor,
-              ),
+              )),
               const SizedBox(width: 12),
               Expanded(
                 child: Align(
                   alignment: Alignment.centerRight,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerRight,
-                    child: sectionHeaderTrailing,
-                  ),
+                  child: sectionHeaderTrailing,
                 ),
               ),
             ],
@@ -2557,7 +2564,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
   /// settled before a failure.
   Future<void> _maybeCheckAndCacheAllStores(String listingKey) async {
     if (!mounted) return;
-    final Map<String, String>? entry = await checkAndCacheStoresForListing(
+    final Map<String, String>? entry = await widget.storeLookup(
       Provider.of<AppsProvider>(context, listen: false),
       listingKey,
     );
@@ -3246,7 +3253,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
     }
     final ThemeData pageThemeForPage = _cachedPageTheme!;
 
-    if (!_scheduledDetailPageRefresh &&
+    if (!widget.suppressAutoCheck && !_scheduledDetailPageRefresh &&
         app != null &&
         settingsProvider.checkUpdateOnDetailPage &&
         app.app.additionalSettings['onDemandOnly'] != true &&
@@ -3576,10 +3583,8 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
       final RoundedRectangleBorder expressiveShape = RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(expressiveRadius),
       );
-      const Size expressiveMaximumSize = Size(double.infinity, 52);
       final ButtonStyle expressiveFilled = FilledButton.styleFrom(
         minimumSize: expressiveMinimumSize,
-        maximumSize: expressiveMaximumSize,
         padding: expressivePadding,
         shape: expressiveShape,
         elevation: 1,
@@ -3845,155 +3850,87 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
       }
 
       if (hasResetStatus) {
-        const double dualButtonBarHeight = 52;
         final bool markUpdatedActionBlocked =
             updating || app.downloadProgress != null;
         return wrapPrimaryBarWithSkip(
-          SizedBox(
-            height: dualButtonBarHeight,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: FilledButton(
+          R10PrimaryActions(
+            first: FilledButton(
                     style: expressiveFilled,
                     onPressed: installActionBlocked
                         ? null
                         : runInstallOrMarkUpdated,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.center,
-                      child: Text(
+                    child: Text(
                         installLabel,
-                        maxLines: 1,
                         textAlign: TextAlign.center,
                       ),
-                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton(
+            second: FilledButton(
                     style: expressiveFilled,
                     onPressed: markUpdatedActionBlocked
                         ? null
                         : showMarkUpdatedDialog,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.center,
-                      child: Text(
+                    child: Text(
                         tr('markUpdated'),
-                        maxLines: 1,
                         textAlign: TextAlign.center,
                       ),
-                    ),
                   ),
-                ),
-              ],
-            ),
           ),
         );
       }
 
       if (trackOnlyHasVersionUpdate) {
-        // Outer Row is in a Column with unbounded max height. A nested Row of
-        // two horizontal Expanded children + stretch can get infinite cross-axis
-        // extent and break layout (blank page). Fixed height bounds the inner Row.
-        const double dualButtonBarHeight = 52;
+        // Adaptive actions grow vertically when the available width or text scale requires it.
         return wrapPrimaryBarWithSkip(
-          SizedBox(
-            height: dualButtonBarHeight,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: FilledButton(
+          R10PrimaryActions(
+            first: FilledButton(
                     style: expressiveFilled,
                     onPressed: installActionBlocked || skipActive
                         ? null
                         : openTrackOnlyReleasePage,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.center,
-                      child: Text(
+                    child: Text(
                         updateLabel,
-                        maxLines: 1,
                         textAlign: TextAlign.center,
                       ),
-                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton(
+            second: FilledButton(
                     style: expressiveFilled,
                     onPressed: installActionBlocked
                         ? null
                         : runInstallOrMarkUpdated,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.center,
-                      child: Text(
+                    child: Text(
                         tr('markUpdated'),
-                        maxLines: 1,
                         textAlign: TextAlign.center,
                       ),
-                    ),
                   ),
-                ),
-              ],
-            ),
           ),
         );
       }
 
       if (nonStandardVersionBehind && !uncertainOnly) {
-        const double dualButtonBarHeight = 52;
         final bool markUpdatedActionBlocked =
             updating || app.downloadProgress != null;
         return wrapPrimaryBarWithSkip(
-          SizedBox(
-            height: dualButtonBarHeight,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: FilledButton(
+          R10PrimaryActions(
+            first: FilledButton(
                     style: expressiveFilled,
                     onPressed: installActionBlocked || skipActive
                         ? null
                         : runInstallOrMarkUpdated,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.center,
-                      child: Text(
+                    child: Text(
                         updateLabel,
-                        maxLines: 1,
                         textAlign: TextAlign.center,
                       ),
-                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton(
+            second: FilledButton(
                     style: expressiveFilled,
                     onPressed: markUpdatedActionBlocked
                         ? null
                         : showMarkUpdatedDialog,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.center,
-                      child: Text(
+                    child: Text(
                         tr('markUpdated'),
-                        maxLines: 1,
                         textAlign: TextAlign.center,
                       ),
-                    ),
                   ),
-                ),
-              ],
-            ),
           ),
         );
       }
@@ -4005,15 +3942,10 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
             onPressed: installActionBlocked || skipActive
                 ? null
                 : runInstallOrMarkUpdated,
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.center,
-              child: Text(
+            child: Text(
                 updateLabel,
-                maxLines: 1,
                 textAlign: TextAlign.center,
               ),
-            ),
           ),
         );
       }
@@ -4022,50 +3954,28 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
       // user's own mark, so nothing notices a by-hand downgrade unless they
       // record it. With a readable package the device version is picked up.
       if (offersDowngrade && trackOnly && app.installedInfo == null) {
-        const double dualButtonBarHeight = 52;
         return wrapPrimaryBarWithSkip(
-          SizedBox(
-            height: dualButtonBarHeight,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: FilledButton(
+          R10PrimaryActions(
+            first: FilledButton(
                     style: expressiveFilled,
                     onPressed: installActionBlocked
                         ? null
                         : openTrackOnlyReleasePage,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.center,
-                      child: Text(
+                    child: Text(
                         downgradeLabel,
-                        maxLines: 1,
                         textAlign: TextAlign.center,
                       ),
-                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton(
+            second: FilledButton(
                     style: expressiveFilled,
                     onPressed: installActionBlocked
                         ? null
                         : markTrackOnlyDowngradedByHand,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.center,
-                      child: Text(
+                    child: Text(
                         tr('markDowngraded'),
-                        maxLines: 1,
                         textAlign: TextAlign.center,
                       ),
-                    ),
                   ),
-                ),
-              ],
-            ),
           ),
         );
       }
@@ -4079,19 +3989,14 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
                   ? openTrackOnlyReleasePage
                   : confirmAndDowngrade)
             : null,
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.center,
-          child: Text(
+        child: Text(
             installedVersionIsNull
                 ? (!trackOnly ? installLabel : markInstalledLabel)
                 : offersDowngrade
                 ? downgradeLabel
                 : (!trackOnly ? updateLabel : markUpdatedLabel),
-            maxLines: 1,
             textAlign: TextAlign.center,
           ),
-        ),
       );
       // A tap on the disabled button says why, as Settings' switches do; a
       // tooltip only answered a long-press, so a tap looked like nothing.
@@ -4410,11 +4315,10 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
 
       final Widget lastCheckedHeader = Text(
         tr('lastUpdateCheckX', args: [lastUpdateCheckValue]),
-        maxLines: 1,
-        softWrap: false,
+        softWrap: true,
         textAlign: TextAlign.right,
         style: pageTheme.textTheme.labelSmall?.copyWith(
-          color: pageTheme.colorScheme.onSurfaceVariant.withAlpha(130),
+          color: pageTheme.colorScheme.onSurfaceVariant,
           fontSize: 11,
         ),
       );
@@ -4572,7 +4476,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
             settingsProvider,
           );
       final String? githubAttestationStatus =
-          securityApp?.latestAttestationStatus;
+          githubAttestationStatusFromJsonValue(securityApp?.latestAttestationStatus);
       final bool githubAttestationBlocked =
           securityApp != null &&
           securitySource != null &&
@@ -4581,9 +4485,9 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
             securitySource,
             settingsProvider,
           );
-      final bool githubAttestationVerified =
+      final bool githubAttestationPresent =
           githubAttestationExpected &&
-          githubAttestationStatus == githubAttestationStatusVerified;
+          githubAttestationStatus == githubAttestationStatusPresent;
       final bool githubAttestationUnsupported =
           githubAttestationExpected &&
           githubAttestationStatus == githubAttestationStatusUnsupported;
@@ -4592,7 +4496,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
           (githubAttestationStatus == githubAttestationStatusError ||
               githubAttestationStatus == null);
       final bool githubAttestationHasStatus =
-          githubAttestationVerified ||
+          githubAttestationPresent ||
           githubAttestationUnsupported ||
           githubAttestationCantCheck;
       final String? malwareScanStatus = securityApp?.latestMalwareScanStatus;
@@ -4687,13 +4591,13 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
                   icon: Icons.verified_outlined,
                   label: tr('reproducibleBuild'),
                 ),
-              if (githubAttestationVerified)
+              if (githubAttestationPresent)
                 statusBadge(
-                  backgroundColor: Colors.blue.withValues(alpha: 0.15),
-                  borderColor: Colors.blue.withValues(alpha: 0.5),
-                  contentColor: Colors.blue,
-                  icon: Icons.shield_outlined,
-                  label: tr('verifiedBuild'),
+                  backgroundColor: Colors.orange.withValues(alpha: 0.16),
+                  borderColor: Colors.orange.withValues(alpha: 0.55),
+                  contentColor: Colors.orange.shade800,
+                  icon: Icons.warning_amber_rounded,
+                  label: tr('gap01AttestationPresent'),
                 ),
               if (reproducibleBuildNotReproducible ||
                   reproducibleBuildNoData ||
@@ -4900,16 +4804,10 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
                         ),
                       ),
                       const SizedBox(width: 4),
-                      Tooltip(
-                        message: tr('copyToClipboard'),
-                        child: SizedBox.square(
-                          dimension: 18,
-                          child: InkResponse(
-                            onTap: () => unawaited(copyCertificateHash(hash)),
-                            radius: 10,
-                            child: const Icon(Icons.copy_rounded, size: 14),
-                          ),
-                        ),
+                      IconButton(
+                        tooltip: tr('r10CopyCertificate'),
+                        onPressed: () => unawaited(copyCertificateHash(hash)),
+                        icon: const Icon(Icons.copy_rounded, size: 18),
                       ),
                     ],
                   );
@@ -4972,6 +4870,10 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
             },
           ),
         );
+      }
+
+      if (securityCertificateHashes.isNotEmpty || app?.installedInfo != null) {
+        securityCardChildren.add(const R10ContextHint('r10CertificateHint'));
       }
 
       final versionCard = _materialAppPageSectionCard(
@@ -5139,10 +5041,10 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
                   ),
                   Icon(typeIcon, size: 14, color: typeColor),
                   const SizedBox(width: 4),
-                  Text(
+                  Expanded(child: Text(
                     typeLabel,
                     style: Theme.of(pageThemeContext).textTheme.bodySmall,
-                  ),
+                  )),
                 ],
               ),
             );
@@ -5401,17 +5303,39 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
                       icon: const Icon(Icons.open_in_new_rounded),
                       label: Text(tr('openApp')),
                     ),
+                  OutlinedButton.icon(
+                    key: const ValueKey('r10-open-source-homepage'),
+                    onPressed: r10SourceHomepage(app.app.url) == null ? null : () async {
+                      if (!await r10OpenSourceHomepage(app.app.url) && mounted) {
+                        _showPageError(ObtainiumError(tr('r10SourceOpenFailed')));
+                      }
+                    },
+                    icon: const Icon(Icons.language_rounded),
+                    label: Text(tr('swipeAction_openSource')),
+                  ),
+                  if (app.app.id == app.installedInfo?.packageName)
+                    OutlinedButton.icon(
+                      key: const ValueKey('r11-app-manager'),
+                      onPressed: () async {
+                        if (!await r11OpenAppManager(app.app.id) && mounted) {
+                          _showPageError(ObtainiumError(tr('appManagerNotInstalledSnackbar')));
+                        }
+                      },
+                      icon: const Icon(Icons.security),
+                      label: Text(tr('r11AppManagerInspect')),
+                    ),
                   TextButton.icon(
                     key: const ValueKey('r06-install-history'),
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
-                        builder: (_) => R05InstallActivityPage(
+                        builder: (_) => R07ActivityCenterPage(
                           packageId: app.app.id,
+                          listingKey: app.app.listingKey,
                         ),
                       ),
                     ),
                     icon: const Icon(Icons.history_rounded),
-                    label: const Text('Install history'),
+                    label: Text(tr('r10ActivityHistory')),
                   ),
                 ],
               ),
@@ -5559,8 +5483,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
       final bool isLandscapeEmbedded =
           widget.isEmbedded &&
           MediaQuery.orientationOf(themeContext) == Orientation.landscape;
-      String? actionBarTooltip(String message) =>
-          widget.isEmbedded ? null : message;
+      String actionBarTooltip(String message) => message;
       Widget actionBarContent = Padding(
         padding: isLandscapeEmbedded
             ? const EdgeInsets.fromLTRB(16, 6, 16, 6)
@@ -5701,11 +5624,10 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
                     icon: const Icon(Icons.delete_outline),
                   ),
                 );
-                return Row(
-                  children: [
-                    for (final Widget actionWidget in bottomBarActions)
-                      Expanded(child: Center(child: actionWidget)),
-                  ],
+                return Wrap(
+                  alignment: WrapAlignment.spaceEvenly,
+                  runSpacing: 4,
+                  children: bottomBarActions,
                 );
               },
             ),
@@ -5716,8 +5638,8 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
         actionBarContent = IconButtonTheme(
           data: IconButtonThemeData(
             style: ButtonStyle(
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              minimumSize: WidgetStateProperty.all(const Size(36, 36)),
+              tapTargetSize: MaterialTapTargetSize.padded,
+              minimumSize: WidgetStateProperty.all(const Size(48, 48)),
               padding: WidgetStateProperty.all(const EdgeInsets.all(4)),
             ),
           ),

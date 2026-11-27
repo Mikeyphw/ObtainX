@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:archive/archive.dart' as archive;
@@ -45,6 +46,9 @@ void main() {
     );
     expect(Directory(target()).existsSync(), isFalse);
     expect(File('${workspace.path}/escape.apk').existsSync(), isFalse);
+    expect(workspace.listSync().where(
+      (file) => file.path.contains('.obtainx-extract-'),
+    ), isEmpty, reason: 'Temporary extraction tree must be removed');
   }
 
   test('ZIP extraction publishes expected APK files only when complete', () async {
@@ -161,6 +165,61 @@ void main() {
       limits: const ArchiveExtractionLimits(maxEntryBytes: 1024));
   });
 
+  test('ZIP metadata budget is enforced before member decoding', () async {
+    await expectZipRejected('valid.zip', limits:
+      const ArchiveExtractionLimits(maxMetadataBytes: 10));
+  });
+
+  test('BZIP2 refuses missing end marker, trailing bytes and invalid block size', () async {
+    for (final name in ['truncated.tar.bz2', 'trailing.tar.bz2', 'invalid_block.tar.bz2']) {
+      await expectTarRejected(name);
+    }
+  });
+
+  test('XZ independently compressed CRC32, CRC64 and SHA256 streams', () async {
+    final expected = List<int>.generate(196608 + 37, (i) => (i * 31) % 251);
+    for (final check in ['crc32', 'crc64', 'sha256']) {
+      final destination = '${workspace.path}/extracted-$check';
+      await extractTarballOffIsolate(
+        fixture('hf02_large_$check.tar.xz'),
+        destination,
+      );
+      expect(File('$destination/nested/app.apk').readAsBytesSync(), expected);
+    }
+    expect(workspace.listSync().where(
+      (file) => file.path.contains('.obtainx-extract-'),
+    ), isEmpty);
+  });
+
+  test('XZ rejects legacy reversed index VLIs without publishing', () async {
+    await expectTarRejected('hf02_legacy_index.tar.xz');
+  });
+
+  test('XZ verifies block checks independently of valid stream metadata', () async {
+    await expectTarRejected('hf02_bad_block_check.tar.xz');
+  });
+
+  test('XZ refuses expanded bytes above budget without publishing', () async {
+    await expectTarRejected('hf02_large_crc64.tar.xz', limits:
+        const ArchiveExtractionLimits(maxEntryBytes: 65536,
+            maxExpandedBytes: 65536));
+  });
+
+  test('XZ oversized dictionary refuses even a tiny valid archive', () async {
+    await expectTarRejected('large_dictionary.tar.xz');
+  });
+
+  test('orphan stage recovery is confined to exact marked ownership', () async {
+    final orphan = Directory('${workspace.path}/.obtainx-extract-2147483646-dead')..createSync();
+    File('${orphan.path}/owner.lock').writeAsStringSync('obtainx-extraction-v2:2147483646');
+    final foreign = Directory('${workspace.path}/.obtainx-extract-2147483645-foreign')..createSync();
+    File('${foreign.path}/owner.lock').writeAsStringSync('not-owned');
+    await extractZipOffIsolate(fixture('valid.zip'), target());
+    expect(orphan.existsSync(), isFalse);
+    expect(foreign.existsSync(), isTrue);
+    expect(Directory(target()).existsSync(), isTrue);
+  });
+
   test('existing extraction destination is never overwritten', () async {
     Directory(target()).createSync();
     final marker = File('${target()}/marker.txt')..writeAsStringSync('keep');
@@ -169,6 +228,39 @@ void main() {
       throwsA(isA<FormatException>()),
     );
     expect(marker.readAsStringSync(), 'keep');
+  });
+
+  test('deadline refusal never publishes or leaves private staging', () async {
+    await expectLater(
+      extractZipOffIsolate(fixture('valid.zip'), target(),
+        limits: const ArchiveExtractionLimits(
+          maxWallTime: Duration(microseconds: 1))),
+      throwsA(isA<TimeoutException>()),
+    );
+    expect(Directory(target()).existsSync(), isFalse);
+    expect(workspace.listSync(), isEmpty);
+  });
+
+  test('cancellation at publication boundary refuses completed staging', () async {
+    var checks = 0;
+    await expectLater(
+      extractZipOffIsolate(fixture('valid.zip'), target(),
+        checkCancellation: () {
+          if (++checks > 1) throw StateError('cancelled');
+        }),
+      throwsA(isA<StateError>()),
+    );
+    expect(Directory(target()).existsSync(), isFalse);
+    expect(workspace.listSync(), isEmpty);
+  });
+
+  test('TAR cancellation before staging leaves destination untouched', () async {
+    await expectLater(
+      extractTarballOffIsolate(fixture('valid.tar.gz'), target(),
+        checkCancellation: () => throw StateError('cancelled')),
+      throwsA(isA<StateError>()),
+    );
+    expect(workspace.listSync(), isEmpty);
   });
 
   test('invalid limits are rejected before writing', () async {

@@ -4,11 +4,15 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, reopened, synchronize, labeled, unlabeled]
+    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review, converted_to_draft]
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
+
+env:
+  OX_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 concurrency:
   group: obtainx-r00-contract-${{ github.workflow }}-${{ github.ref }}
@@ -21,8 +25,33 @@ jobs:
       - name: Checkout exact commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
+      - name: Verify checked-out exact source
+        run: test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
+      - name: Resolve exact overlay scope
+        id: scope
+        shell: bash
+        env:
+          OX_SCOPE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
+          python3 -B scripts/ci/obtainx_ci_policy.py plan --head "$OX_EXPECTED_SHA" --github-output "$GITHUB_OUTPUT"
+      - name: OPT07 plan SHA256 ${{ steps.scope.outputs.plan_digest }}
+        env:
+          OX_PLAN_DIGEST: ${{ steps.scope.outputs.plan_digest }}
+        shell: bash
+        run: test "${#OX_PLAN_DIGEST}" -eq 64 && [[ "$OX_PLAN_DIGEST" =~ ^[a-f0-9]{64}$ ]]
+      - name: Ensure hosted YAML parser dependency
+        run: |
+          if ! python3 -c 'import yaml'; then
+            sudo apt-get update
+            sudo apt-get install -y python3-yaml
+          fi
+      - name: Validate required workflow structure
+        run: python3 -B scripts/ci/r07_workflow_contract.py --check
       - name: Run bootstrap regression tests
         run: python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
       - name: Enforce R00 source/security contracts
@@ -59,6 +88,12 @@ jobs:
         run: python3 -B scripts/ci/r05_contract.py --check
       - name: Enforce R06 details, package-evidence and stacked source contracts
         run: python3 -B scripts/ci/r06_contract.py --check
+      - name: R07 Activity Center source and negative contracts
+        run: python3 -B scripts/ci/r07_contract.py --check
+      - name: R08 source reliability contracts
+        run: python3 -B scripts/ci/r08_contract.py --check
+      - name: R09 discovery and artifact selection contracts
+        run: python3 -B scripts/ci/r09_contract.py --check
       - name: Enforce original R03 resumable download and persistence contracts
         run: python3 -B scripts/ci/r03_contract.py --check
       - name: Enforce R04 GitHub Actions exact-identity and source contract
@@ -80,9 +115,9 @@ jobs:
       - name: Enforce bounded CI optimization and dev-only qualification guard
         run: python3 -B scripts/ci/obtainx_ci_optimization_contract.py --check
       - name: Development-only cannot qualify (same runner)
-        if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:development-only') }}
+        if: steps.scope.outputs.mode == 'scoped'
         shell: bash
         run: |
-          echo 'OX_CI_DEVELOPMENT_ONLY_NOT_QUALIFIED: remove ci:development-only to force the full Android/Flutter matrix' >&2
-          echo 'Development-only mode. All Android runtime and full Flutter gates are NOT QUALIFIED.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'OX_CI_DEVELOPMENT_ONLY_NOT_QUALIFIED: ready PR or ci:full-qualification required for full acceptance' >&2
+          echo 'Scoped development mode. Selected tests may pass; FULL QUALIFICATION IS NOT ESTABLISHED.' >> "$GITHUB_STEP_SUMMARY"
           exit 1

@@ -4,6 +4,7 @@
 library;
 
 import 'dart:io';
+import 'package:obtainium/http/origin_redirect_policy.dart';
 
 class R04ActionsRedirectFailure implements Exception {
   const R04ActionsRedirectFailure(this.reason);
@@ -54,13 +55,8 @@ void r04ValidateArtifactRedirect(Uri from, Uri destination) {
 /// A private repository PAT and any source-config headers MUST NOT reach the
 /// short-lived signed blob URL, even when an HTTP client follows a 302.
 Map<String, String> r04ArtifactStorageHeaders(Map<String, String>? original) {
-  final safe = <String, String>{HttpHeaders.acceptHeader: 'application/octet-stream'};
-  for (final entry in (original ?? const <String, String>{}).entries) {
-    final key = entry.key.toLowerCase();
-    if (key == HttpHeaders.rangeHeader || key == 'if-range' ||
-        key == HttpHeaders.userAgentHeader) {
-      safe[key] = entry.value;
-    }
-  }
-  return safe;
+  return {
+    HttpHeaders.acceptHeader: 'application/octet-stream',
+    ...crossOriginDownloadHeaders(original),
+  };
 }

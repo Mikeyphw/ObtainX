@@ -81,6 +81,8 @@ class SingleSession:
         self.runner_probe_skipped = 0
         self.launches = 0
         self.last_progress = 0.0
+        self.approval_probe_counts = {}
+        self.last_approval_probe = None
 
     def need(self, condition, why):
         self.H.need(condition, why)
@@ -106,7 +108,7 @@ class SingleSession:
             self.need(self.failure is None, 'previous control failure')
             self.need(route in ('/rt02c/prepare', '/rt02c/call', '/rt02c/finish'),
                       'unapproved protocol operation')
-            self.need(set(data).issubset({'case', 'result'}) and
+            self.need(set(data).issubset({'case', 'result', 'owned_session_id'}) and
                       isinstance(data.get('case'), str), 'invalid scenario request')
             case = data['case']
             self.need(self.next_index < len(CASES) and
@@ -122,19 +124,17 @@ class SingleSession:
                 self.base.adb('install', '-t', str(self.fixtures / 'base_v1.apk'),
                               timeout=180)
                 self.H.baseline_v1(self.fixtures)
-                runner = self.base.command(['adb', '-s', self.base.SERIAL,
-                                            'shell', 'pm', 'path', self.base.APP],
-                                           allow_failure=True)
-                self.need(runner.returncode == 0 and
-                          runner.stdout.strip().startswith(b'package:'),
-                          'Flutter runner APK not installed at start boundary')
-                if not self.app_installed:
-                    self.base.adb('shell', 'appops', 'set', self.base.APP,
-                                  'REQUEST_INSTALL_PACKAGES', 'allow')
-                    self.app_installed = True
+                # Dart is already at the authenticated prepare boundary;
+                # unlike bootstrap polling, missing eligibility here refuses
+                # the case before it can reach the real installer.
+                self.app_installed = self.base.grant_runner_install_eligibility()
+                self.need(self.app_installed,
+                          'Flutter runner APK not eligible at start boundary')
                 self.active = case
                 self.called = False
                 self.taps = 0
+                self.approval_probe_counts = {}
+                self.last_approval_probe = None
                 self.call_at = None
                 self.case_started_at = time.monotonic()
                 self.phase = 'DART_TEST_STARTED'
@@ -152,14 +152,20 @@ class SingleSession:
                 self.call_at = time.monotonic()
                 self.phase = 'STOCK_INSTALLER_CALL'
                 return {'authorized': True}
-            self.need(route == '/rt02c/finish' and set(data) == {'case', 'result'},
+            finish_fields = {'case', 'result', 'owned_session_id'} if case in POSITIVE else {'case', 'result'}
+            self.need(route == '/rt02c/finish' and set(data) == finish_fields,
                       'invalid scenario completion request')
             expected = 'installed' if case in POSITIVE else 'refused'
             self.need(data['result'] == expected, 'unexpected scenario disposition')
             if case in POSITIVE:
                 self.need(self.called, 'positive scenario never called stock installer')
+                self.need(self.taps == 1, 'owned foreground install requires explicit Android approval')
+                session_id = data['owned_session_id']
+                self.need(type(session_id) is int and 0 < session_id <= 2147483647 and
+                          all(item.get('owned_session_id') != session_id for item in self.receipt['cases']),
+                          'missing, invalid or reused owned Android session identity')
                 proof = self.base.installed_state(2, True, self.fixtures)
-                proof.update(installed_signed_members_verified=True)
+                proof.update(installed_signed_members_verified=True, owned_session_id=session_id)
                 self.phase = 'ANDROID_V2_SPLIT_VERIFIED'
             else:
                 self.need(not self.called and self.taps == 0,
@@ -189,6 +195,88 @@ class SingleSession:
             self.call_at = None
             return {'verified': True, 'next_index': self.next_index}
 
+    def record_approval_probe(self, category):
+        self.need(category in self.base.APPROVAL_OBSERVATIONS,
+                  'invalid bounded approval diagnostic')
+        self.approval_probe_counts[category] = self.approval_probe_counts.get(category, 0) + 1
+        if category != self.last_approval_probe:
+            print('OX_R02_RT02C_APPROVAL_PROBE case=' + str(self.active) +
+                  ' result=' + category, flush=True)
+            self.last_approval_probe = category
+
+    def probe_approval(self, case, index):
+        # A slow hierarchy dump must not block /finish or /prepare. Re-check
+        # the exact active boundary before sending any input event; a late
+        # snapshot from a completed case is never authority for a later case.
+        def current():
+            return (self.active == case and self.next_index == index and
+                    self.called and self.taps == 0 and self.failure is None)
+
+        def observation(category):
+            with self.lock:
+                if current():
+                    self.record_approval_probe(category)
+
+        def authorize_tap(tap_action):
+            with self.lock:
+                if not current():
+                    return False
+                # Only the final, bounded input mutation is serialized with
+                # the transition. A failed/uncertain tap aborts the session.
+                if tap_action():
+                    self.taps = 1
+                    return True
+                return False
+
+        with self.lock:
+            if not current():
+                return False
+        return self.base._tap_confirmed_install_dialog(
+            on_observation=observation, authorize_tap=authorize_tap)
+
+    def failure_context(self, text):
+        (_, active, phase, _, taps, _, idx, _, _) = self.snapshot()
+        case = active or (CASES[idx] if idx < len(CASES) else CASES[-1])
+        if active is None and idx == 0:
+            phase = self.H.stage(self.flutter_log)
+        return case, phase, taps, self.H.flutter_failure(text, phase=phase, approvals=taps)
+
+    def record_failure(self, returncode):
+        # Capture before execute() removes the disposable package. Observations
+        # are not acceptance and never authorize replay or a success receipt.
+        text = self.flutter_log.read_text('utf8', 'replace')
+        case, phase, taps, category = self.failure_context(text)
+        details = {'case':case, 'phase':phase, 'flutter_error_category':category,
+                   'flutter_returncode_after_stop':returncode,
+                   'android_confirmations':taps,
+                   'approval_probe_counts':dict(self.approval_probe_counts),
+                   'last_approval_probe':self.last_approval_probe,
+                   'package_state_observation':'NOT_CHECKED',
+                   'private_log_sha256':self.H.sha(self.flutter_log),
+                   'raw_device_logs_uploaded':False}
+        details['native_session_observation'] = self.H.native_session_observation(text)
+        details['dart_diagnostic'] = self.H.dart_diagnostic(text, case)
+        self.receipt['status'] = 'FAILED'
+        self.receipt['failure_details'] = details
+        self.rp.write_text(json.dumps(self.receipt, sort_keys=True, indent=2) + '\n')
+        # Persist failure evidence before ADB. A failed observation cannot erase
+        # the primary checkpoint/exit or become a successful install receipt.
+        if phase in ('DART_TEST_STARTED', 'STOCK_INSTALLER_CALL', 'STOCK_INSTALLER_RETURNED',
+                     'ANDROID_V2_SPLIT_VERIFIED'):
+            state = 'UNKNOWN'
+            try:
+                self.base.installed_state(2, True, self.fixtures)
+                state = 'V2_SIGNED_BASE_AND_SPLIT_VERIFIED'
+            except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired):
+                try:
+                    self.H.baseline_v1(self.fixtures)
+                    state = 'V1_SIGNED_BASE_VERIFIED'
+                except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired):
+                    pass
+            details['package_state_observation'] = state
+            self.rp.write_text(json.dumps(self.receipt, sort_keys=True, indent=2) + '\n')
+        print('OX_R02_RT02C_FAILURE_DETAILS ' + json.dumps(details, sort_keys=True), flush=True)
+
     def run(self):
         self.need(self.launches == 0, 'single Flutter launch enforced')
         self.launches = 1
@@ -197,12 +285,14 @@ class SingleSession:
                 '--reporter', 'expanded',
                 '--dart-define=OX_R02C_CONTROL_TOKEN=' + self.token,
                 '--dart-define=OX_R02C_BASE_SHA=' + self.inv['signed_base_sha256'],
-                '--dart-define=OX_R02C_SPLIT_SHA=' + self.inv['signed_split_sha256']]
+                '--dart-define=OX_R02C_SPLIT_SHA=' + self.inv['signed_split_sha256'],
+                '--dart-define=OX_R02C_V1_SHA=' + self.H.sha(self.fixtures / 'base_v1.apk')]
         started = time.monotonic()
         watchdog = RT02CWatchdog(started)  # Bounded, phase-aware real runtime.
         with self.flutter_log.open('wb') as target:
             p = subprocess.Popen(args, stdin=subprocess.DEVNULL,
                                  stdout=target, stderr=subprocess.STDOUT)
+            failed = True
             try:
                 while p.poll() is None:
                     (now, active, phase, called, taps, call_at, idx,
@@ -236,23 +326,13 @@ class SingleSession:
                         if should_probe_runner(now, self.runner_probe_last, runner_stage):
                             self.runner_probe_last = now
                             self.runner_probe_count += 1
-                            probe = self.base.command(['adb', '-s', self.base.SERIAL,
-                                                       'shell', 'pm', 'path', self.base.APP],
-                                                      allow_failure=True)
-                            if (probe.returncode == 0 and
-                                    probe.stdout.strip().startswith(b'package:')):
-                                self.base.adb('shell', 'appops', 'set', self.base.APP,
-                                              'REQUEST_INSTALL_PACKAGES', 'allow')
-                                self.app_installed = True
+                            self.app_installed = self.base.grant_runner_install_eligibility()
                         else:
                             self.runner_probe_skipped += 1
                     # Never interfere with startup/Gradle. Never tap unless Dart
                     # explicitly reached StockInstaller for the current case.
                     if self.app_installed and active and called and taps == 0:
-                        with self.lock:
-                            if self.active == active and self.called and self.taps == 0:
-                                if self.base._tap_confirmed_install_dialog():
-                                    self.taps = 1
+                        self.probe_approval(active, idx)
                     if now - self.last_progress >= 25:
                         current = active or (CASES[idx] if idx < len(CASES) else CASES[-1])
                         current_phase = phase if active else self.H.stage(self.flutter_log)
@@ -264,10 +344,10 @@ class SingleSession:
                                         int(now - started), taps if active else 0)
                         self.last_progress = now
                     time.sleep(1)
-                self.need(p.returncode == 0 and
-                          'All tests passed!' in self.flutter_log.read_text('utf8', 'replace'),
-                          'one-session Flutter test failed: ' +
-                          self.H.flutter_failure(self.flutter_log.read_text('utf8', 'replace')))
+                text = self.flutter_log.read_text('utf8', 'replace')
+                if p.returncode != 0 or 'All tests passed!' not in text:
+                    _, _, _, category = self.failure_context(text)
+                    raise self.H.Refused('one-session Flutter test failed: ' + category)
                 self.need(self.app_installed, 'Flutter runner APK not proven installed')
                 self.need(self.next_index == len(CASES) and self.active is None,
                           'missing completed, independently verified scenario')
@@ -278,11 +358,20 @@ class SingleSession:
                 self.receipt['runner_probe_skipped'] = self.runner_probe_skipped
                 print('OX_OPT06_RT02C_RUNNER_PROBES_COUNT=' + str(self.runner_probe_count) +
                       ' SKIPPED=' + str(self.runner_probe_skipped), flush=True)
+                failed = False
             finally:
-                if p.poll() is None:
-                    p.terminate()
-                    try:
-                        p.wait(timeout=6)
-                    except subprocess.TimeoutExpired:
-                        p.kill()
-                        p.wait(timeout=6)
+                try:
+                    if p.poll() is None:
+                        p.terminate()
+                        try:
+                            p.wait(timeout=6)
+                        except subprocess.TimeoutExpired:
+                            p.kill()
+                            p.wait(timeout=6)
+                finally:
+                    if failed:
+                        try:
+                            self.record_failure(p.returncode)
+                        except (RuntimeError, OSError, ValueError, TypeError, KeyError):
+                            # Diagnostic failure cannot replace the primary refusal.
+                            print('OX_R02_RT02C_FAILURE_DETAILS_UNAVAILABLE', flush=True)

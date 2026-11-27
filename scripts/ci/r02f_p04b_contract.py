@@ -26,7 +26,7 @@ def inspect(root:Path=ROOT)->list[str]:
     t,h,d,w,doc=(docs[p] for p in PATHS)
     def check(ok,msg):
         if not ok:issues.append(msg)
-    for anchor in ('GITHUB_ACTIONS','RUNNER_OS','GITHUB_SHA','keytool',
+    for anchor in ('GITHUB_ACTIONS','RUNNER_OS','OX_EXPECTED_SHA','keytool',
                    'javac','d8','aapt2','zipalign','apksigner',
                    'signed_disposable_target','only_reads_content_uri',
                    'can_install_apks\':False','SHA-256','received_and_declined',
@@ -62,7 +62,7 @@ def inspect(root:Path=ROOT)->list[str]:
         check(anchor in d,'P04B production bridge/UI negative omitted '+anchor)
     check('StockInstaller' not in d and 'install-abandon' not in d,
           'P04B external test substituted stock or host-abandon path')
-    for anchor in ("      - 'scripts/ci/r02f_p04b_*'",
+    for anchor in ("scripts/ci/obtainx_ci_policy.py plan --head",
                    'python3 -B scripts/ci/r02f_p04b_target.py --out',
                    'python3 -B scripts/ci/r02f_p04b_hosted.py run --out',
                    'python3 -B scripts/ci/r02f_p04b_hosted.py verify --out',

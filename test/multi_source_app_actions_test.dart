@@ -14,6 +14,7 @@ import 'package:expressive_refresh/expressive_refresh.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:obtainium/services/r07_operation_timeline.dart';
 import 'package:obtainium/components/app_detail_widgets.dart';
 import 'package:obtainium/main.dart';
 import 'package:obtainium/pages/app.dart';
@@ -24,6 +25,7 @@ import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/services/app_check_store.dart';
 import 'package:obtainium/services/bulk_scan_cache.dart';
+import 'package:obtainium/services/r09_artifact_inspection.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:provider/provider.dart';
@@ -42,6 +44,9 @@ class _Paths extends PathProviderPlatform with MockPlatformInterfaceMixin {
   Future<String?> getExternalStoragePath() async {
     return root;
   }
+
+  @override
+  Future<String?> getApplicationSupportPath() async => root;
 
   @override
   Future<String?> getApplicationDocumentsPath() async {
@@ -411,8 +416,30 @@ void main() {
     });
     expect(provider.apps[first.listingKey]!.app.latestVersion, '2.0');
     expect(provider.apps[second.listingKey]!.app.latestVersion, '3.0');
+    final rows = (await R07OperationTimeline.instance.readActivity())
+        .where((row) => row.intent.kind == 'check').toList();
+    expect(rows.map((row) => row.intent.listingKey).toSet(),
+      {first.listingKey, second.listingKey});
+    expect(rows.every((row) => row.stage == 'checked' && row.finished), isTrue);
+    expect(rows.map((row) => row.batchId).toSet(), hasLength(1));
+    for (final row in rows) {
+      final events = await R07OperationTimeline.instance.events(row.id);
+      expect(events.map((event) => event['stage']), ['queued', 'checking', 'checked']);
+    }
     expect(provider.refreshProgress, isNull);
     expect(provider.updateCheckCompleter, isNull);
+  });
+
+  test('a durable journal refusal reaches the caller without duplicate async errors', () async {
+    final app = _listing(trackOnly: true);
+    provider.apps[app.listingKey] = AppInMemory(app, null, null, icon);
+    final path = '${directory.path}/r07-operation-timeline.sqlite';
+    await Directory(path).create(); // deliberately unsafe DB path, no network dispatch
+    final initial = provider.checkUpdates(specificIds: [app.listingKey]);
+    await expectLater(initial, throwsA(isA<FileSystemException>()));
+    expect(provider.updateCheckCompleter, isNull);
+    expect(provider.refreshProgress, isNull);
+    expect(await Directory(path).exists(), isTrue);
   });
 
   test('reset install status clears an accidental source acknowledgement', () {
@@ -480,6 +507,177 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  testWidgets('R09 picker uses inspected bytes and prevents refused selection', (tester) async {
+    final app = _listing(trackOnly: false).copyWith(apkUrls: const [
+      MapEntry('meet-arm64.apk', 'https://example.org/arm64.apk'),
+    ]);
+    final digest = List.filled(64, 'a').join();
+    var calls = 0;
+    R09ArtifactInspection? result;
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(600, 1500);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(ChangeNotifierProvider<SettingsProvider>.value(value: settings,
+      child: MaterialApp(home: Builder(builder: (context) => Scaffold(body: TextButton(
+        onPressed: () async {
+          final selected = await showDialog<R09PickerSelection>(context: context,
+            builder: (_) => AppFilePicker(app: app, archs: const ['arm64-v8a'],
+              inspectCandidate: (asset, token, progress) async {
+                calls++;
+                final fact = R09ApkFacts(path: '/private/base.apk', name: 'base.apk', sha256: digest,
+                  packageName: _packageId, versionCode: 42, minSdk: 26, signers: [digest]);
+                return R09ArtifactInspection(artifactSha256: digest, bytes: 1024,
+                  members: [fact], selectedPaths: [fact.path],
+                  refusals: calls == 1 ? ['r09ReviewAbiMismatch'] : [],
+                  signerStatus: 'r09ReviewSignerMatches', actionsDigestVerified: false);
+              }));
+          result = selected?.inspection;
+        }, child: const Text('Open review'),
+      ))))));
+    await tester.tap(find.text('Open review'));
+    await tester.pumpAndSettle();
+    expect(calls, 0);
+    final inspect = find.widgetWithText(OutlinedButton, 'Download and inspect APK metadata');
+    await tester.ensureVisible(inspect);
+    await tester.tap(inspect);
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Continue')).onPressed, isNull);
+    await tester.ensureVisible(inspect);
+    await tester.tap(inspect);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+    expect(result?.artifactSha256, digest);
+    expect(calls, 2);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('GAP-04 comparison is explicit, bounded and retains exact rows', (
+    tester,
+  ) async {
+    final app = _listing(trackOnly: false).copyWith(apkUrls: const [
+      MapEntry('first.apk', 'https://example.org/first.apk'),
+      MapEntry('second.apk', 'https://example.org/second.apk'),
+      MapEntry('third.apk', 'https://example.org/third.apk'),
+    ]);
+    final digest = List.filled(64, 'a').join();
+    final calls = <String>[];
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(750, 1800);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      ChangeNotifierProvider<SettingsProvider>.value(
+        value: settings,
+        child: MaterialApp(
+          home: Scaffold(
+            body: AppFilePicker(
+              app: app,
+              archs: const ['arm64-v8a'],
+              inspectCandidate: (asset, token, progress) async {
+                calls.add(asset.key);
+                final fact = R09ApkFacts(
+                  path: '/private/${asset.key}',
+                  name: asset.key,
+                  sha256: digest,
+                  packageName: _packageId,
+                  versionCode: calls.length,
+                  signers: [digest],
+                );
+                return R09ArtifactInspection(
+                  artifactSha256: digest,
+                  bytes: 1024,
+                  members: [fact],
+                  selectedPaths: [fact.path],
+                  refusals: asset.key == 'second.apk'
+                      ? ['r09ReviewAbiMismatch']
+                      : [],
+                  signerStatus: 'r09ReviewSignerMatches',
+                  actionsDigestVerified: false,
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    final compare = find.widgetWithText(
+      OutlinedButton,
+      'Inspect next candidates (up to 2)',
+    );
+    await tester.ensureVisible(compare);
+    await tester.tap(compare);
+    await tester.pumpAndSettle();
+    expect(calls, ['first.apk', 'second.apk']);
+    expect(
+      find.text('Compared 2 of 3 inspectable candidates · 0 failed · 0 unavailable'),
+      findsOneWidget,
+    );
+    await tester.ensureVisible(compare);
+    await tester.tap(compare);
+    await tester.pumpAndSettle();
+    expect(calls, ['first.apk', 'second.apk', 'third.apk']);
+    expect(
+      find.text('Compared 3 of 3 inspectable candidates · 0 failed · 0 unavailable'),
+      findsOneWidget,
+    );
+    expect(tester.widget<OutlinedButton>(compare).onPressed, isNull);
+    expect(find.textContaining('Inspected: selection refused'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('GAP-04 cancel comparison never starts a later candidate', (
+    tester,
+  ) async {
+    final app = _listing(trackOnly: false).copyWith(apkUrls: const [
+      MapEntry('first.apk', 'https://example.org/first.apk'),
+      MapEntry('second.apk', 'https://example.org/second.apk'),
+    ]);
+    final calls = <String>[];
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(750, 1500);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      ChangeNotifierProvider<SettingsProvider>.value(
+        value: settings,
+        child: MaterialApp(
+          home: Scaffold(
+            body: AppFilePicker(
+              app: app,
+              archs: const ['arm64-v8a'],
+              inspectCandidate: (asset, token, progress) async {
+                calls.add(asset.key);
+                await token.whenCancelled;
+                token.throwIfCancelled();
+                throw StateError('Cancellation failed');
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final compare = find.widgetWithText(
+      OutlinedButton,
+      'Inspect next candidates (up to 2)',
+    );
+    await tester.ensureVisible(compare);
+    await tester.tap(compare);
+    await tester.pump();
+    expect(calls, ['first.apk']);
+    final cancel = find.widgetWithText(TextButton, 'Cancel inspection');
+    await tester.ensureVisible(cancel);
+    await tester.tap(cancel);
+    await tester.pumpAndSettle();
+    expect(calls, ['first.apk']);
+    expect(
+      find.text('Compared 0 of 2 inspectable candidates · 0 failed · 0 unavailable'),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('secondary listing download progress stays visible', (
     tester,

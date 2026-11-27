@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:obtainium/components/app_bottom_sheet.dart';
 import 'package:obtainium/providers/apps_provider.dart';
+import 'package:obtainium/services/r09_discovery.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/theme/m3e_expressive_list.dart';
 import 'package:provider/provider.dart';
@@ -71,6 +72,10 @@ class BulkUpdateSheet extends StatefulWidget {
 
 class _BulkUpdateSheetState extends State<BulkUpdateSheet> {
   late Set<String> selectedIds;
+  Map<String, String> get packageByListing => {
+    for (final id in [...widget.existingUpdateIds, ...widget.newInstallIds])
+      if (widget.apps[id] != null) id: widget.apps[id]!.app.id,
+  };
   late Set<_BulkUpdateSectionId> expandedSectionIds;
 
   @override
@@ -89,6 +94,7 @@ class _BulkUpdateSheetState extends State<BulkUpdateSheet> {
     } else {
       selectedIds = {...widget.existingUpdateIds, ...widget.trackOnlyUpdateIds};
     }
+    selectedIds = r09SafeBulkSelection(selectedIds, packageByListing);
     expandedSectionIds = {_BulkUpdateSectionId.updates};
   }
 
@@ -114,7 +120,7 @@ class _BulkUpdateSheetState extends State<BulkUpdateSheet> {
     hapticSelection();
     setState(() {
       if (selected) {
-        selectedIds.add(appId);
+        selectedIds = r09SelectListing(selectedIds, appId, packageByListing);
       } else {
         selectedIds.remove(appId);
       }
@@ -128,7 +134,7 @@ class _BulkUpdateSheetState extends State<BulkUpdateSheet> {
       if (allInGroupSelected) {
         selectedIds.removeAll(groupIds);
       } else {
-        selectedIds.addAll(groupIds);
+        selectedIds = r09SafeBulkSelection({...selectedIds, ...groupIds}, packageByListing);
       }
     });
   }
@@ -241,6 +247,8 @@ class _BulkUpdateSheetState extends State<BulkUpdateSheet> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
+            Text([appInMemory.sourceIdentifier, r09ChannelLabel(appInMemory.app.additionalSettings),
+                appInMemory.app.id].where((s) => s.isNotEmpty).join(' · ')),
             if (versionLabel.isNotEmpty)
               Text(versionLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
           ],
@@ -429,6 +437,8 @@ class _BulkUpdateSheetState extends State<BulkUpdateSheet> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (packageByListing.values.toSet().length < packageByListing.length)
+              Padding(padding: const EdgeInsets.all(12), child: Text(tr('r09ConflictingListings'))),
             for (
               int sectionIndex = 0;
               sectionIndex < visibleSections.length;

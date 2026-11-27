@@ -1,0 +1,157 @@
+name: ObtainX R12 / Protected release candidate (no publication)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed main commit (40 hex characters)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  OX_EXPECTED_SHA: ${{ inputs.source_sha }}
+
+concurrency:
+  group: obtainx-r12-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout protected exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Refuse wrong source or release context
+        run: python3 -B scripts/ci/r12_release_gate.py preflight --head "$OX_EXPECTED_SHA"
+  build:
+    needs: authorize
+    strategy:
+      fail-fast: true
+      matrix:
+        replica: [a, b]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - name: Checkout protected exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Refuse wrong source or release context
+        run: python3 -B scripts/ci/r12_release_gate.py preflight --head "$OX_EXPECTED_SHA"
+      - name: Observe exact main full hosted CI
+        env:
+          OX_CI_READ_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/ci/r12_release_gate.py record-ci --head "$OX_EXPECTED_SHA" --output "$RUNNER_TEMP/ox-ci.json"
+      - name: Set up Java 21
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set up pinned Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          cache: false
+      - name: Install exact Android verification tools
+        run: python3 -B scripts/ci/r02_sdk_retry.py 'build-tools;35.0.0'
+      - name: Install locked dependencies and validate complete source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! python3 -c 'import yaml'; then sudo apt-get update && sudo apt-get install -y python3-yaml; fi
+          sudo apt-get update && sudo apt-get install -y bats shellcheck
+          shellcheck --shell=bash build.sh sign.sh
+          bats scripts/ci/r12_shell.bats
+          node --check assets/translations/standardize.mjs
+          node --test assets/translations/standardize.test.mjs
+          npx --yes --package eslint@9.39.1 -- eslint --config scripts/ci/r12-eslint.config.mjs --max-warnings=0 assets/translations/standardize.mjs assets/translations/standardize.test.mjs scripts/ci/r12-eslint.config.mjs
+          flutter pub get --enforce-lockfile
+          git diff --exit-code -- pubspec.lock
+          dart format --output=none --set-exit-if-changed lib test integration_test packages
+          flutter analyze --fatal-infos --fatal-warnings lib test integration_test
+          flutter test --no-pub
+          python3 -B -m unittest discover -s scripts/ci -p 'test_*.py'
+          python3 -B scripts/ci/r00_source_contract.py --check
+          python3 -B scripts/ci/r07_workflow_contract.py --check
+      - name: Independent unsigned production APK build
+        shell: bash
+        env:
+          OX_REPLICA: ${{ matrix.replica }}
+        run: |
+          set -euo pipefail
+          test ! -e android/key.properties
+          test ! -e android/app/key.properties
+          flutter build apk --release --split-per-abi --flavor normal --no-pub
+          mkdir -m 700 "$RUNNER_TEMP/ox-unsigned"
+          cp "$RUNNER_TEMP/ox-ci.json" "$RUNNER_TEMP/ox-unsigned/ci.json"
+          cp build/app/outputs/flutter-apk/app-*-normal-release.apk "$RUNNER_TEMP/ox-unsigned/"
+          (cd android && ./gradlew --no-daemon lint test)
+          (cd android && ./gradlew :app:dependencies --configuration normalReleaseRuntimeClasspath --console=plain -q) > "$RUNNER_TEMP/ox-unsigned/gradle-dependencies.txt"
+          python3 -B scripts/ci/r12_release_gate.py record-build --head "$OX_EXPECTED_SHA" --replica "$OX_REPLICA" --directory "$RUNNER_TEMP/ox-unsigned"
+      - name: Retain exact unsigned build evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ox-r12-unsigned-${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ox-unsigned/
+          if-no-files-found: error
+          retention-days: 7
+  sign-candidate:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: obtainx-release-candidate
+    steps:
+      - name: Checkout protected exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Refuse wrong source or release context
+        run: python3 -B scripts/ci/r12_release_gate.py preflight --head "$OX_EXPECTED_SHA"
+      - name: Observe exact main full hosted CI
+        env:
+          OX_CI_READ_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/ci/r12_release_gate.py record-ci --head "$OX_EXPECTED_SHA" --output "$RUNNER_TEMP/ox-ci.json"
+      - name: Set up Java 21
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install exact Android verification tools
+        run: python3 -B scripts/ci/r02_sdk_retry.py 'build-tools;35.0.0'
+      - name: Fetch only exact current run unsigned artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "ox-r12-unsigned-a-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" --dir "$RUNNER_TEMP/ox-a"
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "ox-r12-unsigned-b-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" --dir "$RUNNER_TEMP/ox-b"
+      - name: Compare independent builds and sign verified bytes only
+        shell: bash
+        env:
+          OX_RELEASE_KEYSTORE_B64: ${{ secrets.OX_RELEASE_KEYSTORE_B64 }}
+          OX_RELEASE_STORE_PASSWORD: ${{ secrets.OX_RELEASE_STORE_PASSWORD }}
+          OX_RELEASE_KEY_PASSWORD: ${{ secrets.OX_RELEASE_KEY_PASSWORD }}
+          OX_RELEASE_KEY_ALIAS: ${{ secrets.OX_RELEASE_KEY_ALIAS }}
+          OX_RELEASE_CERT_SHA256: ${{ vars.OX_RELEASE_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          python3 -B scripts/ci/r12_release_gate.py sign-candidate --head "$OX_EXPECTED_SHA" --first "$RUNNER_TEMP/ox-a" --second "$RUNNER_TEMP/ox-b" --ci "$RUNNER_TEMP/ox-ci.json" --directory "$RUNNER_TEMP/ox-signed"
+      - name: Retain non-publishing signed candidate evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ox-r12-candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ox-signed/
+          if-no-files-found: error
+          retention-days: 7

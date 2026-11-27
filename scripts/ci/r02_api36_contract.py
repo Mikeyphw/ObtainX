@@ -46,7 +46,7 @@ def inspect(root: Path = ROOT) -> list[str]:
         p.append('inherited Python contract gate lacks R02 API36 audit')
     required_workflow = (
       'permissions:\n  contents: read', 'persist-credentials: false',
-      'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
+      'test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"',
       'flutter build apk --debug --flavor normal --no-pub',
       "test -c /dev/kvm", 'test -r /dev/kvm && test -w /dev/kvm',
       "'system-images;android-36;google_apis;x86_64'",
@@ -64,7 +64,7 @@ def inspect(root: Path = ROOT) -> list[str]:
     for needle in required_workflow:
         if needle not in w:
             p.append('hosted API36 workflow requirement missing: ' + needle)
-    if w.count('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"') != 2:
+    if w.count('test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"') != 3:
         p.append('source binding required in both bootstrap and receipt initialization')
     if ('uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262' not in w
         or 'flutter-version: \'3.47.6\'' not in w):

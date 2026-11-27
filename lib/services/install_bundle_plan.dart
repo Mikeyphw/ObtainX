@@ -50,6 +50,15 @@ class InstallApkMember {
     this.versionCode,
     this.minSdkVersion,
     this.targetSdkVersion,
+    this.splitName,
+    this.configForSplit,
+    this.sha256,
+    this.signers = const [],
+    this.nativeAbis = const [],
+    this.requiredSplits = const [],
+    this.requiredSplitTypes = const [],
+    this.splitTypes = const [],
+    this.splitRequired = false,
   });
 
   final String path;
@@ -57,6 +66,9 @@ class InstallApkMember {
   final int? versionCode;
   final int? minSdkVersion;
   final int? targetSdkVersion;
+  final String? splitName, configForSplit, sha256;
+  final List<String> signers, nativeAbis, requiredSplits, requiredSplitTypes, splitTypes;
+  final bool splitRequired;
 }
 
 class InstallBundlePlan {
@@ -68,13 +80,16 @@ class InstallBundlePlan {
     required this.format,
     this.minSdkVersion,
     this.targetSdkVersion,
-  }) : configApkPaths = List<String>.unmodifiable(configApkPaths);
+    List<InstallApkMember> selectedMembers = const [],
+  }) : configApkPaths = List<String>.unmodifiable(configApkPaths),
+       selectedMembers = List<InstallApkMember>.unmodifiable(selectedMembers);
 
   final String packageName;
   final int versionCode;
   final String baseApkPath;
   final List<String> configApkPaths;
   final InstallArtifactFormat format;
+  final List<InstallApkMember> selectedMembers;
   final int? minSdkVersion;
   final int? targetSdkVersion;
 
@@ -104,8 +119,8 @@ const _knownAbis = [
 
 String _normalizedAbi(String text) => text.toLowerCase().replaceAll('-', '_');
 
-String? _apkAbi(String path) {
-  final name = _normalizedAbi(_apkName(path));
+String? _apkAbi(String splitName) {
+  final name = _normalizedAbi(splitName);
   final seen = <String>[];
   for (final abi in _knownAbis) {
     final normalized = _normalizedAbi(abi);
@@ -126,11 +141,7 @@ const _densityDpis = <String, int>{
   'xhdpi': 320, 'xxhdpi': 480, 'xxxhdpi': 640,
 };
 
-String _configQualifier(String path) {
-  final name = _apkName(path).toLowerCase();
-  return RegExp(r'^(?:split_)?config[._-](.+)\.apk$')
-          .firstMatch(name)?.group(1) ?? '';
-}
+String _configQualifier(String splitName) => splitName.toLowerCase().substring('config.'.length);
 
 String _canonicalLocale(String text) {
   return text.toLowerCase().replaceAll('_', '-')
@@ -158,7 +169,7 @@ InstallBundlePlan resolveInstallBundlePlan({
   if (members.isEmpty) {
     throw const FormatException('Archive contains no APKs');
   }
-  if (members.length > 4096) {
+  if (members.length > 96) {
     throw const FormatException('Too many APK members');
   }
   if (format == InstallArtifactFormat.apk && members.length != 1) {
@@ -173,8 +184,18 @@ InstallBundlePlan resolveInstallBundlePlan({
       throw const FormatException('Duplicate or ambiguous APK filenames');
     }
   }
-  final config = members.where((m) => isConfigurationSplitApk(m.path)).toList();
-  final baseCandidates = members.where((m) => !isConfigurationSplitApk(m.path)).toList();
+  // Manifest role, not the containing archive's attacker-controlled filename.
+  final config = members.where((m) => m.splitName != null).toList();
+  final baseCandidates = members.where((m) => m.splitName == null).toList();
+  final splitIds = <String>{};
+  for (final member in config) {
+    final role = member.splitName!;
+    if (!RegExp(r'^config\.[A-Za-z0-9_.-]+$').hasMatch(role) ||
+        !splitIds.add(role) ||
+        (member.configForSplit != null && member.configForSplit != 'base')) {
+      throw const FormatException('Unsupported or duplicate manifest split role');
+    }
+  }
   if (baseCandidates.length != 1) {
     throw const FormatException('Bundle requires exactly one unambiguous base APK');
   }
@@ -195,10 +216,10 @@ InstallBundlePlan resolveInstallBundlePlan({
     throw const FormatException('APK requires a newer Android SDK');
   }
   for (final member in config) {
-    if (member.packageName != null && member.packageName != packageName) {
+    if (member.packageName != packageName) {
       throw const FormatException('Split package identity mismatch');
     }
-    if (member.versionCode != null && member.versionCode != versionCode) {
+    if (member.versionCode != versionCode) {
       throw const FormatException('Split versionCode mismatch');
     }
     if (member.minSdkVersion != null && deviceSdkVersion != null &&
@@ -214,8 +235,8 @@ InstallBundlePlan resolveInstallBundlePlan({
   final byDensity = <int, InstallApkMember>{};
   final nonAbi = <InstallApkMember>[];
   for (final member in config) {
-    final abi = _apkAbi(member.path);
-    final qualifier = _configQualifier(member.path);
+    final abi = _apkAbi(member.splitName!);
+    final qualifier = _configQualifier(member.splitName!);
     if (abi != null) {
       if (byAbi.containsKey(abi)) {
         throw const FormatException('Multiple APK splits for the same ABI');
@@ -299,6 +320,26 @@ InstallBundlePlan resolveInstallBundlePlan({
   }
   final selectedConfig = [...nonAbi, ?abiMember, ...selectedLocales, ?densityMember]
     ..sort((a, b) => a.path.compareTo(b.path));
+  final selected = [base, ...selectedConfig];
+  final selectedSplits = selected.map((member) => member.splitName).whereType<String>().toSet();
+  final selectedTypes = selected.expand((member) => member.splitTypes).toSet();
+  var commonAbis = supportedAbis.toSet();
+  for (final member in selected) {
+    if ((member.splitRequired && selectedSplits.isEmpty) ||
+        !selectedSplits.containsAll(member.requiredSplits) ||
+        !selectedTypes.containsAll(member.requiredSplitTypes)) {
+      throw const FormatException('Manifest requires missing split evidence');
+    }
+    if (member.nativeAbis.isNotEmpty) {
+      commonAbis = commonAbis.intersection(member.nativeAbis.toSet());
+      if (commonAbis.isEmpty) throw const FormatException('Incompatible native APK libraries');
+    }
+    if (member.signers.isNotEmpty && base.signers.isNotEmpty &&
+        (member.signers.toSet().length != base.signers.toSet().length ||
+        !member.signers.toSet().containsAll(base.signers))) {
+      throw const FormatException('APK member signing identities differ');
+    }
+  }
   return InstallBundlePlan(
     packageName: packageName,
     versionCode: versionCode,
@@ -307,6 +348,7 @@ InstallBundlePlan resolveInstallBundlePlan({
     format: format,
     minSdkVersion: base.minSdkVersion,
     targetSdkVersion: base.targetSdkVersion,
+    selectedMembers: selected,
   );
 }
 

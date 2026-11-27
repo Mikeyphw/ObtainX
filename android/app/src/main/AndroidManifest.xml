@@ -47,6 +47,10 @@
                 <data android:scheme="obtainium" />
             </intent-filter>
             <intent-filter>
+                <action android:name="android.intent.action.SHOW_APP_INFO" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/*" />
@@ -127,6 +131,8 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <package android:name="net.dinglisch.android.taskerm"/>
+        <package android:name="io.github.muntashirakon.AppManager"/>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

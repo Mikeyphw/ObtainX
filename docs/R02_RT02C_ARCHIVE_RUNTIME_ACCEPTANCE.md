@@ -13,3 +13,34 @@ No user data or real installed packages are touched. Every scenario is source- a
 **Scope limitations:** This is NOT full R02 runtime-matrix acceptance. It is an archive **extraction-to-session** hosted emulator test, NOT qualification of the complete user-facing download/import/picker UX, XAPK OBB installation or data paths, SAF, external/Shizuku/Dhizuku installers, API-specific UI, user cancellation or interrupted-install rollback. Actual application UX and physical devices remain unqualified. No releases. No merges. No force-pushes. PR #5 and its RT02B evidence remain untouched.
 
 The self-executing `python3 overlay.zip` launcher creates one new stacked PR, runs all inherited Python contracts and source mutation tests in an isolated `$TMPDIR` worktree, checks staged whitespace, and follows **six** exact-head pull-request-triggered GitHub Actions workflows (R00 source, R00 Flutter, RT01, RT02A, RT02B and RT02C). `--watch-only` resumes monitoring without another push; `gh run watch` opens the native GitHub terminal UI, followed by independent SHA-scoped checking and optional Termux success/failure notifications.
+
+## HF11 — owned foreground installer
+
+All five positive archives now use the first-party production StockInstaller
+foreground owner (sealed `InstallPrecommitGate`), not the legacy plugin route.
+A matching terminal journal, exact baseline and resulting signed APK hashes,
+a distinct positive Android session identity, exactly one observed installer
+approval, and independent host package-state verification are required. No
+negative case may reach the session bridge or publish a session identity. The
+previous exact-head run `45512130442` failed before completing a case; no new
+hosted result is claimed by this change.
+
+## HF12 — analyzer-safe digest uniqueness
+
+The three `String.fromEnvironment` constants can have equal default values
+when analyzed without compile-time defines. Constructing the set through a
+list's runtime `toSet()` preserves the distinct-digest assertion without the
+static duplicate-set warning. The source gate and mutation tests reject the
+original literal, missing/relaxed uniqueness, duplicate inputs and analyzer
+warning suppression; actual strict hosted analysis remains required. All
+HF11 owned-session and seven-case receipt requirements remain unchanged.
+
+## HF13 — pairwise uniqueness and complete analysis scope
+
+HF12's runtime list.toSet() still triggered prefer_collection_literals. Check
+all three digest pairs using isNot before the first case; neither collection
+construction nor lint suppression is needed. Main full Flutter analysis now
+includes integration_test, matching the installer and targeted analysis scope.
+The independent workflow jobs run in parallel. Source mutation checks retain
+strict analysis and all HF11 owned-session/seven-case evidence requirements.
+Actual hosted Dart and Android acceptance remain mandatory.

@@ -58,6 +58,10 @@ class RuStore extends AppSource {
         'https://backapi.rustore.ru/applicationData/overallInfo/$appId',
         additionalSettings,
       );
+      if (overallInfoResponse.statusCode == 419) {
+        throw ObtainiumError('RuStore rejected the client session (419). '
+            'Use the official store until supported session access is available.');
+      }
       if (overallInfoResponse.statusCode != 200) {
         throw getObtainiumHttpError(overallInfoResponse);
       }
@@ -86,14 +90,29 @@ class RuStore extends AppSource {
         followRedirects: false,
         postBody: {'appId': appDetails['appId'], 'firstInstall': true},
       );
-      final downloadDetails = await decodeJsonBody(
-        downloadLinksResponse.bodyBytes,
-      );
-      if (downloadLinksResponse.statusCode != 200 || downloadDetails == null) {
+      // Reject provider status before trying to parse an HTML error as JSON.
+      if (downloadLinksResponse.statusCode == 419) {
+        throw ObtainiumError('RuStore rejected the client session (419). '
+            'Use the official store until supported session access is available.');
+      }
+      if (downloadLinksResponse.statusCode != 200) {
         throw getObtainiumHttpError(downloadLinksResponse);
       }
-      final url = downloadDetails['downloadUrls']?[0]?['url'] as String?;
-      if (url == null) {
+      final downloadDetails = await decodeJsonBody(downloadLinksResponse.bodyBytes);
+      if (downloadDetails is! Map) throw NoAPKError();
+      final links = downloadDetails['downloadUrls'];
+      if (links is! List || links.isEmpty || links.first is! Map) {
+        throw NoAPKError();
+      }
+      // Never silently install only the base of a provider split set.
+      if (links.length != 1) {
+        throw ObtainiumError('RuStore returned multiple package parts. '
+            'Use the official store until verified split selection is supported.');
+      }
+      final url = (links.first as Map)['url'];
+      final parsed = url is String ? Uri.tryParse(url) : null;
+      if (url is! String || parsed == null || parsed.scheme != 'https' ||
+          parsed.host.isEmpty || parsed.userInfo.isNotEmpty) {
         throw NoAPKError();
       }
 

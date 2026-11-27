@@ -9,6 +9,7 @@ import 'dart:ui';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:obtainium/widgets/r07_activity_center_page.dart';
 import 'package:obtainium/main.dart';
 import 'package:obtainium/providers/apps_provider.dart' show formatDownloadSize;
 import 'package:obtainium/providers/settings_provider.dart';
@@ -414,9 +415,41 @@ class CheckingUpdatesNotification extends ObtainiumNotification {
       );
 }
 
+// R07 notification routing binds directly to a unique journal attempt.
+// A package ID or a "latest attempt" lookup is never sufficient.
+int r07AttemptNotificationId(String attemptId) {
+  var hash = 2166136261;
+  for (final unit in attemptId.codeUnits) {
+    hash = ((hash ^ unit) * 16777619) & 0x7fffffff;
+  }
+  return 2100000000 + (hash % 47000000);
+}
+
+// Require an exact operation ID; never route by guessed package/latest record.
+String? r07OperationFromNotificationPayload(String? payload) {
+  if (payload == null || !payload.startsWith('r07:')) return null;
+  final attempt = payload.substring(4);
+  if (!RegExp(r'^[A-Za-z0-9_-]{16,90}$').hasMatch(attempt)) return null;
+  return 'install:$attempt';
+}
+
 class NotificationsProvider {
   FlutterLocalNotificationsPlugin notifications =
       FlutterLocalNotificationsPlugin();
+
+  Future<void> notifyR07Attention({required String attemptId,
+      required String packageId, required String stage}) async {
+    if (!RegExp(r'^[A-Za-z0-9_-]{16,90}$').hasMatch(attemptId)) {
+      throw const FormatException('Invalid R07 notification attempt');
+    }
+    await notify(ObtainiumNotification(
+      r07AttemptNotificationId(attemptId), 'Install needs attention',
+      '$packageId: $stage (open Activity Center to review)',
+      'activity_attention', 'Activity Center',
+      'Installation approvals and uncertain outcomes',
+      Importance.defaultImportance, payload: 'r07:$attemptId',
+    ));
+  }
 
   bool isInitialized = false;
 
@@ -510,6 +543,13 @@ class NotificationsProvider {
   }
 
   void _showNotificationPayload(String? payload, {bool doublePop = false}) {
+    final operationId = r07OperationFromNotificationPayload(payload);
+    if (operationId != null) {
+      globalNavigatorKey.currentState?.push(MaterialPageRoute<void>(
+        builder: (_) => R07ActivityCenterPage(operationId: operationId),
+      ));
+      return;
+    }
     if (payload?.isNotEmpty == true) {
       final lines = payload!.split('\n');
       final title = lines.first;

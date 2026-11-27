@@ -238,7 +238,8 @@ extension AppsProviderImportExport on AppsProvider {
     Map<String, dynamic>? settingsMap;
     Map<String, dynamic>? settingsObtainXMap;
     if (shouldExportSettings > 0) {
-      final settingsValueKeys = settingsProvider.prefs?.getKeys().toSet();
+      final settingsValueKeys = settingsProvider.prefs?.getKeys().toSet()
+        ?..remove('r11AutomationEnabled');
       if (shouldExportSettings < 2) {
         settingsValueKeys?.removeWhere(isSecretSettingKey);
       }
@@ -440,7 +441,7 @@ extension AppsProviderImportExport on AppsProvider {
       // 'appFolders' is skipped: already merged/persisted by
       // _reconcileImportedFolders. Reload settings so the merged folder list
       // (and everything else) is reflected in memory immediately.
-      _applyImportedSettings(settingsMap, skipKeys: const {'appFolders'});
+      _applyImportedSettings(settingsMap, skipKeys: const {'appFolders', 'r11AutomationEnabled'});
       await settingsProvider.initializeSettings();
     }
     return MapEntry<List<App>, bool>(importedApps, hasSettings);
@@ -580,7 +581,7 @@ extension AppsProviderImportExport on AppsProvider {
     Set<String> skipKeys = const {},
   }) {
     settingsMap.forEach((key, value) {
-      if (skipKeys.contains(key)) return;
+      if (skipKeys.contains(key) || key == 'r11AutomationEnabled') return;
       if (value is int) {
         settingsProvider.prefs?.setInt(key, value);
       } else if (value is double) {
@@ -614,6 +615,7 @@ const String obtainXSettingsSectionPrefix = 'settingsSection_';
 /// shared settings — no translation, no overlay.
 const Set<String> obtainXOnlySettingKeys = {
   'appFolders',
+  'r11ScheduleV1',
   'appAccentColorSource',
   'activeCustomSeedHex',
   'savedCustomSeedHexList',
@@ -723,9 +725,10 @@ Map<String, dynamic> buildObtainXSettingsMap(
 
 /// Splits live prefs into a shared Obtainium-safe block and an ObtainX overlay.
 SplitExportSettings splitSettingsForExport(Map<String, dynamic> fullSettings) {
-  final Map<String, dynamic> settings = buildObtainiumSettingsMap(fullSettings);
+  final safeSettings = Map<String, dynamic>.of(fullSettings)..remove('r11AutomationEnabled');
+  final Map<String, dynamic> settings = buildObtainiumSettingsMap(safeSettings);
   final Map<String, dynamic> settingsObtainX = buildObtainXSettingsMap(
-    fullSettings,
+    safeSettings,
     settings,
   );
 

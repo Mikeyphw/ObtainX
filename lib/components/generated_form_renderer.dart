@@ -98,6 +98,7 @@ class GeneratedForm extends StatefulWidget {
     this.wrapFormSectionsInCards = false,
     this.outlinedFieldBorderRadius,
     this.tileMode = false,
+    this.assistSourceUrl,
   });
 
   final List<List<GeneratedFormItem>> items;
@@ -123,6 +124,7 @@ class GeneratedForm extends StatefulWidget {
   /// change the visual layout here — the fork's outlined/section styling is the
   /// intended look (see cross-repo direction: "your visible layout stays yours").
   final bool tileMode;
+  final String? assistSourceUrl;
 
   @override
   State<GeneratedForm> createState() => _GeneratedFormState();
@@ -761,6 +763,7 @@ class _TVTextFieldFocusState extends State<_TVTextFieldFocus> {
 }
 
 class _GeneratedFormState extends State<GeneratedForm> {
+  String? get assistSourceUrl => widget.assistSourceUrl;
   final _formKey = GlobalKey<FormState>();
   Map<String, dynamic> values = {};
   late List<List<Widget>> formInputs;
@@ -958,10 +961,17 @@ class _GeneratedFormState extends State<GeneratedForm> {
                                   tr('regexAssistTooltip'),
                               icon: Icon(formItem.assistIcon),
                               onPressed: () async {
+                                final boundUrl = formState.assistSourceUrl;
                                 await formItem.assistAction!(
                                   context,
-                                  formState.applyTextFieldPatches,
-                                  formState.values,
+                                  (patches) {
+                                    if (formState.mounted && formState.assistSourceUrl == boundUrl) {
+                                      formState.applyTextFieldPatches(patches);
+                                    }
+                                  },
+                                  {...formState.values,
+                                    'r09BoundSourceUrl': ?boundUrl,
+                                  },
                                 );
                               },
                             )

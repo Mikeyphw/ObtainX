@@ -66,11 +66,11 @@ class R04FinalMutationTests(unittest.TestCase):
           '"base_branch": "feature/obtainx-r03-resumable-download-engine-20261115"')
     def test_skip_archive_verification(self):
         self.mutated('lib/providers/apps_provider_install.dart',
-          'await verifyR04ActionsArchiveBeforeExtraction(',
-          'await disableR04Verification(')
+          'await verifyR04ActionsArchiveBeforeExtraction(\n        archive: downloadedFile,',
+          'await disableR04Verification(\n        archive: downloadedFile,')
     def test_remove_expired_receipt_gate(self):
         self.mutated('lib/services/r04_actions_archive_integrity.dart',
-          'expiresAt == null || !expiresAt.isAfter(DateTime.now().toUtc())',
+          'expiresAt == null || !expiresAt.isAfter(now.toUtc())',
           'false')
     def test_remove_persisted_expiry_receipt(self):
         self.mutated('lib/app_sources/github.dart',
@@ -101,7 +101,7 @@ class R04FinalMutationTests(unittest.TestCase):
           'echo tests bypassed')
     def test_remove_android_risk_path(self):
         self.mutated('.github/workflows/obtainx-r02-api36.yml',
-          "- 'lib/providers/source_provider.dart'", "- 'docs/other.dart'")
+          "scripts/ci/obtainx_ci_policy.py plan --head", "- 'docs/other.dart'")
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

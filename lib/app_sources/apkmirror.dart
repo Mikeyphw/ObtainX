@@ -22,39 +22,11 @@ import 'package:obtainium/services/html_parse_isolate.dart';
 const bool apkMirrorSizeDebug = false;
 const String _apkMirrorSizeDebugPrefix = 'OBTAINX-APK-SIZE-DEBUG';
 
-/// The user-agent token APKMirror's Cloudflare rule allowlists.
-///
-/// Every APKMirror *HTML* page (app listing, release page, `-apk-download/`
-/// page) is served only to this allowlist. Anything else — including a
-/// convincingly spoofed mobile-browser UA, which is what this source used to
-/// send — gets a 403 carrying `Cf-Mitigated: challenge` and a "Just a moment…"
-/// interstitial body. The `/feed/` RSS endpoint is the sole exception, which is
-/// why version detection kept working while everything that scrapes HTML (icon
-/// resolution in [APKMirror.getLatestAPKDetails], the lazy size walk in
-/// [APKMirror.resolveLatestApkSizeBytes], the changelog fetch, and
-/// [APKMirror.tryInferringAppId]) silently returned nothing: each of those
-/// treats a failed request as "unavailable" rather than an error.
-///
-/// Measured 2026-08-18, holding every other header constant and varying only
-/// the UA: the rule is a plain substring test on `APKUpdater` — bare
-/// `APKUpdater`, `APKUpdater-v9.9.9` and `APKUpdater-v3.5.9 ObtainX/x.y.z` all
-/// return 200, while `ObtainX-v1.0.0`, `Obtainium`, `okhttp/4.12.0` and the old
-/// browser UA all return 403. Because the match tolerates extra text, ObtainX
-/// keeps its own name and version in the string instead of impersonating
-/// APKUpdater outright, so APKMirror can still attribute (and, if they want,
-/// block) this traffic.
-///
-/// Do NOT "fix" this back to a browser user-agent — that is precisely what
-/// disabled the features above.
-const String apkMirrorAllowlistedUserAgentToken = 'APKUpdater-v3.5.9';
-
-/// [apkMirrorAllowlistedUserAgentToken], with ObtainX's own identification
-/// appended when the running version is known.
+/// Identify ObtainX truthfully. Provider refusals remain refusals; do not
+/// impersonate other clients or send their credentials.
 String apkMirrorUserAgent([String? obtainXVersion]) {
-  final String version = obtainXVersion?.trim() ?? '';
-  return version.isEmpty
-      ? apkMirrorAllowlistedUserAgentToken
-      : '$apkMirrorAllowlistedUserAgentToken ObtainX/$version';
+  final version = obtainXVersion?.trim() ?? '';
+  return version.isEmpty ? 'ObtainX' : 'ObtainX/$version';
 }
 
 class _ApkMirrorSizeCandidate {
@@ -605,7 +577,7 @@ class APKMirror extends AppSource {
       includeOwnDebugBuild: true,
     );
     return {
-      // See [apkMirrorAllowlistedUserAgentToken] — a browser UA is refused.
+      // Honest identity, including when the provider refuses HTML access.
       'user-agent': apkMirrorUserAgent(packageInfo?.versionName),
       'Accept':
           'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -787,21 +759,23 @@ class APKMirror extends AppSource {
       throw NoVersionError();
     }
 
-    // Icon resolution is intentionally decoupled from size resolution. Size
-    // resolution requires walking the release page + N download pages and
-    // is now done lazily on the AppPage. The icon, by contrast, is one
-    // cheap GET against the listing page and is fine to do here.
-    String? iconUrl;
-    try {
-      final pageRes = await sourceRequest(standardUrl, additionalSettings);
-      if (pageRes.statusCode == 200) {
-        iconUrl = await iconUrlFromApkMirrorAppPageHtml(
-          pageRes.body,
-          standardUrl,
-        );
+    // Keep RSS polling independent from the optional HTML icon. Once a
+    // matching listing has been checked, retain its icon (including absent)
+    // instead of scraping the listing page on each poll (#339).
+    final previous = previouslyCheckedApp;
+    String? iconUrl = previous != null && previous.url == standardUrl ? previous.iconUrl : null;
+    if (previous == null || previous.url != standardUrl) {
+      try {
+        final pageRes = await sourceRequest(standardUrl, additionalSettings);
+        if (pageRes.statusCode == 200) {
+          iconUrl = await iconUrlFromApkMirrorAppPageHtml(
+            pageRes.body,
+            standardUrl,
+          );
+        }
+      } catch (_) {
+        // Icon is optional; feed errors remain authoritative.
       }
-    } catch (_) {
-      // Icon is optional - ignore errors.
     }
 
     // [apkSizeBytes] is intentionally not resolved here. The APKMirror size
@@ -885,8 +859,13 @@ class APKMirror extends AppSource {
       if (filteredEntries.isEmpty) {
         return releasePageSize;
       }
+      // Refuse a speculative size if inspecting the bounded candidate set
+      // cannot determine it; the user can still open the store listing.
+      if (filteredEntries.length > 3) {
+        return releasePageSize;
+      }
       final List<_ApkMirrorSizeCandidate> sizeCandidates = [];
-      for (final candidateDownloadPageEntry in filteredEntries) {
+      for (final candidateDownloadPageEntry in filteredEntries.take(3)) {
         final downloadPageResponse = await sourceRequest(
           candidateDownloadPageEntry.value,
           additionalSettings,

@@ -18,12 +18,14 @@ class R04ActionsHistoryDialog extends StatefulWidget {
     this.initialRepositoryUrl = '',
     this.initialBranch = '',
     this.initialWorkflow = '',
+    this.now,
   });
 
   final R04ActionsHistoryLoader loadHistory;
   final String initialRepositoryUrl;
   final String initialBranch;
   final String initialWorkflow;
+  final DateTime Function()? now;
 
   @override
   State<R04ActionsHistoryDialog> createState() => _R04ActionsHistoryDialogState();
@@ -33,6 +35,7 @@ class _R04ActionsHistoryDialogState extends State<R04ActionsHistoryDialog> {
   late final TextEditingController repository;
   late final TextEditingController branch;
   late final TextEditingController workflow;
+  DateTime now() => widget.now?.call() ?? DateTime.now();
   bool busy = false;
   bool searched = false;
   String? error;
@@ -96,6 +99,7 @@ class _R04ActionsHistoryDialogState extends State<R04ActionsHistoryDialog> {
             const SizedBox(height: 12),
             TextField(
               controller: repository,
+              readOnly: true,
               keyboardType: TextInputType.url,
               decoration: const InputDecoration(
                 labelText: 'GitHub repository URL',
@@ -107,11 +111,15 @@ class _R04ActionsHistoryDialogState extends State<R04ActionsHistoryDialog> {
             Wrap(spacing: 8, runSpacing: 8, children: [
               SizedBox(width: 240, child: TextField(
                 controller: branch,
+                enabled: !busy,
+                onChanged: (_) => setState(() { rows = const []; searched = false; error = null; }),
                 decoration: const InputDecoration(labelText: 'Branch (default if blank)',
                   border: OutlineInputBorder()),
               )),
               SizedBox(width: 240, child: TextField(
                 controller: workflow,
+                enabled: !busy,
+                onChanged: (_) => setState(() { rows = const []; searched = false; error = null; }),
                 decoration: const InputDecoration(labelText: 'Workflow ID/name (optional)',
                   border: OutlineInputBorder()),
               )),
@@ -142,10 +150,18 @@ class _R04ActionsHistoryDialogState extends State<R04ActionsHistoryDialog> {
                           subtitle: Text(
                             '${row.status} · ${row.branch} · ${row.commitSha.substring(0, 12)}\n'
                             '${row.artifactName ?? 'No artifact'}'
-                            '${row.artifactId == null ? '' : ' · ID ${row.artifactId}'} · ${row.reason}',
+                            '${row.artifactId == null ? '' : ' · ID ${row.artifactId}'} · ${row.reason}\n'
+                            'Size: ${row.sizeBytes ?? 'unknown'} B · Expires: ${row.expiresAt?.toUtc().toIso8601String() ?? 'unknown'}\n'
+                            '${row.archiveSha256 == null ? 'No ZIP digest' : 'Advertised ZIP SHA-256 (not APK signer)'} · APK metadata pending download',
                           ),
-                          trailing: row.canSelect
-                            ? TextButton(onPressed: () => Navigator.of(context).pop(row),
+                          trailing: row.canSelectAt(now())
+                            ? TextButton(onPressed: () {
+                                if (row.canSelectAt(now())) {
+                                  Navigator.of(context).pop(row);
+                                } else {
+                                  setState(() {});
+                                }
+                              },
                                 child: const Text('Select'))
                             : const Icon(Icons.block, semanticLabel: 'Unavailable'),
                         ),

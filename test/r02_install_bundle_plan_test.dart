@@ -12,8 +12,9 @@ const base = InstallApkMember(
 InstallApkMember config(String name, {String? package, int? version}) =>
     InstallApkMember(
       path: '/work/apks/$name',
-      packageName: package,
-      versionCode: version,
+      packageName: package ?? 'org.example.demo',
+      versionCode: version ?? 14,
+      splitName: name.replaceFirst(RegExp(r'^split_'), '').replaceFirst(RegExp(r'\.apk$'), ''),
     );
 
 InstallBundlePlan resolve(
@@ -215,6 +216,24 @@ void main() {
       const InstallApkMember(path: '/work/apks/feature_dashboard.apk',
           packageName: 'org.example.demo', versionCode: 14),
     ]), throwsFormatException);
+  });
+
+  test('manifest roles take precedence over attacker-selected names', () {
+    const disguisedBase = InstallApkMember(path: '/work/config.en.apk',
+      packageName: 'org.example.demo', versionCode: 14);
+    const disguisedConfig = InstallApkMember(path: '/work/base2.apk',
+      packageName: 'org.example.demo', versionCode: 14, splitName: 'config.arm64_v8a');
+    expect(resolve([disguisedConfig, disguisedBase]).sessionPaths,
+      [disguisedBase.path, disguisedConfig.path]);
+    const feature = InstallApkMember(path: '/work/config.x86.apk',
+      packageName: 'org.example.demo', versionCode: 14, splitName: 'feature');
+    expect(() => resolve([base, feature]), throwsFormatException);
+  });
+  test('required manifest splits cannot be silently omitted', () {
+    const required = InstallApkMember(path: '/work/base.apk', packageName: 'org.example.demo',
+      versionCode: 14, requiredSplits: ['config.en']);
+    expect(() => resolve([required]), throwsFormatException);
+    expect(resolve([required, config('config.en.apk')]).requiresSplitSession, isTrue);
   });
 
   test('file order cannot influence selected base or ABI', () {

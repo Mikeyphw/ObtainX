@@ -9,6 +9,11 @@ import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/services/html_parse_isolate.dart';
 
+/// Preserve spaces, plus signs, ampersands and Unicode in provider metadata.
+Uri farsroidDownloadBoxUri(String postId, String version) => Uri.https(
+    'farsroid.com', '/api/download-box/',
+    {'post_id': postId, 'post_version': version});
+
 class Farsroid extends AppSource {
   Farsroid() {
     hosts = ['farsroid.com'];
@@ -34,7 +39,7 @@ class Farsroid extends AppSource {
   String sourceSpecificStandardizeURL(String url, {bool forSelection = false}) {
     return standardizeUrlWithRegex(
       url,
-      subdomainPrefix: r'([^\.]+\.)',
+      subdomainPrefix: r'([^\.]+\.)?',
       pathPattern: r'/[^/]+',
     );
   }
@@ -64,7 +69,7 @@ class Farsroid extends AppSource {
       }
 
       final res2 = await sourceRequest(
-        'https://${hosts[0]}/api/download-box/?post_id=$postId&post_version=$version',
+        farsroidDownloadBoxUri(postId, version).toString(),
         additionalSettings,
       );
       if (res2.statusCode != 200) {
@@ -76,13 +81,15 @@ class Farsroid extends AppSource {
       } catch (e) {
         unawaited(
           LogsProvider().add(
-            'Failed to decode Farsroid JSON: $e',
+            'Failed to decode Farsroid JSON (${e.runtimeType})',
             level: LogLevel.error,
           ),
         );
         throw NoAPKError();
       }
-      final html2 = farsroidJson?['data']?['content'] as String? ?? '';
+      final data = farsroidJson?['data'];
+      final content = data is Map ? data['content'] : null;
+      final html2 = content is String ? content : '';
       if (html2.isEmpty) {
         throw NoAPKError();
       }

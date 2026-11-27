@@ -25,7 +25,7 @@ class RT02FMutation(unittest.TestCase):
     def test_external_callback_must_use_classifier(self):
         self.mutate(M.EXTERNAL,'classifyUnverifiedThirdPartyHandoff(changed)','InstallResult.success()')
     def test_pending_indicator_guard(self):
-        self.mutate(M.PROVIDER,"if (pending != null) {\n              _awaitThirdPartyInstallConfirmation(dir.appId);","if (true) {\n              _awaitThirdPartyInstallConfirmation(dir.appId);")
+        self.mutate(M.PROVIDER,"if (pending != null) {\n              _awaitThirdPartyInstallConfirmation(r05Container);","if (true) {\n              _awaitThirdPartyInstallConfirmation(r05Container);")
     def test_selected_flutter_test(self):
         self.mutate(M.FLUTTER,'flutter test --no-pub test/r02f_external_handoff_test.dart','echo test skipped')
     def test_targeted_vs_full_not_disabled(self):
@@ -35,7 +35,7 @@ class RT02FMutation(unittest.TestCase):
     def test_source_contract_mandatory(self):
         self.mutate(M.SOURCE_CI,'python3 -B scripts/ci/r02f_source_contract.py --check','echo skip')
     def test_android_high_risk_path(self):
-        self.mutate(M.HEAVY[1],"      - 'lib/installers/**'", "      - 'docs/**'")
+        self.mutate(M.HEAVY[1],"  pull_request:\n", "  pull_request:\n    paths: [docs/**]\n")
     def test_manual_full_workflow_retained(self):
         self.mutate(M.HEAVY[2],'  workflow_dispatch:', '  # no manual gate')
 if __name__=='__main__': unittest.main()

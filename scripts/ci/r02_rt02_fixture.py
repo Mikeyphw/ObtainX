@@ -91,7 +91,7 @@ def signed_fixture(out: Path) -> dict:
                                'split': split}
             need(artifacts[name]['size'] > 250, 'fixture APK unexpectedly small')
         inventory = {'schema':1, 'fixture_package':PKG, 'signed_with_ephemeral_ci_key':True,
-                     'source_sha':os.environ.get('GITHUB_SHA', ''), 'files':artifacts,
+                     'source_sha':os.environ.get('OX_EXPECTED_SHA', ''), 'files':artifacts,
                      'never_released':True}
         need(bool(re.fullmatch('[0-9a-f]{40}', inventory['source_sha'])), 'source SHA missing')
         (out/'fixture_inventory.json').write_text(json.dumps(inventory, indent=2, sort_keys=True)+'\n')

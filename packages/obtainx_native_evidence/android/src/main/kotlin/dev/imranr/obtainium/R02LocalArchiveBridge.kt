@@ -84,6 +84,17 @@ internal class R02LocalArchiveBridge(
                         }
                     }
                 }
+                "installedEvidence" -> {
+                    val target = call.argument<String>("package")
+                    if (target.isNullOrBlank()) {
+                        reply.error("R02_VERIFY_ARGS", "Missing package identity", null)
+                    } else {
+                        worker.execute {
+                            val evidence = runCatching { installedEvidence(target) }.getOrNull()
+                            main.post { reply.success(evidence) }
+                        }
+                    }
+                }
                 "verifyInstalled" -> {
                     val target = call.argument<String>("package")
                     val version = call.argument<Number>("version")
@@ -111,6 +122,12 @@ internal class R02LocalArchiveBridge(
                 else -> reply.notImplemented()
             }
         }
+    }
+
+    fun close() {
+        channel.setMethodCallHandler(null)
+        cancelled.values.forEach { it.set(true) }
+        worker.shutdownNow()
     }
 
     private fun selectedName(uri: Uri): String {
@@ -170,7 +187,6 @@ internal class R02LocalArchiveBridge(
         }
     }
 
-    @Suppress("DEPRECATION")
     private fun sourceEvidence(target: String, version: Long, sources: List<String>): Map<String, Any>? {
         if (!Regex("^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$").matches(target) ||
             sources.size !in 1..128 || sources.toSet().size != sources.size) return null
@@ -180,15 +196,22 @@ internal class R02LocalArchiveBridge(
             if (!file.canonicalPath.startsWith(root) || !file.isFile ||
                 java.nio.file.Files.isSymbolicLink(file.toPath())) return null
         }
-        val flags = PackageManager.GET_SIGNING_CERTIFICATES
-        val archive = context.packageManager.getPackageArchiveInfo(sources.first(), flags) ?: return null
-        val observedVersion = if (Build.VERSION.SDK_INT >= 28) archive.longVersionCode
-                              else archive.versionCode.toLong()
-        if (archive.packageName != target || observedVersion != version) return null
-        val signers = archive.signingInfo?.apkContentsSigners?.map { shaBytes(it.toByteArray()) }?.sorted()
-        if (signers.isNullOrEmpty()) return null
-        return mapOf("hashes" to sources.map { digestFile(File(it)) }.sorted(),
-                     "signers" to signers)
+        var expectedSigners: List<String>? = null
+        val splitIds = mutableSetOf<String>()
+        val hashes = sources.mapIndexed { index, path ->
+            val file = File(path)
+            val before = digestFile(file)
+            val manifest = R09ApkManifest.inspect(file)
+            require(manifest.packageName == target && manifest.versionCode == version)
+            if (index == 0) require(manifest.split == null)
+            else require(manifest.split != null && splitIds.add(manifest.split))
+            val signers = R09ApkSignatures.current(file, Build.VERSION.SDK_INT)
+            if (index == 0) expectedSigners = signers
+            else require(expectedSigners == signers) { "APK member signer mismatch" }
+            require(digestFile(file) == before) { "APK changed during verification" }
+            before
+        }.sorted()
+        return mapOf("hashes" to hashes, "signers" to requireNotNull(expectedSigners))
     }
 
     @Suppress("DEPRECATION")
@@ -196,16 +219,41 @@ internal class R02LocalArchiveBridge(
         if (!Regex("^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$").matches(target) ||
             hashes.size !in 1..128 || signers.isEmpty() ||
             (hashes + signers).any { !Regex("^[0-9a-f]{64}$").matches(it) }) return false
-        val observed = context.packageManager.getPackageInfo(target, PackageManager.GET_SIGNING_CERTIFICATES)
-        val observedVersion = if (Build.VERSION.SDK_INT >= 28) observed.longVersionCode
-                              else observed.versionCode.toLong()
-        if (observed.packageName != target || observedVersion != version) return false
-        val installedSigners = observed.signingInfo?.apkContentsSigners?.map { shaBytes(it.toByteArray()) }?.sorted()
-        if (signers.sorted() != installedSigners) return false
-        val appInfo = observed.applicationInfo ?: return false
+        val observed = installedEvidence(target) ?: return false
+        return observed["version"] == version && observed["hashes"] == hashes.sorted() &&
+            observed["signers"] == signers.sorted()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun installedEvidence(target: String): Map<String, Any>? {
+        if (!Regex("^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$").matches(target)) return null
+        val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+        val observed = context.packageManager.getPackageInfo(target, flags)
+        val version = if (Build.VERSION.SDK_INT >= 28) observed.longVersionCode
+                      else observed.versionCode.toLong() and 0xffffffffL
+        if (observed.packageName != target) return null
+        val signatures = if (Build.VERSION.SDK_INT >= 28) observed.signingInfo?.apkContentsSigners else observed.signatures
+        val signers = signatures?.map { shaBytes(it.toByteArray()) }?.distinct()?.sorted()
+        if (signers.isNullOrEmpty() || signers.size > 96) return null
+        val appInfo = observed.applicationInfo ?: return null
         val installedPaths = listOf(appInfo.sourceDir) + (appInfo.splitSourceDirs?.toList() ?: emptyList())
-        if (installedPaths.size != hashes.size) return false
-        return installedPaths.map { digestFile(File(it)) }.sorted() == hashes.sorted()
+        if (installedPaths.size !in 1..96 || installedPaths.toSet().size != installedPaths.size) return null
+        val hashes = installedPaths.map { path ->
+            val apk = File(path)
+            require(apk.isFile && apk.length() in 1L..(768L * 1024 * 1024))
+            digestFile(apk)
+        }.sorted()
+        // A concurrent package replacement cannot turn an earlier observation
+        // into a receipt for a later installed version.
+        val after = context.packageManager.getPackageInfo(target, flags)
+        val afterInfo = after.applicationInfo ?: return null
+        val afterPaths = listOf(afterInfo.sourceDir) + (afterInfo.splitSourceDirs?.toList() ?: emptyList())
+        if (after.lastUpdateTime != observed.lastUpdateTime || afterPaths != installedPaths) return null
+        val afterVersion = if (Build.VERSION.SDK_INT >= 28) after.longVersionCode else after.versionCode.toLong() and 0xffffffffL
+        val afterSignatures = if (Build.VERSION.SDK_INT >= 28) after.signingInfo?.apkContentsSigners else after.signatures
+        val afterSigners = afterSignatures?.map { shaBytes(it.toByteArray()) }?.distinct()?.sorted()
+        if (afterVersion != version || afterSigners != signers || after.packageName != target) return null
+        return mapOf("package" to target, "version" to version, "hashes" to hashes, "signers" to signers)
     }
 
     private fun shaBytes(raw: ByteArray): String =

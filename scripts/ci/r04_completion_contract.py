@@ -78,14 +78,14 @@ def verify(root: Path = ROOT) -> int:
       'r04ArtifactStorageHeaders', 'uri.scheme == \'https\'',
       ".endsWith('.blob.core.windows.net')", '.actions.githubusercontent.com',
       'HttpHeaders.acceptHeader: \'application/octet-stream\'',
-      'key == HttpHeaders.rangeHeader',
+      'crossOriginDownloadHeaders(original)',
     ))
     require(FILES[4], (
       'verifyR04ActionsArchiveBeforeExtraction(', 'sha256.bind(archive.openRead())',
       'if (actual != expected)', 'await archive.delete()',
       'runAttempt is! int', 'artifactId is! int',
       "rawEvidence['expiresAt']",
-      'expiresAt == null || !expiresAt.isAfter(DateTime.now().toUtc())',
+      'expiresAt == null || !expiresAt.isAfter(now.toUtc())',
     ))
     require(FILES[5], (
       'r04ArtifactIdKey', 'r04RunAttemptKey', 'r04CommitShaKey',
@@ -114,8 +114,9 @@ def verify(root: Path = ROOT) -> int:
       'GitHub.r04ModeActions ||',
     ))
     # The GitHub artifact ZIP must be hashed BEFORE archive extraction.
-    verify_position = data[FILES[7]].find('await verifyR04ActionsArchiveBeforeExtraction(')
-    extract_position = data[FILES[7]].find('final artifactFormat = installArtifactFormat(')
+    production_start = data[FILES[7]].find('Future<Object> downloadApp(')
+    verify_position = data[FILES[7]].find('await verifyR04ActionsArchiveBeforeExtraction(', production_start)
+    extract_position = data[FILES[7]].find('final artifactFormat = installArtifactFormat(', production_start)
     if verify_position < 0 or extract_position < 0 or verify_position > extract_position:
         failures.append('P02 digest gate must precede APK/archive extraction')
     require(FILES[8], (
@@ -157,7 +158,7 @@ def verify(root: Path = ROOT) -> int:
       "'physical_install':'NOT_QUALIFIED'",
     ))
     for path in FILES[17:21]:
-        require(path, ("- 'lib/providers/source_provider.dart'", "- 'test/r04_*'"))
+        require(path, ("scripts/ci/obtainx_ci_policy.py plan --head", "ready_for_review, converted_to_draft"))
     # This must be committed before Devtool delivery CI. Never infer a
     # required set from observed runs or mark release qualification complete.
     try:

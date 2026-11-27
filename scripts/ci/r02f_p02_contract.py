@@ -55,7 +55,7 @@ def inspect(root:Path=ROOT)->list[str]:
               'if __name__==\'__main__\':raise SystemExit(main())'),
         TEST:('test_contract_accepts_exact_source','test_cancel_session_parsing_negative',
               'test_source_mutation_rejected','test_contract_refuses_missing_emulator_script'),
-        WORKFLOW:("      - 'scripts/ci/r02f_p02_*'",
+        WORKFLOW:("scripts/ci/obtainx_ci_policy.py plan --head",
                   'python3 -B scripts/ci/r02_rt02c_hosted.py run --out',
                   'python3 -B scripts/ci/r02f_p02_session_abandon.py run --out',
                   'python3 -B scripts/ci/r02_rt02c_hosted.py verify --out',

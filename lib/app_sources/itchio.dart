@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:obtainium/http/origin_redirect_policy.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:html/dom.dart';
 import 'package:obtainium/custom_errors.dart';
@@ -233,8 +234,10 @@ class ItchIO extends AppSource {
       if (bypassRes.statusCode == 200) {
         // The call returns JSON: {"url": "download_url"}
         final tokenizedUrl = jsonDecode(bypassRes.body)['url'] as String?;
-        if (tokenizedUrl != null) {
-          final downloadPageRes = await sourceRequest(tokenizedUrl, {
+        final tokenizedUri = tokenizedUrl == null ? null : Uri.tryParse(tokenizedUrl);
+        if (tokenizedUri != null && tokenizedUri.userInfo.isEmpty &&
+            sameRequestOrigin(tokenizedUri, Uri.parse(baseUrl))) {
+          final downloadPageRes = await sourceRequest(tokenizedUri.toString(), {
             ...additionalSettings,
             'extraHeaders': {'Cookie': ?cookies},
           });

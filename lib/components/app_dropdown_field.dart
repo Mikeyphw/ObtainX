@@ -75,7 +75,9 @@ Widget appDropdownField<T>({
             child: DropdownButton<T>(
               value: fieldState.value,
               isExpanded: true,
-              isDense: isDense,
+              // Both the menu and the selected field must grow with wrapped text.
+              isDense: isDense && MediaQuery.textScalerOf(context).scale(16) <= 16,
+              itemHeight: null,
               menuWidth: menuWidth,
               dropdownColor: scheme.surfaceContainerHigh,
               borderRadius: BorderRadius.circular(borderRadius),

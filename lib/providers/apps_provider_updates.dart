@@ -13,6 +13,8 @@ import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/services/bulk_import_service.dart';
+import 'package:obtainium/services/r11_external_requests.dart';
+import 'package:obtainium/services/r07_operation_timeline.dart';
 import 'package:obtainium/services/bulk_scan_cache.dart';
 import 'package:obtainium/services/store_icon_resolver.dart';
 import 'package:obtainium/version/partial_download_version.dart';
@@ -665,8 +667,9 @@ extension AppsProviderUpdates on AppsProvider {
         currentApp.additionalSettings,
       );
       if (resolvedUrl.isEmpty) return fetchedApp;
-      final Map<String, String>? headers = await source.getRequestHeaders(
+      final Map<String, String>? headers = await source.getAssetRequestHeaders(
         currentApp.additionalSettings,
+        currentApp.url,
         resolvedUrl,
         forAPKDownload: true,
       );
@@ -684,13 +687,22 @@ extension AppsProviderUpdates on AppsProvider {
     return fetchedApp;
   }
 
-  Future<App?> fetchUpdate(String appId) async {
-    return SourceRequestSession.run(() => _fetchUpdateInSession(appId));
+  Future<App?> fetchUpdate(String appId, {App? exactListing}) async {
+    if (exactListing != null && (exactListing.listingKey != appId ||
+        r11ExactLiveListing(apps, exactListing) == null)) {
+      return null;
+    }
+    return _runSingleDurableCheck(appId, (key) => SourceRequestSession.run(
+      () => _fetchUpdateInSession(key, exactListing: exactListing)));
   }
 
-  Future<App?> _fetchUpdateInSession(String appId) async {
+  Future<App?> _fetchUpdateInSession(String appId, {App? exactListing}) async {
+    if (exactListing != null && r11ExactLiveListing(apps, exactListing) == null) return null;
     final _FetchedAppUpdate? update = await _fetchUpdateSnapshot(appId);
-    if (update == null) return null;
+    if (update == null || (exactListing != null &&
+        r11ExactLiveListing(apps, exactListing) == null)) {
+      return null;
+    }
     return mergeFetchedUpdateWithLiveState(
       requestedApp: update.requestedApp,
       liveApp: apps[appId]?.app,
@@ -698,8 +710,32 @@ extension AppsProviderUpdates on AppsProvider {
     );
   }
 
+  Future<App?> _runSingleDurableCheck(String appId,
+      Future<App?> Function(String) action) async {
+    final app = apps[appId]?.app;
+    if (app == null || app.hasPendingRepoRename) { return null; }
+    final key = app.listingKey;
+    R07OperationIntent identity(App selected) => R07OperationIntent(kind: 'check',
+      listingKey: selected.listingKey, packageId: selected.id,
+      channel: r11ChannelFingerprint(selected),
+      release: downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(selected)));
+    final expected = identity(app);
+    final timeline = R07OperationTimeline.instance;
+    final entry = (await timeline.enqueue([expected])).single;
+    return timeline.run(entry, expected, 'checking', () {
+      final live = apps[key]?.app;
+      if (!apps.containsListingKey(key) || live == null || live.hasPendingRepoRename ||
+          !identity(live).matches(expected)) {
+        throw StateError('Queued check source changed');
+      }
+      return action(key);
+    }, successStage: 'checked', failureReason: (error) =>
+      error is SocketException || error is HandshakeException || error is TimeoutException ? 'network' : 'source');
+  }
+
   Future<App?> checkUpdate(String appId) async {
-    return SourceRequestSession.run(() => _checkUpdateInSession(appId));
+    return _runSingleDurableCheck(appId, (key) => SourceRequestSession.run(
+      () => _checkUpdateInSession(key)));
   }
 
   Future<App?> _checkUpdateInSession(String appId) async {
@@ -915,13 +951,19 @@ extension AppsProviderUpdates on AppsProvider {
     List<String>? specificIds,
     bool forceAll = false,
     SettingsProvider? sp,
+    R07TimelineEntry? resumeQueued,
   }) {
+    if (resumeQueued != null && (resumeQueued.stage != 'queued' ||
+        resumeQueued.intent.kind != 'check' || specificIds?.length != 1 ||
+        specificIds!.single != resumeQueued.intent.listingKey)) {
+      throw StateError('Queued check requires exact listing identity');
+    }
     return SourceRequestSession.run(
       () => _checkUpdatesInSession(
         throwErrorsForRetry: throwErrorsForRetry,
         specificIds: specificIds,
         forceAll: forceAll,
-        sp: sp,
+        sp: sp, resumeQueued: resumeQueued,
       ),
     );
   }
@@ -931,12 +973,19 @@ extension AppsProviderUpdates on AppsProvider {
     List<String>? specificIds,
     bool forceAll = false,
     SettingsProvider? sp,
+    R07TimelineEntry? resumeQueued,
   }) async {
     final SettingsProvider settingsProvider = sp ?? this.settingsProvider;
     if (updateCheckCompleter != null) {
+      if (resumeQueued != null) { throw StateError('Another check batch is active'); }
       return updateCheckCompleter!.future;
     }
     final completer = updateCheckCompleter = Completer<List<App>>();
+    // The initiating call reports its error directly; a joining caller awaits
+    // the shared future. Observe the shared error even when nobody joins so
+    // a database/ownership refusal cannot also become an unhandled error.
+    unawaited(completer.future.then<void>((_) {},
+      onError: (Object error, StackTrace stack) {}));
     var completed = 0;
     var total = 0;
     DateTime lastProgressNotification = DateTime.fromMillisecondsSinceEpoch(0);
@@ -958,7 +1007,7 @@ extension AppsProviderUpdates on AppsProvider {
       if (specificIds != null) {
         // Keep only IDs that resolve to exactly one listing, so an ambiguous
         // package ID (tracked from two stores) can't null-crash below.
-        appIds = specificIds.where((id) => apps[id] != null).toSet().toList();
+        appIds = specificIds.map((id) => apps[id]?.listingKey).whereType<String>().toSet().toList();
         if (settingsProvider.onlyCheckInstalledOrTrackOnlyApps) {
           appIds.removeWhere((id) {
             final App app = apps[id]!.app;
@@ -983,6 +1032,18 @@ extension AppsProviderUpdates on AppsProvider {
         );
       }
       total = appIds.length;
+      final timeline = R07OperationTimeline.instance;
+      R07OperationIntent checkIntent(App app) => R07OperationIntent(kind: 'check',
+        listingKey: app.listingKey, packageId: app.id, channel: r11ChannelFingerprint(app),
+        release: downloadReleaseCacheKey(InstallReleaseSnapshot.fromApp(app)));
+      if (resumeQueued != null && (appIds.length != 1 || appIds.single != resumeQueued.intent.listingKey)) {
+        throw StateError('Queued check no longer eligible');
+      }
+      final queuedChecks = resumeQueued == null ? await timeline.enqueue([
+        for (final id in appIds)
+          if (apps.containsListingKey(id)) checkIntent(apps[id]!.app),
+      ]) : [resumeQueued];
+      final checksByListing = {for (final row in queuedChecks) row.intent.listingKey: row};
       final List<_FetchedAppUpdate> pendingResults = [];
       // Checked, but the source had nothing usable (see
       // sourceAnsweredWithoutUpdate), keyed to that answer. Saved with the
@@ -1073,8 +1134,24 @@ extension AppsProviderUpdates on AppsProvider {
         while (nextIndex < total) {
           final String appId = appIds[nextIndex++];
           try {
-            final _FetchedAppUpdate? update =
-                await fetchUpdateWithHandshakeRetry(appId);
+            final current = apps[appId]?.app;
+            final queued = checksByListing[appId];
+            if (queued == null) { continue; }
+            if (!apps.containsListingKey(appId) || current == null || current.hasPendingRepoRename) {
+              await timeline.cancelQueued(queued.id);
+              continue;
+            }
+            final _FetchedAppUpdate? update = await timeline.run(queued,
+              checkIntent(current), 'checking', () {
+                final live = apps[appId]?.app;
+                if (!apps.containsListingKey(appId) || live == null || live.hasPendingRepoRename ||
+                    !checkIntent(live).matches(checkIntent(current))) {
+                  throw StateError('Queued check source changed');
+                }
+                return fetchUpdateWithHandshakeRetry(appId);
+              },
+              successStage: 'checked', failureReason: (error) =>
+                error is SocketException || error is HandshakeException ? 'network' : 'source');
             if (update != null) {
               pendingResults.add(update);
             }
@@ -1104,14 +1181,13 @@ extension AppsProviderUpdates on AppsProvider {
       await flushFetchedResults(force: true);
       if (errors.idsByErrorString.isNotEmpty) {
         final ex = CheckUpdatesException(updates, errors);
-        completer.completeError(ex);
         throw ex;
       }
       completer.complete(updates);
       return updates;
-    } catch (e) {
+    } catch (error, stack) {
       if (!completer.isCompleted) {
-        completer.completeError(e);
+        completer.completeError(error, stack);
       }
       rethrow;
     } finally {

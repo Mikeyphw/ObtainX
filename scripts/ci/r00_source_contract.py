@@ -25,6 +25,8 @@ EXPECTED_WORKFLOWS = {
     # Reviewed RT02C archive-to-installer verification, no release permissions.
     'obtainx-r02-rt02c.yml',
 }
+# Manual, protected-main, non-publishing R12 lane is not a seventh PR check.
+OPTIONAL_REVIEWED_WORKFLOWS = {'obtainx-r12-candidate.yml'}
 LEGACY_WORKFLOWS = {
     'build.yml', 'release.yml', 'pr-base-guard.yml',
     'format-issue-body.yml', 'translation-validate.yaml',
@@ -46,7 +48,7 @@ def check_private_material(paths: list[str]) -> list[str]:
 def check_workflows(workflow_files: dict[str, str]) -> list[str]:
     errors: list[str] = []
     names = set(workflow_files)
-    unexpected = names - EXPECTED_WORKFLOWS
+    unexpected = names - EXPECTED_WORKFLOWS - OPTIONAL_REVIEWED_WORKFLOWS
     missing = EXPECTED_WORKFLOWS - names
     if unexpected:
         errors.append('unreviewed workflow(s): ' + ', '.join(sorted(unexpected)))
@@ -66,6 +68,12 @@ def check_workflows(workflow_files: dict[str, str]) -> list[str]:
                 errors.append(name + ': action not pinned to a 40-hex SHA (' + ref + ')')
         if re.search(r'(?:gh\s+release\s+create|action-gh-release|github-tag-action|release-action)', data):
             errors.append(name + ': release publication not permitted in R00')
+    if 'obtainx-r12-candidate.yml' in workflow_files:
+        from r12_release_contract import inspect_workflow
+        try:
+            errors.extend('R12: ' + e for e in inspect_workflow(workflow_files['obtainx-r12-candidate.yml']))
+        except (ValueError, TypeError, KeyError):
+            errors.append('R12: invalid candidate workflow')
     return errors
 
 

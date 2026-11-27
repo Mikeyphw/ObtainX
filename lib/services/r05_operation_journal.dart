@@ -8,13 +8,36 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:obtainium/services/r05_operation_receipt.dart';
+import 'package:obtainium/services/r07_journal_guard.dart';
+import 'package:obtainium/services/r07_process_owner.dart';
 import 'package:path_provider/path_provider.dart';
+
+/// A read-only diagnostic projection. Corruption cannot authorize recovery or
+/// mutation, but it must not hide all other independently readable history.
+class R05JournalRead {
+  const R05JournalRead(this.receipts, this.unreadableCount);
+  final List<R05OperationReceipt> receipts;
+  final int unreadableCount;
+}
+
+class R05RetentionPreview {
+  R05RetentionPreview._(this.cutoff, this.listingKey, this.packageId,
+      this.channel, Map<String, String> entries)
+      : entries = Map.unmodifiable(entries);
+  final DateTime cutoff;
+  final String? listingKey, packageId, channel;
+  final Map<String, String> entries;
+}
 
 class R05OperationJournal {
   R05OperationJournal({Directory? testingRoot}) : this._internal(testingRoot);
   R05OperationJournal._internal(this._testingRoot);
   static final R05OperationJournal instance = R05OperationJournal();
+  // Limit unresolved operations, not the accumulated immutable history.
   static const int maxOperations = 512;
+  static bool _terminal(R05OperationReceipt item) => const {
+    R05InstallStage.confirmed, R05InstallStage.failed, R05InstallStage.cancelled,
+  }.contains(item.stage);
   static const int maxReceiptBytes = 64 * 1024;
   final Directory? _testingRoot;
   Future<void> _tail = Future<void>.value();
@@ -27,7 +50,8 @@ class R05OperationJournal {
     final result = Completer<T>();
     _tail = _tail.catchError((Object _) {}).then((_) async {
       try {
-        result.complete(await operation());
+        final root = await _root();
+        result.complete(await withR07JournalGuard(root, 'install-journal', operation));
       } catch (error, stack) {
         result.completeError(error, stack);
       }
@@ -46,6 +70,41 @@ class R05OperationJournal {
       throw const FileSystemException('R05 operation folder is not a directory');
     }
     return path;
+  }
+
+  Future<Directory> _archive(Directory root) async {
+    final directory = Directory('${root.path}.history');
+    final type = await FileSystemEntity.type(directory.path, followLinks: false);
+    if (type != FileSystemEntityType.notFound && type != FileSystemEntityType.directory) {
+      throw const FileSystemException('Unsafe R05 historical archive');
+    }
+    return directory;
+  }
+
+  Future<File> _locate(Directory root, String id) async {
+    final active = _file(root, id);
+    final archived = _file(await _archive(root), id);
+    final liveType = await FileSystemEntity.type(active.path, followLinks: false);
+    final pastType = await FileSystemEntity.type(archived.path, followLinks: false);
+    if (liveType != FileSystemEntityType.notFound && pastType != FileSystemEntityType.notFound) {
+      throw const FormatException('Duplicate active and historical R05 identity');
+    }
+    if (liveType != FileSystemEntityType.notFound) return active;
+    return archived;
+  }
+
+  Future<void> _archiveTerminal(Directory root, R05OperationReceipt receipt) async {
+    if (!_terminal(receipt)) return;
+    final archive = await _archive(root);
+    await archive.create(recursive: true);
+    final target = _file(archive, receipt.id);
+    if (await FileSystemEntity.type(target.path, followLinks: false) != FileSystemEntityType.notFound) {
+      throw const FormatException('R05 archive identity already exists');
+    }
+    final active = _file(root, receipt.id);
+    // Publish the terminal receipt first, then move it atomically. Either
+    // location remains readable after process death; no copy/delete window.
+    await active.rename(target.path);
   }
 
   File _file(Directory root, String id) {
@@ -71,35 +130,99 @@ class R05OperationJournal {
     return receipt;
   }
 
-  Future<List<R05OperationReceipt>> _readAll() async {
+  Future<R05JournalRead> _scan({required bool strict, bool includeHistory = true,
+      int? historyLimit, bool Function(R05OperationReceipt)? includeFinished,
+      void Function(R05OperationReceipt)? observe}) async {
     final root = await _root();
-    final files = await root.list(followLinks: false).toList();
-    if (files.length > maxOperations) throw const FileSystemException('R05 journal inventory exceeds limit');
     final receipts = <R05OperationReceipt>[];
-    for (final entity in files) {
-      final name = entity.uri.pathSegments.last;
-      // A crash between temp creation and atomic rename leaves a staging
-      // file. It is not a committed receipt; preserve it without deleting
-      // it or promoting it to an outcome.
-      if (RegExp(r'^\.[A-Za-z0-9_-]{16,90}-[0-9a-f]{24}\.tmp$').hasMatch(name)) {
-        if (entity is! File || await entity.length() > maxReceiptBytes) {
-          throw const FormatException('Unsafe R05 interrupted staging file');
-        }
-        continue;
+    final finished = <R05OperationReceipt>[];
+    var unreadable = 0;
+    final directories = <Directory>[root];
+    if (includeHistory) {
+      try {
+        final archive = await _archive(root);
+        if (await archive.exists()) directories.add(archive);
+      } on FileSystemException {
+        if (strict) rethrow;
+        unreadable++;
       }
-      if (entity is! File || !RegExp(r'^[A-Za-z0-9_-]{16,90}\.json$')
-          .hasMatch(entity.uri.pathSegments.last)) {
-        throw const FormatException('Unknown or interrupted R05 journal file');
-      }
-      receipts.add(await _read(entity));
     }
-    receipts.sort((a, b) => b.createdUtc.compareTo(a.createdUtc));
-    return List<R05OperationReceipt>.unmodifiable(receipts);
+    final ids = <String>{};
+    for (final directory in directories) {
+    await for (final entity in directory.list(followLinks: false)) {
+      try {
+        final name = entity.uri.pathSegments.last;
+        // Staging is not an outcome. Preserve interrupted staging files.
+        if (RegExp(r'^\.[A-Za-z0-9_-]{16,90}-[0-9a-f]{24}\.tmp$').hasMatch(name)) {
+          if (entity is! File ||
+              await FileSystemEntity.type(entity.path, followLinks: false) != FileSystemEntityType.file ||
+              await entity.length() > maxReceiptBytes) {
+            throw const FormatException('Unsafe R05 interrupted staging file');
+          }
+          continue;
+        }
+        if (entity is! File || !RegExp(r'^[A-Za-z0-9_-]{16,90}\.json$').hasMatch(name)) {
+          throw const FormatException('Unknown or interrupted R05 journal file');
+        }
+        final item = await _read(entity);
+        if (directory.path != root.path && !_terminal(item)) {
+          throw const FormatException('Unresolved receipt in historical archive');
+        }
+        if (!ids.add(item.id)) throw const FormatException('Duplicate R05 receipt identity');
+        observe?.call(item);
+        final terminalForActivity = _terminal(item) &&
+            (item.stage != R05InstallStage.confirmed || item.exactBytesConfirmed);
+        if (terminalForActivity && (historyLimit != null || includeFinished != null)) {
+          if (includeFinished?.call(item) == false || historyLimit == 0) { continue; }
+          finished.add(item);
+          if (historyLimit != null) {
+            finished.sort((a, b) {
+              final order = b.updatedUtc.compareTo(a.updatedUtc);
+              return order == 0 ? a.id.compareTo(b.id) : order;
+            });
+            if (finished.length > historyLimit) { finished.removeLast(); }
+          }
+        } else {
+          receipts.add(item);
+        }
+      } on FileSystemException {
+        if (strict) rethrow;
+        unreadable++;
+      } on FormatException {
+        if (strict) rethrow;
+        unreadable++;
+      } on TypeError {
+        if (strict) rethrow;
+        unreadable++;
+      }
+    }
+    }
+    receipts.addAll(finished);
+    receipts.sort((a, b) {
+      final time = b.createdUtc.compareTo(a.createdUtc);
+      return time == 0 ? a.id.compareTo(b.id) : time;
+    });
+    return R05JournalRead(List.unmodifiable(receipts), unreadable);
   }
+
+  Future<List<R05OperationReceipt>> _readAll() async =>
+      (await _scan(strict: true)).receipts;
+
+  Future<List<R05OperationReceipt>> _readRecovery() async =>
+      (await _scan(strict: true, includeHistory: false)).receipts;
+
+  Future<R05JournalRead> readForActivity({int? historyLimit,
+      bool Function(R05OperationReceipt)? includeFinished,
+      void Function(R05OperationReceipt)? observe}) =>
+      _exclusive(() => _scan(strict: false, historyLimit: historyLimit,
+        includeFinished: includeFinished, observe: observe));
 
   Future<void> _write(R05OperationReceipt receipt, {bool creating = false}) async {
     final root = await _root();
     final target = _file(root, receipt.id);
+    if (await FileSystemEntity.type(_file(await _archive(root), receipt.id).path, followLinks: false) != FileSystemEntityType.notFound) {
+      throw const FormatException('Cannot overwrite archived R05 receipt');
+    }
     final currentType = await FileSystemEntity.type(target.path, followLinks: false);
     if (currentType == FileSystemEntityType.link ||
         (creating && currentType != FileSystemEntityType.notFound)) {
@@ -121,6 +244,7 @@ class R05OperationJournal {
     } finally {
       if (await stage.exists()) await stage.delete();
     }
+    await _archiveTerminal(root, receipt);
   }
 
   Future<R05OperationReceipt> begin({
@@ -128,12 +252,30 @@ class R05OperationJournal {
     required String backend, required String kind,
     required List<String> fileNames,
     String? sourceHost, String? sourceBranch, String? workflow,
+    String? channelFingerprint,
     int? runId, int? runAttempt, String? commitSha, int? artifactId,
     String? downloadSha256, String? archiveSignerSha256, int? expectedVersionCode,
+    List<String> selectedApkSha256 = const [], List<String> archiveSignerSet = const [],
+    String? releaseFingerprint, String? containerSha256, int? workflowId,
+    String? sourceRepository, String? finalOrigin, String? parentAttemptId, String? timelineId,
+    String? processOwner,
   }) => _exclusive(() async {
-    final all = await _readAll();
-    if (all.length >= maxOperations) {
-      throw const FileSystemException('R05 journal full: export or explicitly clear old evidence first');
+    final all = await _readRecovery();
+    if (timelineId != null && all.any((item) => item.listingKey == listingKey && !_terminal(item))) {
+      throw StateError('An unresolved attempt already owns this listing');
+    }
+    if (parentAttemptId != null) {
+      final parent = await _read(await _locate(await _root(), parentAttemptId));
+      if (channelFingerprint == null || releaseFingerprint == null ||
+          parent.listingKey != listingKey || parent.packageId != packageId ||
+          parent.channelFingerprint != channelFingerprint || parent.releaseFingerprint != releaseFingerprint ||
+          !const {R05InstallStage.failed, R05InstallStage.cancelled}.contains(parent.stage) ||
+          all.any((item) => item.listingKey == listingKey && !_terminal(item))) {
+        throw StateError('Retry parent or current ownership is no longer qualified');
+      }
+    }
+    if (all.where((item) => !_terminal(item)).length >= maxOperations) {
+      throw const FileSystemException('R05 unresolved operation limit reached');
     }
     final random = Random.secure();
     final id = 'r05_${DateTime.now().toUtc().microsecondsSinceEpoch.toRadixString(16)}_'
@@ -141,10 +283,15 @@ class R05OperationJournal {
     final receipt = R05OperationReceipt.start(
       id: id, listingKey: listingKey, packageId: packageId,
       backend: backend, kind: kind, fileNames: fileNames,
+      channelFingerprint: channelFingerprint,
       sourceHost: sourceHost, sourceBranch: sourceBranch, workflow: workflow,
       runId: runId, runAttempt: runAttempt, commitSha: commitSha,
       artifactId: artifactId, expectedVersionCode: expectedVersionCode, downloadSha256: downloadSha256,
       archiveSignerSha256: archiveSignerSha256,
+      selectedApkSha256: selectedApkSha256, archiveSignerSet: archiveSignerSet,
+      releaseFingerprint: releaseFingerprint, containerSha256: containerSha256,
+      workflowId: workflowId, sourceRepository: sourceRepository, finalOrigin: finalOrigin,
+      parentAttemptId: parentAttemptId, timelineId: timelineId, processOwner: processOwner,
     );
     await _write(receipt, creating: true);
     return receipt;
@@ -154,7 +301,7 @@ class R05OperationJournal {
     R05AndroidEvidence? evidence, int? androidCode, String? reason,
   }) => _exclusive(() async {
     final root = await _root();
-    final previous = await _read(_file(root, id));
+    final previous = await _read(await _locate(root, id));
     final updated = previous.transition(stage, evidence: evidence,
         androidCode: androidCode, reason: reason);
     await _write(updated);
@@ -167,7 +314,7 @@ class R05OperationJournal {
     R05AndroidEvidence? evidence, int? androidCode, String? reason,
   }) => _exclusive(() async {
     final root = await _root();
-    final previous = await _read(_file(root, id));
+    final previous = await _read(await _locate(root, id));
     if (previous.stage == R05InstallStage.confirmed ||
         previous.stage == R05InstallStage.failed ||
         previous.stage == R05InstallStage.cancelled ||
@@ -185,10 +332,74 @@ class R05OperationJournal {
 
   Future<List<R05OperationReceipt>> list() => _exclusive(_readAll);
 
+  /// Explicit retention preview. Unknown channel ownership remains read-only;
+  /// the null filter selects all independently bound channels.
+  bool _retentionMatch(R05OperationReceipt item, DateTime cutoff,
+      String? listingKey, String? packageId, String? channel) =>
+      item.channelFingerprint != null &&
+      _terminal(item) && (item.stage != R05InstallStage.confirmed || item.exactBytesConfirmed) &&
+      item.updatedUtc.isBefore(cutoff.toUtc()) &&
+      (listingKey == null || item.listingKey == listingKey) &&
+      (packageId == null || item.packageId == packageId) &&
+      (channel == null || item.channelFingerprint == channel);
+
+  Future<R05RetentionPreview> _preview(DateTime cutoff, String? listingKey,
+      String? packageId, String? channel) async {
+    final all = await _readAll();
+    final referencedParents = all.map((item) => item.parentAttemptId).whereType<String>().toSet();
+    return R05RetentionPreview._(cutoff.toUtc(), listingKey, packageId, channel, {
+      for (final item in all)
+        if (!referencedParents.contains(item.id) && _retentionMatch(item, cutoff, listingKey, packageId, channel))
+          item.id: item.encode(),
+    });
+  }
+
+  Future<R05RetentionPreview> previewTerminalBefore(DateTime cutoff, {
+    String? listingKey, String? packageId, String? channel,
+  }) => _exclusive(() => _preview(cutoff, listingKey, packageId, channel));
+
+  /// Every deletion is limited to the reviewed immutable terminal receipt.
+  /// A changed selection refuses before deletion; unresolved entries and R03
+  /// recovery bytes are never touched. Terminal stages have no transitions.
+  Future<int> pruneTerminalBefore(DateTime cutoff, {String? listingKey,
+    String? packageId, String? channel, R05RetentionPreview? preview,
+  }) => _exclusive(() async {
+    final current = await _preview(cutoff, listingKey, packageId, channel);
+    if (preview != null && (preview.cutoff != current.cutoff ||
+        preview.listingKey != current.listingKey || preview.packageId != current.packageId ||
+        preview.channel != current.channel || preview.entries.length != current.entries.length ||
+        preview.entries.entries.any((entry) => current.entries[entry.key] != entry.value))) {
+      throw StateError('History selection changed; review retention again');
+    }
+    final approved = preview ?? current;
+    final root = await _root();
+    var removed = 0;
+    for (final entry in approved.entries.entries) {
+      final file = await _locate(root, entry.key);
+      if (await FileSystemEntity.type(file.path, followLinks: false) == FileSystemEntityType.notFound) {
+        continue;
+      }
+      final item = await _read(file);
+      if (item.encode() != entry.value ||
+          !_retentionMatch(item, cutoff, listingKey, packageId, channel)) {
+        throw StateError('History selection changed; review retention again');
+      }
+      // A concurrent legitimate prune may already have removed this immutable
+      // receipt. Do not remove or substitute any other file.
+      try {
+        await file.delete();
+        removed++;
+      } on FileSystemException {
+        if (await FileSystemEntity.type(file.path, followLinks: false) != FileSystemEntityType.notFound) rethrow;
+      }
+    }
+    return removed;
+  });
+
   /// A broadcast has package scope, not operation scope. Never attribute it
   /// to a specific install attempt while two live attempts are ambiguous.
   Future<R05OperationReceipt?> uniqueUnresolved(String listingKey) => _exclusive(() async {
-    final candidates = (await _readAll()).where((item) =>
+    final candidates = (await _readRecovery()).where((item) =>
       item.listingKey == listingKey &&
       (item.stage == R05InstallStage.pending ||
        item.stage == R05InstallStage.awaitingApproval ||
@@ -198,7 +409,7 @@ class R05OperationJournal {
   });
 
   Future<R05OperationReceipt?> latestUnresolved(String listingKey) => _exclusive(() async {
-    final all = await _readAll();
+    final all = await _readRecovery();
     for (final item in all) {
       if (item.listingKey == listingKey &&
           (item.stage == R05InstallStage.pending ||
@@ -214,9 +425,16 @@ class R05OperationJournal {
   /// Process death cannot be interpreted as cancellation or success.
   /// An unresolved Android approval/handoff remains visible in the review UI.
   Future<void> recoverInterrupted() => _exclusive(() async {
-    final all = await _readAll();
+    final root = await _root();
+    final all = await _readRecovery();
     for (final item in all) {
-      if (item.stage == R05InstallStage.pending) {
+      if (_terminal(item)) {
+        await _archiveTerminal(root, item);
+      } else if (item.stage == R05InstallStage.pending) {
+        final owner = item.processOwner;
+        if (owner != null && await R07ProcessOwner.decode(owner).inspect() != R07ProcessState.dead) {
+          continue; // A live or unprovable owner is not evidence of interruption.
+        }
         await _write(item.transition(R05InstallStage.unknown,
             reason: 'App restarted before installer outcome was recorded'));
       }

@@ -40,7 +40,7 @@ class SourceMutationTests(unittest.TestCase):
     def test_missing_wrong_certificate_rejected(self):
         self.mutate(C.FIXTURE,'orig_cert!=wrong_cert','True')
     def test_source_bound_ci(self):
-        self.mutate(C.WORKFLOW,'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"','true')
+        self.mutate(C.WORKFLOW,'test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"','true')
     def test_require_emulator_api36(self):
         self.mutate(C.WORKFLOW,'api-level: 36','api-level: 35')
     def test_require_exact_pinned_emulator_runner(self):

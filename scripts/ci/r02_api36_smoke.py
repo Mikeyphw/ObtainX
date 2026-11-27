@@ -267,7 +267,7 @@ def host_identity() -> tuple[str, str]:
     need(os.environ.get('GITHUB_ACTIONS') == 'true' and
          os.environ.get('RUNNER_OS') == 'Linux' and
          os.environ.get('RUNNER_ARCH') == 'X64', 'GH Linux x64 runner required')
-    source = os.environ.get('GITHUB_SHA', '')
+    source = os.environ.get('OX_EXPECTED_SHA', '')
     run_id = os.environ.get('GITHUB_RUN_ID', '')
     need(bool(re.fullmatch('[0-9a-f]{40}', source)), 'missing source SHA')
     need(bool(re.fullmatch('[0-9]+', run_id)), 'missing run ID')

@@ -2,69 +2,58 @@ name: ObtainX R02 / API 36 Hosted Emulator Bootstrap
 
 on:
   pull_request:
-    paths:
-      - 'lib/installers/**'
-      - 'lib/providers/apps_provider_install.dart'
-      - 'lib/providers/apps_provider.dart'
-      - 'lib/providers/source_provider.dart'
-      - 'lib/components/generated_form_renderer.dart'
-      - 'lib/services/r03_*'
-      - 'lib/services/r04_*'
-      - 'lib/services/r05_*'
-      - 'lib/widgets/r05_*'
-      - 'lib/pages/app.dart'
-      - 'lib/components/r06_*'
-      - 'test/r06_*'
-      - 'scripts/ci/r06_*'
-      - 'test/r05_*'
-      - 'scripts/ci/r05_*'
-      - 'lib/app_sources/github.dart'
-      - 'test/r04_*'
-      - 'scripts/ci/r04_*'
-      - 'test/r03_*'
-      - 'scripts/ci/r03_*'
-      - 'lib/providers/apps_provider_updates.dart'
-      - 'lib/providers/installer_provider.dart'
-      - 'lib/providers/external_install_bridge.dart'
-      - 'lib/services/install_bundle_plan.dart'
-      - 'lib/services/verified_obb_delivery.dart'
-      - 'lib/services/artifact_file_work.dart'
-      - 'integration_test/**'
-      - 'android/**'
-      - '.github/workflows/**'
-      - 'scripts/ci/r02_rt02**'
-      - 'scripts/ci/r02f_p02_*'
-      - 'scripts/ci/r02f_p03_*'
-      - 'scripts/ci/r02f_p04b_*'
-      - 'scripts/ci/r02f_p04_*'
-      - 'lib/services/r02f_p04_backend_availability.dart'
-      - 'scripts/ci/r02f_p05_*'
-      - 'lib/services/r02f_p05_*'
-      - 'test/r02f_p05_*'
-      - 'scripts/ci/r02_final_*'
-      - 'lib/services/r02_local_*'
-      - 'test/r02_local_*'
-      - 'scripts/ci/r02g_*'
-      - 'scripts/ci/r02_sdk_retry.py'
-      - 'scripts/ci/obtainx_ci_policy.py'
-      - 'scripts/ci/*optimization*'
-      - 'scripts/ci/r00_source_contract.py'
-      - 'pubspec.yaml'
-      - 'pubspec.lock'
-      - 'docs/SECURITY_RELEASE_POLICY.md'
-    types: [opened, reopened, synchronize, labeled, unlabeled]
+    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review, converted_to_draft]
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
+
+env:
+  OX_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 concurrency:
   group: obtainx-r02-api36-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  scope:
+    name: Exact-SHA scope classifier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.scope.outputs.mode }}
+      full_flutter: ${{ steps.scope.outputs.full_flutter }}
+      targeted_flutter: ${{ steps.scope.outputs.targeted_flutter }}
+      api36: ${{ steps.scope.outputs.api36 }}
+      rt02: ${{ steps.scope.outputs.rt02 }}
+      rt02b: ${{ steps.scope.outputs.rt02b }}
+      rt02c: ${{ steps.scope.outputs.rt02c }}
+      plan: ${{ steps.scope.outputs.plan }}
+    steps:
+      - name: Checkout PR HEAD, not GitHub synthetic merge commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve exact overlay scope
+        id: scope
+        shell: bash
+        env:
+          OX_SCOPE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
+          python3 -B scripts/ci/obtainx_ci_policy.py plan --head "$OX_EXPECTED_SHA" --github-output "$GITHUB_OUTPUT"
+      - name: OPT07 plan SHA256 ${{ steps.scope.outputs.plan_digest }}
+        env:
+          OX_PLAN_DIGEST: ${{ steps.scope.outputs.plan_digest }}
+        shell: bash
+        run: test "${#OX_PLAN_DIGEST}" -eq 64 && [[ "$OX_PLAN_DIGEST" =~ ^[a-f0-9]{64}$ ]]
   emulator-api36:
-    if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'ci:development-only') }}
+    needs: scope
+    if: needs.scope.outputs.api36 == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
@@ -73,12 +62,13 @@ jobs:
       - name: Checkout exact source commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Enforce emulator bootstrap source and mutation contracts
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
           python3 -B -m unittest discover -s scripts/ci -p 'test_r02_api36_contract.py' -v
           python3 -B scripts/ci/r02_api36_contract.py --check
       - name: Set up Java 21
@@ -97,7 +87,7 @@ jobs:
           path: |
             build/app/outputs/flutter-apk/app-normal-debug.apk
             build/app/outputs/flutter-apk/obtainx-opt03-debug-apk.json
-          key: obtainx-opt03-v1-${{ runner.os }}-flutter3.47.6-java21-normal-debug-${{ github.sha }}
+          key: obtainx-opt03-v1-${{ runner.os }}-flutter3.47.6-java21-normal-debug-${{ github.event.pull_request.head.sha || github.sha }}
           fail-on-cache-miss: false
       - name: Set up Flutter 3.47.6
         if: steps.opt03_apk_restore.outputs.cache-hit != 'true'
@@ -111,7 +101,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$OX_EXPECTED_SHA"
           test "$RUNNER_OS" = Linux
           test "$(uname -m)" = x86_64
           mkdir -p "$RUNNER_TEMP/obtainx-r02-api36"
@@ -175,7 +165,7 @@ jobs:
           OX_EVIDENCE_ROOT: ${{ runner.temp }}/obtainx-r02-api36
         run: |
           set -euo pipefail
-          printf 'ObtainX evidence hashes only; source=%s; uploads remain mandatory\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          printf 'ObtainX evidence hashes only; source=%s; uploads remain mandatory\n' "$OX_EXPECTED_SHA" >> "$GITHUB_STEP_SUMMARY"
           for f in "$OX_EVIDENCE_ROOT"/*.json "$OX_EVIDENCE_ROOT"/fixtures/*inventory.json; do
             if [[ -f "$f" && ! -L "$f" ]]; then
               n="$(wc -c < "$f")"
@@ -190,7 +180,7 @@ jobs:
         timeout-minutes: 3
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # pinned v4
         with:
-          name: obtainx-r02-api36-bootstrap-${{ github.sha }}
+          name: obtainx-r02-api36-bootstrap-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/obtainx-r02-api36/receipt.json
             ${{ runner.temp }}/obtainx-r02-api36/app_launch.png

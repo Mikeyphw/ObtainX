@@ -8,6 +8,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:obtainium/services/r07_journal_guard.dart';
 
 const int r03ChunkBytes = 1024 * 1024;
 const int r03MaximumBytes = 4 * 1024 * 1024 * 1024;
@@ -38,6 +39,40 @@ class R03InvalidEntityException implements Exception {
 /// A persistent receipt contains no bearer tokens, URL query strings, or
 /// authorization headers. The actual URL and credentials are re-resolved from
 /// the tracked source on each operation, including after application restart.
+/// Optional exact history owner; absent on legacy or non-library transfers.
+class R03HistoryBinding {
+  R03HistoryBinding(this.listingKey, this.packageId, this.channel,
+      {this.releaseFingerprint}) {
+    if (listingKey.isEmpty || listingKey.length > 1000 ||
+        listingKey.contains(RegExp(r'[\x00-\x1f/\\]')) ||
+        !RegExp(r'^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$').hasMatch(packageId) ||
+        packageId.length > 255 || !RegExp(r'^[a-f0-9]{64}$').hasMatch(channel) ||
+        (releaseFingerprint != null && !RegExp(r'^[a-f0-9]{64}$').hasMatch(releaseFingerprint!))) {
+      throw const FormatException('Invalid R03 history owner');
+    }
+  }
+  final String listingKey, packageId, channel;
+  final String? releaseFingerprint;
+  Map<String, String> toJson() => {'listingKey': listingKey, 'packageId': packageId, 'channel': channel,
+    'releaseFingerprint': ?releaseFingerprint};
+  static R03HistoryBinding? decode(Object? value) {
+    if (value == null) return null;
+    if (value is! Map || value.keys.any((key) => !const {'listingKey', 'packageId', 'channel', 'releaseFingerprint'}.contains(key)) ||
+        value['listingKey'] is! String || value['packageId'] is! String || value['channel'] is! String ||
+        (value.containsKey('releaseFingerprint') && value['releaseFingerprint'] is! String)) {
+      throw const FormatException('Invalid R03 history binding');
+    }
+    return R03HistoryBinding(value['listingKey'] as String, value['packageId'] as String,
+        value['channel'] as String, releaseFingerprint: value['releaseFingerprint'] as String?);
+  }
+  @override
+  bool operator ==(Object other) => other is R03HistoryBinding &&
+      other.listingKey == listingKey && other.packageId == packageId && other.channel == channel &&
+      other.releaseFingerprint == releaseFingerprint;
+  @override
+  int get hashCode => Object.hash(listingKey, packageId, channel, releaseFingerprint);
+}
+
 class R03DownloadRecord {
   const R03DownloadRecord({
     required this.jobId,
@@ -52,6 +87,9 @@ class R03DownloadRecord {
     this.lastModified,
     this.finalDigest,
     this.completedBytes,
+    this.historyBinding,
+    this.originObserved = false,
+    this.cacheRootFingerprint,
   });
 
   final String jobId;
@@ -66,16 +104,28 @@ class R03DownloadRecord {
   final String? lastModified;
   final String? finalDigest;
   final int? completedBytes;
+  final R03HistoryBinding? historyBinding;
+  final bool originObserved;
+  final String? cacheRootFingerprint;
+
+  bool get explicitlyResumable => historyBinding?.releaseFingerprint != null &&
+      cacheRootFingerprint != null && ifRange != null && totalBytes != null &&
+      validatedBytes > 0 && validatedBytes < totalBytes! && finalDigest == null &&
+      const {R03Stage.paused, R03Stage.failed, R03Stage.cancelled,
+        R03Stage.retrying, R03Stage.downloading}.contains(stage);
 
   int get validatedBytes => blocks.length * r03ChunkBytes;
   String? get ifRange => etag ?? lastModified;
 
   Map<String, Object?> toJson() => {
     'schema': 'obtainx.r03.download.v1',
+    if (historyBinding != null) 'historyBinding': historyBinding!.toJson(),
     'jobId': jobId,
     'sourceFingerprint': sourceFingerprint,
     'origin': origin,
     'finalOrigin': finalOrigin,
+    if (originObserved) 'originObserved': true,
+    if (cacheRootFingerprint != null) 'cacheRootFingerprint': cacheRootFingerprint,
     'fileName': fileName,
     'stage': stage.name,
     'blocks': blocks,
@@ -112,6 +162,10 @@ class R03DownloadRecord {
           completed > r03MaximumBytes))) {
       throw const FormatException('R03 invalid size metadata');
     }
+    final cacheRoot = input['cacheRootFingerprint'];
+    if (cacheRoot != null && (cacheRoot is! String || !RegExp(r'^[a-f0-9]{64}$').hasMatch(cacheRoot))) {
+      throw const FormatException('Invalid R03 cache root identity');
+    }
     return R03DownloadRecord(
       jobId: _requiredString(input, 'jobId'),
       sourceFingerprint: _requiredString(input, 'sourceFingerprint'),
@@ -125,6 +179,9 @@ class R03DownloadRecord {
       lastModified: input['lastModified'] as String?,
       finalDigest: input['finalDigest'] as String?,
       completedBytes: completed as int?,
+      historyBinding: R03HistoryBinding.decode(input['historyBinding']),
+      originObserved: input['originObserved'] == true,
+      cacheRootFingerprint: cacheRoot as String?,
     );
   }
 
@@ -150,6 +207,8 @@ class R03DownloadRecord {
     lastModified: lastModified ?? this.lastModified,
     finalDigest: finalDigest ?? this.finalDigest,
     completedBytes: completedBytes ?? this.completedBytes,
+    historyBinding: historyBinding, originObserved: originObserved,
+    cacheRootFingerprint: cacheRootFingerprint,
   );
 }
 
@@ -193,12 +252,14 @@ String? r03StrongEtag(String? value) {
   return (start: start, end: end, total: total);
 }
 
-String r03FinalOrigin(HttpClientResponse response, Uri source) {
+String r03FinalOrigin(HttpClientResponse response, Uri source, {Uri? resolved}) {
   // The HttpService's redirect policy still owns authorization forwarding.
   // A receipt records only the final origin, never a presigned URL/query.
-  Uri current = source;
-  for (final redirect in response.redirects) {
-    current = current.resolveUri(redirect.location);
+  Uri current = resolved ?? source;
+  if (resolved == null) {
+    for (final redirect in response.redirects) {
+      current = current.resolveUri(redirect.location);
+    }
   }
   return '${current.scheme}://${current.host}${current.hasPort ? ':${current.port}' : ''}';
 }
@@ -207,14 +268,23 @@ String r03FinalOrigin(HttpClientResponse response, Uri source) {
 /// journal. A committed .part block has a SHA-256 hash in that journal; an
 /// uncommitted trailing fragment is truncated on recovery.
 class R03DownloadEngine {
-  R03DownloadEngine({required this.journalDirectory});
+  R03DownloadEngine({required this.journalDirectory, this.maxBytes = r03MaximumBytes}) {
+    if (maxBytes <= 0 || maxBytes > r03MaximumBytes) {
+      throw const R03InvalidEntityException('invalid transfer bound');
+    }
+  }
   final Directory journalDirectory;
-  static final Map<String, Future<File>> _active = {};
+  final int maxBytes;
+  static final Map<String, Future<({File file, R03DownloadRecord receipt})>> _active = {};
   // A caller with different trusted-byte requirements must never inherit a
   // transfer owned by another caller, even when URL and destination match.
   static final Map<String, String?> _activeExpectedDigest = {};
+  static final Map<String, int> _activeMaxBytes = {};
+  static final Map<String, R03HistoryBinding?> _activeHistory = {};
+  static final Map<String, bool> _activeOriginObserved = {};
 
-  static String jobKey(Uri url, File destination, Map<String, String> headers) {
+  static String jobKey(Uri url, File destination, Map<String, String> headers,
+      {R03HistoryBinding? historyBinding}) {
     final sorted = headers.entries.toList()
       ..sort((a, b) => a.key.toLowerCase().compareTo(b.key.toLowerCase()));
     // Including a digest of the request headers prevents cross-account cache
@@ -222,6 +292,7 @@ class R03DownloadEngine {
     return sha256.convert(utf8.encode(jsonEncode([
       url.toString(), destination.absolute.path,
       for (final h in sorted) [h.key.toLowerCase(), h.value],
+      if (historyBinding?.releaseFingerprint != null) historyBinding!.toJson(),
     ]))).toString();
   }
 
@@ -235,40 +306,63 @@ class R03DownloadEngine {
     required void Function(double?, int?, int?)? onProgress,
     bool useExisting = true,
     String? expectedSha256,
+    R03HistoryBinding? historyBinding,
+    R03DownloadRecord? resumeRecord,
+    Uri? Function(HttpClientResponse)? resolvedUri,
+    void Function(R03DownloadRecord)? onVerified,
   }) {
-    final key = jobKey(source, destination, headers);
+    final key = jobKey(source, destination, headers, historyBinding: historyBinding);
     final existing = _active[key];
     if (existing != null) {
       unawaited(firstResponse.listen((_) {}).cancel());
-      if (_activeExpectedDigest[key] != expectedSha256) {
+      if (resumeRecord != null || _activeExpectedDigest[key] != expectedSha256 || _activeMaxBytes[key] != maxBytes ||
+          _activeHistory[key] != historyBinding || _activeOriginObserved[key] != (resolvedUri != null)) {
         return Future<File>.error(const R03InvalidEntityException(
           'conflicting trusted digest for active transfer'));
       }
-      return existing;
+      return existing.then((result) { onVerified?.call(result.receipt); return result.file; });
     }
-    final next = _run(
-      source: source, destination: destination, headers: headers,
-      firstResponse: firstResponse, fetch: fetch,
-      isCancelled: isCancelled, onProgress: onProgress,
-      useExisting: useExisting, expectedSha256: expectedSha256,
-      jobId: key,
-    );
+    Future<({File file, R03DownloadRecord receipt})> guarded() async {
+      var entered = false;
+      try {
+        return await withR07JournalGuard(journalDirectory,
+          'destination:${destination.absolute.path}', () {
+          entered = true;
+          return _run(source: source, destination: destination, headers: headers,
+            firstResponse: firstResponse, fetch: fetch,
+            isCancelled: isCancelled, onProgress: onProgress,
+            useExisting: useExisting, expectedSha256: expectedSha256,
+            jobId: key, historyBinding: historyBinding, resolvedUri: resolvedUri,
+            resumeRecord: resumeRecord);
+        });
+      } catch (_) {
+        if (!entered) await firstResponse.listen((_) {}).cancel();
+        rethrow;
+      }
+    }
+    final next = guarded();
     _active[key] = next;
     _activeExpectedDigest[key] = expectedSha256;
+    _activeMaxBytes[key] = maxBytes;
+    _activeHistory[key] = historyBinding;
+    _activeOriginObserved[key] = resolvedUri != null;
     void clearActive() {
       if (identical(_active[key], next)) {
         _active.remove(key);
         _activeExpectedDigest.remove(key);
+        _activeMaxBytes.remove(key);
+        _activeHistory.remove(key);
+        _activeOriginObserved.remove(key);
       }
     }
     // Consume completion and failure without returning the failed Future from
     // cleanup (a returned Future can re-emit its error into the cleanup chain).
     unawaited(next.then<void>((_) { clearActive(); },
       onError: (Object error, StackTrace trace) { clearActive(); }));
-    return next;
+    return next.then((result) { onVerified?.call(result.receipt); return result.file; });
   }
 
-  Future<File> _run({
+  Future<({File file, R03DownloadRecord receipt})> _run({
     required Uri source,
     required File destination,
     required Map<String, String> headers,
@@ -279,47 +373,92 @@ class R03DownloadEngine {
     required bool useExisting,
     required String jobId,
     String? expectedSha256,
+    R03HistoryBinding? historyBinding,
+    R03DownloadRecord? resumeRecord,
+    Uri? Function(HttpClientResponse)? resolvedUri,
   }) async {
-    await journalDirectory.create(recursive: true);
     final journal = File('${journalDirectory.path}/$jobId.json');
     final part = File('${destination.path}.part');
     final origin = '${source.scheme}://${source.host}${source.hasPort ? ':${source.port}' : ''}';
-    if (await FileSystemEntity.type(destination.path, followLinks: false) ==
-            FileSystemEntityType.link ||
-        await FileSystemEntity.type(part.path, followLinks: false) ==
-            FileSystemEntityType.link ||
-        await FileSystemEntity.type(journal.path, followLinks: false) ==
-            FileSystemEntityType.link) {
-      throw const R03InvalidEntityException('symlink path rejected');
-    }
     final R03DownloadRecord initial = R03DownloadRecord(
       jobId: jobId, sourceFingerprint: jobId, origin: origin,
       finalOrigin: origin, fileName: destination.uri.pathSegments.last,
-      stage: R03Stage.queued, blocks: const [],
+      stage: R03Stage.queued, blocks: const [], historyBinding: historyBinding,
+      originObserved: resolvedUri != null,
+      cacheRootFingerprint: r07JournalFingerprint(destination.parent.absolute.path),
     );
     R03DownloadRecord? previous;
-    if (useExisting && await journal.exists()) {
-      try {
-        final decoded = jsonDecode(await journal.readAsString());
-        if (decoded is! Map<String, dynamic>) throw const FormatException('journal map');
-        final candidate = R03DownloadRecord.fromJson(decoded);
-        if (candidate.jobId == jobId && candidate.sourceFingerprint == jobId &&
-            candidate.fileName == initial.fileName && candidate.origin == origin) {
-          previous = candidate;
-        }
-      } catch (_) {
-        // A damaged journal must never authorize reusing stale bytes.
+    try {
+      final journalType = await FileSystemEntity.type(journalDirectory.path, followLinks: false);
+      if (journalType != FileSystemEntityType.notFound && journalType != FileSystemEntityType.directory) {
+        throw const R03InvalidEntityException('Unsafe transfer journal directory');
       }
+      await journalDirectory.create(recursive: true);
+      for (final path in [destination.path, part.path, journal.path]) {
+        final type = await FileSystemEntity.type(path, followLinks: false);
+        if (type != FileSystemEntityType.notFound && type != FileSystemEntityType.file) {
+          throw const R03InvalidEntityException('Unsafe transfer file path');
+        }
+      }
+      if (await part.exists()) {
+        await _refuseForeignPartial(initial);
+      }
+      if (await journal.exists()) {
+        try {
+          final candidate = await _readCheckpoint(journal);
+          if (candidate.jobId == jobId && candidate.sourceFingerprint == jobId &&
+              candidate.fileName == initial.fileName && candidate.origin == origin &&
+              (resolvedUri == null || candidate.originObserved) &&
+              (candidate.totalBytes ?? 0) <= maxBytes &&
+              (candidate.completedBytes ?? 0) <= maxBytes && candidate.validatedBytes <= maxBytes) {
+            previous = candidate;
+          } else if (historyBinding != null && await part.exists()) {
+            throw const R03InvalidEntityException('Existing partial checkpoint identity differs');
+          }
+        } catch (_) {
+          // Unknown owned partial bytes must be preserved, not reclassified as
+          // an empty checkpoint. Legacy non-library orphans remain untrusted.
+          if (historyBinding != null && await part.exists()) rethrow;
+        }
+      }
+      if (previous?.historyBinding != null && previous?.historyBinding != historyBinding) {
+        throw const R03InvalidEntityException('conflicting historical owner for transfer');
+      }
+      if (!useExisting && previous?.explicitlyResumable == true && await part.exists()) {
+        throw const R03InvalidEntityException('A recoverable transfer owns these bytes; resume it instead');
+      }
+      if (!useExisting) previous = null;
+      if (resumeRecord != null && (!useExisting || previous == null ||
+          !resumeRecord.explicitlyResumable || resumeRecord.jobId != jobId ||
+          previous.cacheRootFingerprint != initial.cacheRootFingerprint ||
+          jsonEncode(previous.toJson()) != jsonEncode(resumeRecord.toJson()))) {
+        throw const R03InvalidEntityException('Exact paused transfer no longer available');
+      }
+    } catch (_) {
+      try { await firstResponse.listen((_) {}).cancel(); } catch (_) { /* primary refusal */ }
+      rethrow;
     }
     var response = firstResponse;
-    var active = initial;
+    final effectiveInitial = previous != null && previous.historyBinding == null
+        ? R03DownloadRecord(jobId: initial.jobId, sourceFingerprint: initial.sourceFingerprint,
+          origin: initial.origin, finalOrigin: initial.finalOrigin, fileName: initial.fileName,
+          stage: R03Stage.queued, blocks: const [], originObserved: initial.originObserved) : initial;
+    var active = effectiveInitial;
     var committed = <String>[];
     var acceptedBytes = 0;
     int? total;
     String? etag;
     String? lastModified;
-    var currentOrigin = r03FinalOrigin(firstResponse, source);
+    String responseOrigin(HttpClientResponse value) {
+      final resolved = resolvedUri?.call(value);
+      if (resolvedUri != null && resolved == null) {
+        throw const R03InvalidEntityException('transport did not establish final origin');
+      }
+      return r03FinalOrigin(value, source, resolved: resolved);
+    }
+    var currentOrigin = responseOrigin(firstResponse);
     bool eligibleForResume = false;
+    var startedWrite = false;
 
     try {
       if (isCancelled()) throw const R03InvalidEntityException('cancelled');
@@ -331,7 +470,7 @@ class R03DownloadEngine {
         if (digest == previous.finalDigest &&
             (expectedSha256 == null || digest == expectedSha256)) {
           await response.listen((_) {}).cancel();
-          return destination;
+          return (file: destination, receipt: previous);
         }
       }
       if (useExisting && previous != null &&
@@ -346,30 +485,36 @@ class R03DownloadEngine {
           eligibleForResume = false;
         }
       }
+      if (resumeRecord != null && !eligibleForResume) {
+        await response.listen((_) {}).cancel();
+        throw const R03InvalidEntityException('Resume requires the same origin, validator and verified blocks');
+      }
       if (eligibleForResume) {
-        // Keep only journal-committed, SHA-verified bytes. Never reuse an
-        // uncheckpointed fragment left by a terminated process.
-        await _truncateTo(part, previous!.validatedBytes);
-        committed = List<String>.of(previous.blocks);
-        acceptedBytes = previous.validatedBytes;
+        final checkpoint = previous!;
+        committed = List<String>.of(checkpoint.blocks);
+        acceptedBytes = checkpoint.validatedBytes;
         await response.listen((_) {}).cancel();
         final resumableHeaders = Map<String, String>.from(headers)
           ..removeWhere((key, _) => key.toLowerCase() == 'range' ||
               key.toLowerCase() == 'if-range')
           ..['range'] = 'bytes=$acceptedBytes-'
-          ..['if-range'] = previous.ifRange!;
+          ..['if-range'] = checkpoint.ifRange!;
         response = await fetch(resumableHeaders);
-        currentOrigin = r03FinalOrigin(response, source);
+        currentOrigin = responseOrigin(response);
         final range = r03ContentRange(response.headers.value(HttpHeaders.contentRangeHeader));
         final correct206 = response.statusCode == HttpStatus.partialContent &&
             range != null && range.start == acceptedBytes &&
-            range.total == previous.totalBytes &&
+            range.total == checkpoint.totalBytes &&
             range.end == range.total - 1 &&
             response.contentLength == range.end - range.start + 1 &&
             response.compressionState != HttpClientResponseCompressionState.decompressed &&
-            currentOrigin == previous.finalOrigin &&
-            _responseValidatorMatches(previous, response);
+            currentOrigin == checkpoint.finalOrigin &&
+            _responseValidatorMatches(checkpoint, response);
         if (!correct206) {
+          if (resumeRecord != null) {
+            await response.listen((_) {}).cancel();
+            throw const R03InvalidEntityException('Explicit resume requires an exact validated range');
+          }
           // Any ignored, invalid or changed range restarts from byte zero;
           // never append these bytes, even when the server returns 206.
           committed.clear();
@@ -380,7 +525,11 @@ class R03DownloadEngine {
               ..removeWhere((key, _) => key.toLowerCase() == 'range' ||
                   key.toLowerCase() == 'if-range'));
           }
-          currentOrigin = r03FinalOrigin(response, source);
+          currentOrigin = responseOrigin(response);
+        } else {
+          // Truncate only after the exact 206 is established. A refused
+          // explicit resume must preserve the previous checkpoint and bytes.
+          await _truncateTo(part, acceptedBytes);
         }
       }
       if (response.statusCode != HttpStatus.ok &&
@@ -395,18 +544,19 @@ class R03DownloadEngine {
               response.compressionState == HttpClientResponseCompressionState.decompressed
               ? null : response.contentLength);
       if (responseTotal != null && (responseTotal < acceptedBytes ||
-          responseTotal > r03MaximumBytes)) {
+          responseTotal > maxBytes)) {
         throw const R03InvalidEntityException('invalid expected length');
       }
       total = responseTotal;
       etag = r03StrongEtag(response.headers.value(HttpHeaders.etagHeader));
       lastModified = response.headers.value(HttpHeaders.lastModifiedHeader);
-      active = initial.copyWith(
+      active = effectiveInitial.copyWith(
         stage: R03Stage.downloading, blocks: committed,
         totalBytes: total, etag: etag, lastModified: lastModified,
         finalOrigin: currentOrigin,
       );
       await _save(journal, active);
+      startedWrite = true;
       await destination.parent.create(recursive: true);
       final output = await part.open(
         mode: acceptedBytes > 0 ? FileMode.append : FileMode.write);
@@ -416,7 +566,7 @@ class R03DownloadEngine {
         await for (final incoming in response.timeout(const Duration(seconds: 45))) {
           if (isCancelled()) throw const R03InvalidEntityException('cancelled');
           if (incoming.isEmpty) continue;
-          if (received + incoming.length > r03MaximumBytes ||
+          if (received + incoming.length > maxBytes ||
               (total != null && received + incoming.length > total)) {
             throw const R03InvalidEntityException('response exceeds expected length');
           }
@@ -465,16 +615,50 @@ class R03DownloadEngine {
       );
       await _save(journal, active);
       onProgress?.call(null, null, null);
-      return destination;
+      return (file: destination, receipt: active);
     } catch (error) {
       final status = isCancelled() ? R03Stage.cancelled :
           error is R03DownloadHttpException && r03CanRetryHttpStatus(error.statusCode)
               ? R03Stage.retrying : R03Stage.failed;
       try {
-        await _save(journal, active.copyWith(stage: status,
-          blocks: List<String>.of(committed)));
+        if (startedWrite || (resumeRecord == null && previous?.explicitlyResumable != true)) {
+          await _save(journal, active.copyWith(stage: status,
+            blocks: List<String>.of(committed)));
+        }
       } catch (_) { /* Preserve original failure. */ }
       rethrow;
+    }
+  }
+
+  static Future<R03DownloadRecord> _readCheckpoint(File file) async {
+    if (await FileSystemEntity.type(file.path, followLinks: false) != FileSystemEntityType.file ||
+        await file.length() > 320 * 1024) {
+      throw const FormatException('Unsafe transfer checkpoint');
+    }
+    final bytes = await file.readAsBytes();
+    if (bytes.length > 320 * 1024) throw const FormatException('Oversize transfer checkpoint');
+    final value = jsonDecode(utf8.decode(bytes));
+    if (value is! Map<String, dynamic>) throw const FormatException('Invalid transfer checkpoint');
+    final record = R03DownloadRecord.fromJson(value);
+    if (file.uri.pathSegments.last != '${record.jobId}.json' || record.sourceFingerprint != record.jobId) {
+      throw const FormatException('Transfer checkpoint identity mismatch');
+    }
+    return record;
+  }
+
+  Future<void> _refuseForeignPartial(R03DownloadRecord expected) async {
+    await for (final entry in journalDirectory.list(followLinks: false)) {
+      final name = entry.uri.pathSegments.last;
+      if (name == '${expected.jobId}.json') { continue; }
+      if (RegExp(r'^[a-f0-9]{64}\.json\.tmp$').hasMatch(name) && entry is File) { continue; }
+      if (entry is! File || !RegExp(r'^[a-f0-9]{64}\.json$').hasMatch(name)) {
+        throw const R03InvalidEntityException('Unknown partial transfer ownership');
+      }
+      final record = await _readCheckpoint(entry);
+      if (record.fileName == expected.fileName &&
+          (record.cacheRootFingerprint == null || record.cacheRootFingerprint == expected.cacheRootFingerprint)) {
+        throw const R03InvalidEntityException('Another transfer identity owns this partial file');
+      }
     }
   }
 

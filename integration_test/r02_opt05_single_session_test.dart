@@ -82,7 +82,7 @@ void main() {
         if (scenario=='split') {
           final split=await exactFixture('config.x86_64.apk',splitDigest,directory);
           members.add(InstallApkMember(path:split.path,packageName:packageName,
-                                       versionCode:2,minSdkVersion:26));
+                                       versionCode:2, minSdkVersion:26, splitName: 'config.x86_64'));
         }
         final plan=resolveInstallBundlePlan(
           members:members,

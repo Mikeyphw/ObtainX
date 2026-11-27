@@ -146,6 +146,82 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('real swipe thresholds honor tactile feedback in both directions', (tester) async {
+    final haptics = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform, (call) async {
+        if (call.method == 'HapticFeedback.vibrate') haptics.add(call);
+        return null;
+      });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform, null));
+    await openApps(tester);
+    final row = find.ancestor(of: find.text('App 00'), matching: find.byWidgetPredicate(
+      (widget) => widget.runtimeType.toString() == '_SwipeableListItem'));
+    final initialPosition = tester.getTopLeft(find.text('App 00'));
+    for (final enabled in [true, false]) {
+      settings.tactileFeedbackEnabled = enabled;
+      haptics.clear();
+      for (final sign in [1.0, -1.0]) {
+        final gesture = await tester.startGesture(tester.getCenter(row));
+        await gesture.moveBy(Offset(sign * 30, 0));
+        await tester.pump();
+        await gesture.moveBy(Offset(sign * 100, 0));
+        await tester.pump();
+        await gesture.cancel();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(tester.getTopLeft(find.text('App 00')), initialPosition);
+        expect(provider.apps['org.example.app0']!.app.pinned, isFalse);
+      }
+      expect(haptics.length, enabled ? 2 : 0);
+      expect(haptics.every((call) => call.arguments == 'HapticFeedbackType.selectionClick'), isTrue);
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('source swipe launches only on a real release in either direction', (tester) async {
+    const channel = MethodChannel('plugins.flutter.io/url_launcher');
+    final launches = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'launch') {
+        launches.add(call);
+        return true;
+      }
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null));
+    settings.rightSwipeAction = SwipeAction.openSource;
+    settings.leftSwipeAction = SwipeAction.openSource;
+    settings.tactileFeedbackEnabled = false;
+    await openApps(tester);
+    final row = find.ancestor(of: find.text('App 00'), matching: find.byWidgetPredicate(
+      (widget) => widget.runtimeType.toString() == '_SwipeableListItem'));
+    for (final sign in [1.0, -1.0]) {
+      final before = launches.length;
+      for (final cancel in [true, false]) {
+        final gesture = await tester.startGesture(tester.getCenter(row));
+        await gesture.moveBy(Offset(sign * 30, 0));
+        await tester.pump();
+        await gesture.moveBy(Offset(sign * 100, 0));
+        await tester.pump();
+        if (cancel) {
+          await gesture.cancel();
+        } else {
+          await gesture.up();
+        }
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(launches.length, before + (cancel ? 0 : 1));
+      }
+    }
+    expect(launches.map((call) => (call.arguments as Map)['url']),
+      everyElement('https://github.com/example/app0'));
+    expect(launches.map((call) => (call.arguments as Map)['useWebView']),
+      everyElement(false));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final reduceEffects in [false, true]) {
     testWidgets(
       'row appearance is preserved with reduced effects $reduceEffects',

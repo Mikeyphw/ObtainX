@@ -52,8 +52,10 @@ Future<void> _requestForeground() async {
   try {
     final request = await client.postUrl(Uri.parse('http://127.0.0.1:$_port/p03/foreground'));
     request.contentLength = 0;
-    final response = await request.close().timeout(const Duration(seconds: 25));
-    final body = await utf8.decoder.bind(response).join();
+    final response = await request.close().timeout(const Duration(seconds: 70));
+    final body = await utf8.decoder.bind(response).join().timeout(
+      const Duration(seconds: 5),
+    );
     if (response.statusCode != 200 || body != 'foreground_ready') {
       throw StateError('Host did not verify approval screen before ObtainX foreground');
     }

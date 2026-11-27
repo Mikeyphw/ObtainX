@@ -603,20 +603,31 @@ class R03DownloadEngine {
               min((total ?? maxBytes) - received, max(incoming.length, 8 * r03ChunkBytes)));
             capacityCheckedAt = received;
           }
-          // Disable new pause requests before committing the final full block.
-          // A previously accepted pause is serviced against the last checkpoint.
-          if (total != null && received + incoming.length >= total) {
-            onPauseAvailable?.call(false);
-          }
-          if (isPauseRequested?.call() == true) {
-            throw const R03InvalidEntityException('pause requested');
-          }
-          await output.writeFrom(incoming);
-          received += incoming.length;
+          // Network chunks are not checkpoint boundaries. Write only up to the
+          // next checkpoint before exposing pause, even if one incoming chunk
+          // contains the entire remaining response.
           var index = 0;
           while (index < incoming.length) {
+            if (isCancelled()) throw const R03InvalidEntityException('cancelled');
+            if (isPauseRequested?.call() == true) {
+              throw const R03InvalidEntityException('pause requested');
+            }
+            if (elapsed.elapsed >= maxWallTime) {
+              throw TimeoutException('Artifact transfer deadline exceeded');
+            }
             final remaining = r03ChunkBytes - partial.length;
             final end = min(incoming.length, index + remaining);
+            final count = end - index;
+            // Disable new requests only at the final byte boundary, not at
+            // the start of a network chunk containing earlier checkpoints.
+            if (total != null && received + count >= total) {
+              onPauseAvailable?.call(false);
+            }
+            if (isPauseRequested?.call() == true) {
+              throw const R03InvalidEntityException('pause requested');
+            }
+            await output.writeFrom(incoming, index, end);
+            received += count;
             partial.addAll(incoming.sublist(index, end));
             index = end;
             if (partial.length == r03ChunkBytes) {

@@ -55,6 +55,12 @@ class R03MutationTests(unittest.TestCase):
         self.mutated(PATHS[0], '_activeExpectedDigest[key] != expectedSha256', 'false')
     def test_remove_runtime_check(self):
         self.mutated(PATHS[0],"if (isCancelled()) throw const R03InvalidEntityException('cancelled');",'if (false) throw const R03InvalidEntityException(\"cancelled\");')
+    def test_remove_chunk_cancellation_check(self):
+        self.mutated(PATHS[0], "await for (final incoming in response.timeout(const Duration(seconds: 45))) {\n          if (isCancelled())", "await for (final incoming in response.timeout(const Duration(seconds: 45))) {\n          if (false)")
+    def test_remove_checkpoint_cancellation_check(self):
+        self.mutated(PATHS[0], "while (index < incoming.length) {\n            if (isCancelled())", "while (index < incoming.length) {\n            if (false)")
+    def test_remove_preverification_cancellation_check(self):
+        self.mutated(PATHS[0], "if (isCancelled()) throw const R03InvalidEntityException('cancelled');\n      if (total != null && received != total)", "if (false) throw const R03InvalidEntityException('cancelled');\n      if (total != null && received != total)")
     def test_remove_atomic_publish(self):
         self.mutated(PATHS[0],'await part.rename(destination.path)',
                      'await part.delete()')

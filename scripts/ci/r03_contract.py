@@ -43,8 +43,12 @@ def verify(root:Path=ROOT)->int:
     assert_has("whenComplete(() => _active.remove(key))" not in
         engine.split('unawaited(next.then<void>', 1)[-1],
         'unhandled failed Future returned by active cleanup')
-    assert_has(engine.count("if (isCancelled()) throw const R03InvalidEntityException('cancelled');") >= 3,
-        'cancellation checks must remain before and after transfer')
+    cancellation_guard = "if (isCancelled()) throw const R03InvalidEntityException('cancelled');"
+    assert_has(engine.count(cancellation_guard) >= 4 and all(marker in engine for marker in (
+        "await for (final incoming in response.timeout(const Duration(seconds: 45))) {\n          " + cancellation_guard,
+        "while (index < incoming.length) {\n            " + cancellation_guard,
+        "      " + cancellation_guard + "\n      if (total != null && received != total) {",
+    )), 'cancellation checks must remain before transfer, per response, per checkpoint and before verification')
     assert_has("url.toString(), destination.absolute.path" in engine,
         'R03 identity missing URL/path fingerprint')
     assert_has('finalOrigin: currentOrigin' in engine,

@@ -1,4 +1,5 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:convert';
@@ -83,6 +84,8 @@ void main() {
     late List<String> ranges;
     late List<String> ifRanges;
     late int requests;
+    Completer<void>? firstBlockGate;
+    late int responseChunkBytes;
 
     setUp(() async {
       sandbox = await Directory.systemTemp.createTemp('obtainx-r03-test-');
@@ -100,6 +103,8 @@ void main() {
       rejection = null;
       omitLength = false;
       requests = 0;
+      firstBlockGate = null;
+      responseChunkBytes = 65536;
       ranges = [];
       ifRanges = [];
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -148,12 +153,27 @@ void main() {
         }
         if (!omitLength) reply.contentLength = payload.length - offset;
         try {
-          for (var index = offset; index < payload.length; index += 65536) {
-            final end = min(index + 65536, payload.length);
+          final gate = offset == 0 ? firstBlockGate : null;
+          var index = offset;
+          while (index < payload.length) {
+            var end = min(index + responseChunkBytes, payload.length);
+            if (gate != null && index < r03ChunkBytes) {
+              end = min(end, r03ChunkBytes);
+            }
             reply.add(payload.sublist(index, end));
             await reply.flush();
+            index = end;
+            if (gate != null && index == r03ChunkBytes) {
+              await gate.future.timeout(const Duration(seconds: 15));
+            }
           }
           await reply.close();
+        } on TimeoutException {
+          // A missing test checkpoint is a failing client test, not an
+          // unhandled server error. Close the connection at the bound.
+          try {
+            await reply.close();
+          } on HttpException { /* closed */ } on SocketException { /* closed */ }
         } on SocketException {
           // Cancellation deliberately closes a live transfer. A server-side
           // broken pipe is expected; it is not an extra failed test.
@@ -164,6 +184,9 @@ void main() {
     });
 
     tearDown(() async {
+      if (firstBlockGate?.isCompleted == false) {
+        firstBlockGate!.complete();
+      }
       client.close(force: true);
       await server.close(force: true);
       await sandbox.delete(recursive: true);
@@ -299,27 +322,61 @@ void main() {
       expect(await output.readAsBytes(), payload);
       expect(ranges, contains('bytes=${paused.validatedBytes}-'));
     });
-    test('explicit pause retains exact committed bytes and resumes with digest', () async {
-      const channel = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-      const release = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-      final owner = R03HistoryBinding('source:one', 'com.example', channel, releaseFingerprint: release);
-      final expected = sha256.convert(payload).toString();
+    for (final chunk in [65536, 2 * r03ChunkBytes + 97]) {
+      test('explicit pause retains exact committed bytes and resumes with digest ($chunk)', () async {
+        const channel = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        const release = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+        final owner = R03HistoryBinding('source:one', 'com.example', channel, releaseFingerprint: release);
+        final expected = sha256.convert(payload).toString();
+        responseChunkBytes = chunk;
+        final gate = Completer<void>();
+        // Hold the producer at a real durable block until pause is requested.
+        // The second case offers all remaining bytes in one write on resume.
+        firstBlockGate = gate;
+        var pause = false;
+        try {
+          await expectLater(transfer(historyBinding: owner, expectedSha256: expected,
+            paused: () => pause, pauseAvailable: (available) {
+              if (available && !pause) {
+                pause = true;
+                gate.complete();
+              }
+            }), throwsA(isA<R03PausedException>()));
+        } finally {
+          if (!gate.isCompleted) {
+            gate.complete();
+          }
+          firstBlockGate = null;
+        }
+        expect(pause, isTrue);
+        expect(target().existsSync(), isFalse);
+        final id = R03DownloadEngine.jobKey(source(), target(), const {}, historyBinding: owner);
+        final journal = File('${sandbox.path}/private-receipts/$id.json');
+        final saved = R03DownloadRecord.fromJson(Map<String, dynamic>.from(jsonDecode(await journal.readAsString())));
+        expect(saved.stage, R03Stage.paused);
+        expect(saved.explicitlyResumable, isTrue);
+        expect(saved.validatedBytes, r03ChunkBytes);
+        expect(File('${target().path}.part').lengthSync(), saved.validatedBytes);
+        final output = await transfer(historyBinding: owner, expectedSha256: expected, resumeRecord: saved);
+        expect(await output.readAsBytes(), payload);
+        expect(ranges, contains('bytes=${saved.validatedBytes}-'));
+        expect(ifRanges, contains(etag));
+      });
+    }
+    test('coalesced response still exposes first durable pause boundary', () async {
+      responseChunkBytes = payload.length;
+      final owner = R03HistoryBinding('source:one', 'com.example',
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        releaseFingerprint: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
       var pause = false;
-      await expectLater(transfer(historyBinding: owner, expectedSha256: expected,
-        paused: () => pause, pauseAvailable: (available) { if (available) pause = true; }),
-        throwsA(isA<R03PausedException>()));
-      expect(pause, isTrue);
+      await expectLater(transfer(historyBinding: owner,
+        paused: () => pause, pauseAvailable: (available) {
+          if (available) {
+            pause = true;
+          }
+        }), throwsA(isA<R03PausedException>()));
       expect(target().existsSync(), isFalse);
-      final id = R03DownloadEngine.jobKey(source(), target(), const {}, historyBinding: owner);
-      final journal = File('${sandbox.path}/private-receipts/$id.json');
-      final saved = R03DownloadRecord.fromJson(Map<String, dynamic>.from(jsonDecode(await journal.readAsString())));
-      expect(saved.stage, R03Stage.paused);
-      expect(saved.explicitlyResumable, isTrue);
-      expect(File('${target().path}.part').lengthSync(), saved.validatedBytes);
-      final output = await transfer(historyBinding: owner, expectedSha256: expected, resumeRecord: saved);
-      expect(await output.readAsBytes(), payload);
-      expect(ranges, contains('bytes=${saved.validatedBytes}-'));
-      expect(ifRanges, contains(etag));
+      expect(File('${target().path}.part').lengthSync(), r03ChunkBytes);
     });
     test('unbounded length never advertises explicit pause', () async {
       omitLength = true;

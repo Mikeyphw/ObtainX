@@ -869,7 +869,7 @@ class GitHub extends AppSource {
         } catch (e) {
           unawaited(
             LogsProvider().add(
-              'Failed to parse redirect response for repo rename: ${e.toString()}',
+              'Failed to parse redirect response for repo rename: ${e.runtimeType}',
             ),
           );
         }

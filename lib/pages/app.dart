@@ -392,7 +392,7 @@ Future<void> loadIconsAndScanStoresFor(
     } catch (error) {
       unawaited(
         appsProvider.logs.add(
-          'Icon load failed for $listingKey: $error',
+          'Icon load failed for $listingKey: ${error.runtimeType}',
           level: LogLevel.warning,
         ),
       );
@@ -483,7 +483,7 @@ Future<Map<String, String>?> checkAndCacheStoresForListing(
 
   void logStoreError(String store, Object error) => unawaited(
     appsProvider.logs.add(
-      'Store check failed for $appId on $store: $error',
+      'Store check failed for $appId on $store: ${error.runtimeType}',
       level: LogLevel.warning,
     ),
   );
@@ -573,7 +573,7 @@ Future<Map<String, String>?> checkAndCacheStoresForListing(
   } catch (error) {
     unawaited(
       appsProvider.logs.add(
-        'Store scan failed for $appId: $error',
+        'Store scan failed for $appId: ${error.runtimeType}',
         level: LogLevel.warning,
       ),
     );
@@ -1664,7 +1664,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
   }
 
   void _showPageError(dynamic error, {String? title}) {
-    unawaited(LogsProvider().add(error.toString(), level: LogLevel.error));
+    unawaited(LogsProvider().add(safeErrorDisplay(error), level: LogLevel.error));
     final BuildContext? appContext = globalNavigatorKey.currentContext;
     if (appContext == null) return;
     Provider.of<AppsProvider>(
@@ -2328,7 +2328,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
     } catch (error) {
       // Older WebView builds have no inset listener to install, and their
       // pre-M139 behavior is what this call was asking for anyway.
-      unawaited(LogsProvider().add(error.toString(), level: LogLevel.info));
+      unawaited(LogsProvider().add(safeErrorDisplay(error), level: LogLevel.info));
     }
   }
 
@@ -2437,7 +2437,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
         mode: LaunchMode.externalApplication,
       );
     } catch (error) {
-      unawaited(LogsProvider().add(error.toString(), level: LogLevel.error));
+      unawaited(LogsProvider().add(safeErrorDisplay(error), level: LogLevel.error));
     }
     if (!mounted) return;
     _showPageMessage(
@@ -2651,7 +2651,7 @@ class _AppPageState extends State<AppPage> with WidgetsBindingObserver {
       );
     } catch (error) {
       _logApkMirrorSizeDebugFromAppPage(
-        'lazy resolve error id=${widget.appId} error=${error.toString()}',
+        'lazy resolve error id=${widget.appId} error=${error.runtimeType}',
       );
     }
   }

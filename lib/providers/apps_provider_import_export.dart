@@ -335,7 +335,7 @@ extension AppsProviderImportExport on AppsProvider {
     try {
       decodedJSON = jsonDecode(appsJSON);
     } catch (e) {
-      throw ObtainiumError('${tr('failedToImport')}: ${e.toString()}');
+      throw ObtainiumError('${tr('failedToImport')}: ${e.runtimeType}');
     }
     final hasSchemaVersion =
         decodedJSON is Map && decodedJSON.containsKey('schemaVersion');
@@ -353,7 +353,7 @@ extension AppsProviderImportExport on AppsProvider {
                 .toList();
       }
     } catch (e) {
-      throw ObtainiumError('${tr('failedToImport')}: ${e.toString()}');
+      throw ObtainiumError('${tr('failedToImport')}: ${e.runtimeType}');
     }
     // Resolve settings: shared block plus optional ObtainX overlay.
     final Map<String, dynamic>? sharedSettings = hasSchemaVersion

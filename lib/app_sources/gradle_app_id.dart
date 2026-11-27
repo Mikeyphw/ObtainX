@@ -469,7 +469,7 @@ Future<String?> inferAppIdFromGradleFiles(
         );
         if (appId != null) return appId;
       } catch (err) {
-        onError?.call('Could not read $path while inferring app ID: $err');
+        onError?.call('Could not read $path while inferring app ID: ${err.runtimeType}');
       }
     }
     return null;
@@ -488,7 +488,7 @@ Future<String?> inferAppIdFromGradleFiles(
           .take(maxDiscoveredFilesToRead),
     );
   } catch (err) {
-    onError?.call('Could not list repo files while inferring app ID: $err');
+    onError?.call('Could not list repo files while inferring app ID: ${err.runtimeType}');
     return null;
   }
 }

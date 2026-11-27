@@ -15,6 +15,7 @@ import 'package:obtainium/providers/apps_provider.dart' show formatDownloadSize;
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/theme/app_dialog_theme.dart';
 import 'package:obtainium/providers/source_provider.dart';
+import 'package:obtainium/services/diagnostic_redaction.dart';
 
 // Fixed notification IDs. Kept small and distinct so notifications of different
 // kinds never overwrite each other; per-download notifications live in a
@@ -233,12 +234,12 @@ class ErrorCheckingUpdatesNotification extends ObtainiumNotification {
     : super(
         id ?? errorCheckingUpdatesNotificationId,
         tr('errorCheckingUpdates'),
-        error,
+        boundedDiagnosticText(error),
         'BG_UPDATE_CHECK_ERROR',
         tr('errorCheckingUpdatesNotifChannel'),
         tr('errorCheckingUpdatesNotifDescription'),
         Importance.high,
-        payload: "${tr('errorCheckingUpdates')}\n$error",
+        payload: "${tr('errorCheckingUpdates')}\n${boundedDiagnosticText(error)}",
       );
 }
 
@@ -293,12 +294,12 @@ class ErrorInstallingUpdatesNotification extends ObtainiumNotification {
     : super(
         id ?? errorInstallingUpdatesNotificationId,
         tr('errorInstallingUpdate'),
-        error,
+        boundedDiagnosticText(error),
         'BG_INSTALL_ERROR',
         tr('errorInstallingUpdateNotifChannel'),
         tr('errorInstallingUpdateNotifDescription'),
         Importance.high,
-        payload: "${tr('errorInstallingUpdate')}\n$error",
+        payload: "${tr('errorInstallingUpdate')}\n${boundedDiagnosticText(error)}",
       );
 }
 

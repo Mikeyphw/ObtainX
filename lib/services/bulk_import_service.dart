@@ -347,7 +347,7 @@ class BulkImportService {
                     }
                   }
                 } catch (e) {
-                  debugPrint('APKPure check failed for $candidate: $e');
+                  debugPrint('APKPure check failed for $candidate: ${e.runtimeType}');
                   if (candidate == pkg) {
                     rethrow;
                   }
@@ -703,9 +703,9 @@ class BulkImportService {
         }
       }
       return result;
-    } catch (error, stackTrace) {
+    } catch (error) {
       debugPrint(
-        'IzzyOnDroid index bulk check failed, falling back to API per package: $error\n$stackTrace',
+        'IzzyOnDroid index bulk check failed, falling back to API per package: ${error.runtimeType}',
       );
       await _runBulkPerPackageApiLookups(
         toQuery: toQuery,
@@ -985,8 +985,8 @@ class BulkImportService {
           );
           // Non-rate-limit failure — leave uncached so it retries next scan.
         }
-      } catch (e, s) {
-        debugPrint('GitHub search exception for $pkg: $e\n$s');
+      } catch (e) {
+        debugPrint('GitHub search exception for $pkg: ${e.runtimeType}');
         // Network error or timeout — don't cache; retry next scan.
       }
       reportProgress();

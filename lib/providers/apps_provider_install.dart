@@ -1865,7 +1865,7 @@ extension AppsProviderInstall on AppsProvider {
           await _clearPendingInstall(dir.appId, release);
           unawaited(
             logs.add(
-              'Could not install container from ${dir.type}: ${e.toString()}',
+              'Could not install container from ${dir.type}: ${e.runtimeType}',
             ),
           );
           errors.add(dir.appId, e, appName: apps[dir.appId]?.name);
@@ -1906,7 +1906,7 @@ extension AppsProviderInstall on AppsProvider {
       } catch (e) {
         unawaited(
           logs.add(
-            'Could not install APKs for ${dir.appId} from ${dir.type}: ${e.toString()}',
+            'Could not install APKs for ${dir.appId} from ${dir.type}: ${e.runtimeType}',
           ),
         );
         errors.add(dir.appId, e, appName: apps[dir.appId]?.name);
@@ -2015,7 +2015,7 @@ extension AppsProviderInstall on AppsProvider {
       } catch (e) {
         unawaited(
           logs.add(
-            'Failed to delete bad download files for ${file.appId}: ${e.toString()}',
+            'Failed to delete bad download files for ${file.appId}: ${e.runtimeType}',
           ),
         );
       }
@@ -2043,7 +2043,7 @@ extension AppsProviderInstall on AppsProvider {
       } catch (e) {
         unawaited(
           logs.add(
-            'Failed to delete downgraded APK file: $e',
+            'Failed to delete downgraded APK file: ${e.runtimeType}',
             level: LogLevel.error,
           ),
         );
@@ -2149,7 +2149,7 @@ extension AppsProviderInstall on AppsProvider {
           await file.file.delete(recursive: true);
         } catch (e) {
           unawaited(
-            logs.add('Failed to delete APK after install: ${e.toString()}'),
+            logs.add('Failed to delete APK after install: ${e.runtimeType}'),
           );
         }
       }
@@ -2201,7 +2201,7 @@ extension AppsProviderInstall on AppsProvider {
       // return before continuing to the actual install prompt.
       await waitForUserToReturnToForeground(notificationsProvider);
     } catch (e) {
-      unawaited(logs.add('Share to App Verifier failed: ${e.toString()}'));
+      unawaited(logs.add('Share to App Verifier failed: ${e.runtimeType}'));
     }
   }
 
@@ -3288,11 +3288,11 @@ extension AppsProviderInstall on AppsProvider {
       );
     } catch (e) {
       unawaited(
-        logs.add('Error scanning APK with VirusTotal: ${e.toString()}'),
+        logs.add('Error scanning APK with VirusTotal: ${e.runtimeType}'),
       );
       return (
         status: malwareScanStatusError,
-        detail: tr('virusTotalErrorGeneric', args: [e.toString()]),
+        detail: tr('virusTotalErrorGeneric', args: [safeErrorDisplay(e)]),
         reportUrl: null,
       );
     }
@@ -3523,10 +3523,10 @@ extension AppsProviderInstall on AppsProvider {
               release: dir.release,
             ),
           );
-        } catch (exception, stackTrace) {
+        } catch (exception) {
           unawaited(
             logs.add(
-              'APK save folder copy failed: ${exception.toString()}\n$stackTrace',
+              'APK save folder copy failed: ${exception.runtimeType}',
               level: LogLevel.error,
             ),
           );
@@ -3554,10 +3554,10 @@ extension AppsProviderInstall on AppsProvider {
           dir.file.deleteSync();
         } catch (_) {}
       }
-    } catch (exception, stackTrace) {
+    } catch (exception) {
       unawaited(
         logs.add(
-          'Post-install bundle disposition failed: ${exception.toString()}\n$stackTrace',
+          'Post-install bundle disposition failed: ${exception.runtimeType}',
           level: LogLevel.error,
         ),
       );
@@ -3589,10 +3589,10 @@ extension AppsProviderInstall on AppsProvider {
             apkSaveTreeUri,
             storeFacingDownloadDisplayNameForApp(appRef, release: release),
           );
-        } catch (exception, stackTrace) {
+        } catch (exception) {
           unawaited(
             logs.add(
-              'APK save folder copy failed: ${exception.toString()}\n$stackTrace',
+              'APK save folder copy failed: ${exception.runtimeType}',
               level: LogLevel.error,
             ),
           );
@@ -3607,10 +3607,10 @@ extension AppsProviderInstall on AppsProvider {
           primaryFile.deleteSync();
         } catch (_) {}
       }
-    } catch (exception, stackTrace) {
+    } catch (exception) {
       unawaited(
         logs.add(
-          'Post-install APK disposition failed: ${exception.toString()}\n$stackTrace',
+          'Post-install APK disposition failed: ${exception.runtimeType}',
           level: LogLevel.error,
         ),
       );

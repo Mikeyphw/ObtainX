@@ -56,7 +56,7 @@ class StockInstaller extends Installer {
     } catch (e) {
       unawaited(
         LogsProvider().add(
-          'App will not be installed silently: failed to get installed package details: ${app.id} (${e.toString()})',
+          'App will not be installed silently: failed to get installed package details: ${app.id} (${e.runtimeType})',
         ),
       );
       return false;

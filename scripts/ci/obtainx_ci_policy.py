@@ -21,6 +21,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SHA = re.compile(r'^[0-9a-f]{40}$')
 RISK_GLOBS = (
+    'lib/http/linked_changelog_policy.dart',
+    'lib/services/diagnostic_redaction.dart',
+    'lib/custom_errors.dart',
+    'lib/providers/logs_provider.dart',
+    'lib/services/diagnostic_snapshot.dart',
+    'test/final_audit_01_*',
+    'scripts/ci/*final_audit_01*',
+    'scripts/ci/r12_device_evidence.py',
     'lib/installers/**',
     'lib/providers/apps_provider_install.dart',
     'lib/widgets/r07_*',

@@ -26,6 +26,8 @@ import 'package:progress_indicator_m3e/progress_indicator_m3e.dart';
 import 'package:obtainium/app_sources/apkmirror.dart';
 import 'package:obtainium/app_sources/codeberg.dart';
 import 'package:obtainium/app_sources/gitlab.dart';
+import 'package:obtainium/app_sources/github.dart';
+import 'package:obtainium/http/linked_changelog_policy.dart';
 import 'package:obtainium/components/app_bottom_sheet.dart';
 import 'package:obtainium/components/r10_accessibility.dart';
 import 'package:obtainium/components/app_details_container.dart';
@@ -1657,10 +1659,10 @@ class _SwipeableListItemState extends State<_SwipeableListItem>
                 .downloadAndInstallLatestApps([
                   widget.appId,
                 ], globalNavigatorKey.currentContext)
-                .catchError((Object e, StackTrace stackTrace) {
+                .catchError((Object e) {
                   unawaited(
                     provider.logs.add(
-                      'Swipe update failed for ${widget.appId}: $e\n$stackTrace',
+                      'Swipe update failed for ${widget.appId}: ${e.runtimeType}',
                       level: LogLevel.error,
                     ),
                   );
@@ -1968,128 +1970,40 @@ class AppsPage extends StatefulWidget {
   State<AppsPage> createState() => AppsPageState();
 }
 
-String? _githubReleaseApiUrlFromUrl(String url) {
-  final uri = Uri.tryParse(url);
-  if (uri == null || !uri.host.toLowerCase().endsWith('github.com')) {
-    return null;
-  }
-  final segments = uri.pathSegments;
-  if (segments.length < 3 || segments[2] != 'releases') {
-    return null;
-  }
-  final repoApiBase =
-      'https://api.github.com/repos/${segments[0]}/${segments[1]}/releases';
-  if (segments.length == 3 || segments[3] == 'latest') {
-    return '$repoApiBase/latest';
-  }
-  if (segments[3] == 'tag' && segments.length >= 5) {
-    final tagName = segments.sublist(4).join('/');
-    return '$repoApiBase/tags/${Uri.encodeComponent(tagName)}';
-  }
-  return null;
-}
-
-String? _rawFileUrlFromRepositoryPageUrl(String url) {
-  final uri = Uri.tryParse(url);
-  if (uri == null) return null;
-  final host = uri.host.toLowerCase();
-  final segments = uri.pathSegments;
-  if (host.endsWith('github.com') &&
-      segments.length >= 5 &&
-      segments[2] == 'blob') {
-    return Uri(
-      scheme: 'https',
-      host: 'raw.githubusercontent.com',
-      pathSegments: [
-        segments[0],
-        segments[1],
-        segments[3],
-        ...segments.sublist(4),
-      ],
-    ).toString();
-  }
-  final gitLabBlobIndex = segments.indexOf('blob');
-  if (host.endsWith('gitlab.com') &&
-      gitLabBlobIndex > 1 &&
-      segments[gitLabBlobIndex - 1] == '-' &&
-      segments.length > gitLabBlobIndex + 2) {
-    final rawSegments = List<String>.from(segments);
-    rawSegments[gitLabBlobIndex] = 'raw';
-    return uri.replace(pathSegments: rawSegments).toString();
-  }
-  return null;
-}
-
-String? _gitlabReleaseApiUrlFromUrl(String url) {
-  final uri = Uri.tryParse(url);
-  if (uri == null) return null;
-  final path = uri.path;
-  if (path.contains('/api/v4/projects/')) {
-    return url;
-  }
-  final segments = uri.pathSegments;
-  final dashIndex = segments.indexOf('-');
-  if (dashIndex > 0 &&
-      segments.length > dashIndex + 1 &&
-      segments[dashIndex + 1] == 'releases') {
-    final projectPathEncoded = segments
-        .sublist(0, dashIndex)
-        .map(Uri.encodeComponent)
-        .join('%2F');
-    final String apiBasePath = '/api/v4/projects/$projectPathEncoded/releases';
-    if (segments.length > dashIndex + 2) {
-      final tagName = segments.sublist(dashIndex + 2).join('/');
-      return uri
-          .replace(
-            path: '$apiBasePath/${Uri.encodeComponent(tagName)}',
-            queryParameters: null,
-          )
-          .toString();
-    }
-    return uri.replace(path: apiBasePath, queryParameters: null).toString();
-  }
-  return null;
-}
-
 Future<String?> _loadLinkedChangeLog(
   AppSource appSource,
   App app,
   String changesUrl,
 ) async {
-  final githubReleaseApiUrl = _githubReleaseApiUrlFromUrl(changesUrl);
-  var gitlabReleaseApiUrl = _gitlabReleaseApiUrlFromUrl(changesUrl);
-
-  if (gitlabReleaseApiUrl != null && appSource is GitLab) {
-    final String? pat = await appSource.getPATIfAny(app.additionalSettings);
-    if (pat != null && pat.isNotEmpty) {
-      final uri = Uri.parse(gitlabReleaseApiUrl);
-      final newQueryParams = Map<String, String>.from(uri.queryParameters);
-      newQueryParams['private_token'] = pat;
-      gitlabReleaseApiUrl = uri
-          .replace(queryParameters: newQueryParams)
-          .toString();
-    }
+  final plan = planLinkedChangelog(
+    app.url,
+    changesUrl,
+    gitlab: appSource is GitLab,
+    github: appSource is GitHub,
+    gitlabHost: appSource is GitLab ? appSource.hosts.first : null,
+  );
+  Map<String, String>? headers;
+  if (plan.sourceHeaders) {
+    final settings = SettingsProvider();
+    await settings.initializeSettings();
+    final merged = await appSource.buildMergedSettings(app.additionalSettings, settings);
+    headers = await appSource.getRequestHeaders(merged, plan.uri.toString());
   }
-
-  final requestUrl =
-      githubReleaseApiUrl ??
-      gitlabReleaseApiUrl ??
-      _rawFileUrlFromRepositoryPageUrl(changesUrl) ??
-      changesUrl;
-  final response = await appSource.sourceRequest(
-    requestUrl,
-    app.additionalSettings,
+  // Request the exact planned URI directly: no source proxy rewrite, insecure
+  // TLS setting or redirect can move credential-bearing metadata requests.
+  final response = await HttpService().request(
+    'GET', plan.uri, headers, followRedirects: false,
   );
   if (response.statusCode != 200) {
     throw getObtainiumHttpError(response);
   }
-  if (githubReleaseApiUrl != null) {
+  if (plan.githubRelease) {
     final decoded = jsonDecode(response.body);
     if (decoded is Map<String, dynamic>) {
       return (decoded['body'] ?? '').toString();
     }
   }
-  if (gitlabReleaseApiUrl != null) {
+  if (plan.gitlabRelease) {
     try {
       final decoded = jsonDecode(response.body);
       if (decoded is List && decoded.isNotEmpty) {
@@ -2114,18 +2028,19 @@ Future<String?> _loadLinkedChangeLog(
 }
 
 /// Turns a relative changelog image path into an absolute URL for the forge
-/// that published [appUrl]. Absolute http(s) URLs are returned unchanged.
+/// that published [appUrl]. Unsafe destinations are refused.
 String resolveChangeLogImageSrc({
   required String src,
   required String appUrl,
   required AppSource appSource,
 }) {
-  if (src.startsWith('http://') || src.startsWith('https://')) {
-    return src;
+  if (Uri.tryParse(src)?.hasScheme == true || src.startsWith('//')) {
+    return safeChangelogNavigation(appUrl, src)?.toString() ?? '';
   }
   try {
     final Uri uri = Uri.parse(appUrl);
     final List<String> segments = uri.pathSegments;
+    String checked(String url) => safeChangelogNavigation(appUrl, url)?.toString() ?? '';
     String cleanPath = src;
     if (cleanPath.startsWith('./')) {
       cleanPath = cleanPath.substring(2);
@@ -2133,18 +2048,18 @@ String resolveChangeLogImageSrc({
       cleanPath = cleanPath.substring(1);
     }
 
-    if (uri.host.contains('github.com') && segments.length >= 2) {
-      return 'https://raw.githubusercontent.com/${segments[0]}/${segments[1]}/HEAD/$cleanPath';
+    if (uri.host == 'github.com' && segments.length >= 2) {
+      return checked('https://raw.githubusercontent.com/${segments[0]}/${segments[1]}/HEAD/$cleanPath');
     }
-    if (uri.host.contains('gitlab.com') && segments.length >= 2) {
-      return 'https://gitlab.com/${segments[0]}/${segments[1]}/-/raw/HEAD/$cleanPath';
+    if (uri.host == 'gitlab.com' && segments.length >= 2) {
+      return checked('https://gitlab.com/${segments[0]}/${segments[1]}/-/raw/HEAD/$cleanPath');
     }
     if (appSource is Codeberg && segments.length >= 2) {
-      return '${uri.origin}/${segments[0]}/${segments[1]}/raw/branch/HEAD/$cleanPath';
+      return checked('${uri.origin}/${segments[0]}/${segments[1]}/raw/branch/HEAD/$cleanPath');
     }
-    return '${uri.origin}/$cleanPath';
+    return checked('${uri.origin}/$cleanPath');
   } catch (_) {
-    return src;
+    return '';
   }
 }
 
@@ -2184,7 +2099,7 @@ void showChangeLogDialog(
       if (srcMatch != null) {
         final src = resolveUrl(srcMatch.group(1)!);
         final alt = altMatch?.group(1) ?? '';
-        return '![$alt]($src)';
+        return src.isEmpty ? alt : '![$alt]($src)';
       }
       return match.group(0)!;
     });
@@ -2196,7 +2111,7 @@ void showChangeLogDialog(
       final alt = match.group(1) ?? '';
       final src = match.group(2)!;
       final absoluteSrc = resolveUrl(src);
-      return '![$alt]($absoluteSrc)';
+      return absoluteSrc.isEmpty ? alt : '![$alt]($absoluteSrc)';
     });
 
     // GitHub/GitLab release notes routinely wrap screenshots in HTML layout
@@ -2214,9 +2129,10 @@ void showChangeLogDialog(
       '\n\n',
     );
   }
+  final safeChangesUrl = changesUrl == null ? null : safeChangelogNavigation(app.url, changesUrl);
   final Future<String?>? linkedChangeLogFuture =
-      changeLog == null && changesUrl != null
-      ? _loadLinkedChangeLog(appSource, app, changesUrl)
+      changeLog == null && safeChangesUrl != null
+      ? _loadLinkedChangeLog(appSource, app, safeChangesUrl.toString())
       : null;
 
   showAppModalSheet<void>(
@@ -2240,11 +2156,10 @@ void showChangeLogDialog(
                 ),
                 data: displayChangeLog,
                 onTapLink: (text, href, title) {
-                  if (href != null) {
+                  final target = href == null ? null : safeChangelogNavigation(app.url, href);
+                  if (target != null) {
                     launchUrlString(
-                      href.startsWith('http://') || href.startsWith('https://')
-                          ? href
-                          : '${Uri.parse(app.url).origin}/$href',
+                      target.toString(),
                       mode: LaunchMode.externalApplication,
                     );
                   }
@@ -2281,7 +2196,7 @@ void showChangeLogDialog(
                 }
                 if (snapshot.hasError) {
                   return SelectableText(
-                    snapshot.error.toString(),
+                    safeErrorDisplay(snapshot.error),
                     style: textTheme.bodyMedium?.copyWith(
                       color: colorScheme.error,
                     ),
@@ -2328,18 +2243,18 @@ void showChangeLogDialog(
               ],
             ),
           ),
-          if (changesUrl != null)
+          if (safeChangesUrl != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: InkWell(
                 onTap: () {
                   launchUrlString(
-                    changesUrl,
+                    safeChangesUrl.toString(),
                     mode: LaunchMode.externalApplication,
                   );
                 },
                 child: Text(
-                  changesUrl,
+                  safeChangesUrl.toString(),
                   style: textTheme.bodySmall?.copyWith(
                     color: colorScheme.primary,
                     decoration: TextDecoration.underline,

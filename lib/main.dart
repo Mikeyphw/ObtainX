@@ -16,6 +16,7 @@ import 'package:obtainium/theme/app_switch_theme.dart';
 import 'package:obtainium/theme.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/logs_provider.dart';
+import 'package:obtainium/services/diagnostic_redaction.dart';
 import 'package:obtainium/providers/notifications_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -90,64 +91,38 @@ void installDiagnosticErrorLogging() {
   unawaited(_recordNativeCrashLogIfPresent(logs));
 
   FlutterError.onError = (FlutterErrorDetails details) {
-    unawaited(
-      logs.add(
-        _diagnosticErrorMessage(
-          'Flutter framework error',
-          details.exception,
-          details.stack,
-          context: details.context?.toDescription(),
-          library: details.library,
-        ),
-        level: LogLevel.error,
-      ),
-    );
+    final safe = _diagnosticErrorMessage('Flutter framework error', details.exception);
+    unawaited(logs.add(safe, level: LogLevel.error));
+    // Do not forward raw exception, informationCollector, or user-controlled
+    // error context to the framework's console/debug handler.
+    final sanitized = FlutterErrorDetails(exception: FlutterError(safe));
     if (previousFlutterError != null) {
-      previousFlutterError(details);
+      previousFlutterError(sanitized);
     } else {
-      FlutterError.presentError(details);
+      FlutterError.presentError(sanitized);
     }
   };
 
   PlatformDispatcher.instance.onError = (Object error, StackTrace stackTrace) {
-    unawaited(
-      logs.add(
-        _diagnosticErrorMessage('Uncaught Dart error', error, stackTrace),
-        level: LogLevel.error,
-      ),
-    );
-    return previousPlatformError?.call(error, stackTrace) ?? false;
+    final safe = _diagnosticErrorMessage('Uncaught Dart error', error);
+    unawaited(logs.add(safe, level: LogLevel.error));
+    // Report the category, never the original platform exception. Returning
+    // true avoids the engine's raw exception fallback when no handler exists.
+    previousPlatformError?.call(StateError(safe), StackTrace.empty);
+    return true;
   };
 }
 
 Future<void> _recordNativeCrashLogIfPresent(LogsProvider logs) async {
   final nativeCrashLog = await NativeFeatures.consumeNativeCrashLog();
   if (nativeCrashLog == null) return;
-  await logs.add(
-    'Native crash from previous run:\n$nativeCrashLog',
-    level: LogLevel.error,
-  );
+  // A pre-upgrade native crash record may contain arbitrary secret text.
+  await logs.add('Native crash from previous run (raw details withheld)',
+    level: LogLevel.error);
 }
 
-String _diagnosticErrorMessage(
-  String label,
-  Object error,
-  StackTrace? stackTrace, {
-  String? context,
-  String? library,
-}) {
-  final buffer = StringBuffer(label)..writeln(': $error');
-  if (library != null && library.isNotEmpty) {
-    buffer.writeln('Library: $library');
-  }
-  if (context != null && context.isNotEmpty) {
-    buffer.writeln('Context: $context');
-  }
-  if (stackTrace != null) {
-    buffer.writeln(stackTrace);
-  }
-  return buffer.toString().trimRight();
-}
+String _diagnosticErrorMessage(String label, Object error) =>
+    '$label: ${diagnosticErrorCategory(error)}';
 
 Future<void> loadTranslations() async {
   // See easy_localization/issues/210
@@ -196,10 +171,10 @@ void callbackDispatcher() {
       final taskId = 'wm_${DateTime.now().millisecondsSinceEpoch}';
       await bgUpdateCheck(taskId, inputData);
       return true;
-    } catch (e, stack) {
+    } catch (e) {
       unawaited(
         logs.add(
-          'WorkManager callback crashed: $e\n$stack',
+          'WorkManager callback crashed: ${e.runtimeType}',
           level: LogLevel.error,
         ),
       );
@@ -896,7 +871,7 @@ class _ObtainiumState extends State<Obtainium> with WidgetsBindingObserver {
                 }
               })
               .catchError((err) {
-                debugPrint(err.toString());
+                debugPrint(diagnosticErrorCategory(err));
               });
         }
       }

@@ -8,6 +8,7 @@ import 'package:obtainium/app_sources/github.dart';
 import 'package:obtainium/app_sources/gradle_app_id.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/http/origin_redirect_policy.dart';
+import 'package:obtainium/http/linked_changelog_policy.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -139,6 +140,9 @@ class GitLab extends AppSource {
     bool forAPKDownload = false,
   }) async {
     final uri = Uri.tryParse(url);
+    if (uri != null && hasCredentialQuery(uri)) {
+      throw const FormatException('GitLab URL credentials refused');
+    }
     if (uri == null || uri.userInfo.isNotEmpty ||
         !sameRequestOrigin(uri, Uri.parse('https://${hosts[0]}'))) {
       return null;

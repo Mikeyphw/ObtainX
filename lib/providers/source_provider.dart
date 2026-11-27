@@ -720,7 +720,7 @@ class App {
       json = originalJson;
       unawaited(
         LogsProvider().add(
-          'Error running JSON compat modifiers (using original JSON): ${e.toString()}',
+          'Error running JSON compat modifiers (using original JSON): ${e.runtimeType}',
           level: LogLevel.warning,
         ),
       );
@@ -790,7 +790,7 @@ class App {
     } on TypeError catch (e) {
       unawaited(
         LogsProvider().add(
-          'Type mismatch in App.fromJson: ${e.toString()}',
+          'Type mismatch in App.fromJson: ${e.runtimeType}',
           level: LogLevel.error,
         ),
       );
@@ -2488,9 +2488,7 @@ class HttpService {
       return RateLimitError(30); // Default to a conservative 30 minutes
     }
     return ObtainiumError(
-      (res.reasonPhrase != null && res.reasonPhrase!.isNotEmpty)
-          ? res.reasonPhrase!
-          : tr('errorWithHttpStatusCode', args: [res.statusCode.toString()]),
+      'HTTP ${res.statusCode}',
       code: 'HTTP_ERROR',
     );
   }

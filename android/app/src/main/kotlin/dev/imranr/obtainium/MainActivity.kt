@@ -40,8 +40,6 @@ import io.flutter.plugin.common.MethodChannel
 import lab.neruno.android_package_manager.toMap
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.PrintWriter
-import java.io.StringWriter
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -139,7 +137,7 @@ class MainActivity : FlutterActivity() {
             Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
                 writeNativeCrashLog(
                     appContext,
-                    "Uncaught native exception on ${thread.name}",
+                    "Uncaught native exception",
                     throwable,
                 )
                 if (previousHandler != null) {
@@ -183,9 +181,9 @@ class MainActivity : FlutterActivity() {
         }
 
         private fun stackTraceText(throwable: Throwable): String {
-            val stringWriter = StringWriter()
-            throwable.printStackTrace(PrintWriter(stringWriter))
-            return stringWriter.toString()
+            // Throwable messages, cause messages and raw stack dumps may
+            // contain provider credentials, install URLs or intent extras.
+            return "Exception category: " + throwable.javaClass.name
         }
 
         fun cancelDownloadFromNotification(appId: String) {

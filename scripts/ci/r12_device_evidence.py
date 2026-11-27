@@ -110,7 +110,7 @@ def verify_matrix(candidate, matrix, evidence_dir):
             HEX40.fullmatch(str(candidate.get('source_sha', ''))) and HEX40.fullmatch(str(candidate.get('source_tree', ''))) and
             HEX64.fullmatch(str(candidate.get('certificate_sha256', ''))), 'invalid candidate identity')
     require(candidate.get('package_status') == 'SIGNED_CANDIDATE_VERIFIED' and candidate.get('publication_authorized') is False and
-            candidate.get('SOURCE_PASS') == 'PASS_BUILD_LANES' and candidate.get('HOSTED_CI_PASS') == 'PASS_EXACT_MAIN_FULL_JOBS', 'candidate prerequisites absent')
+            candidate.get('SOURCE_PASS') == 'PASS_BUILD_LANES' and candidate.get('HOSTED_CI_PASS') in ('PASS_EXACT_MAIN_FULL_JOBS', 'PASS_EXACT_MERGED_TREE_FULL_JOBS'), 'candidate prerequisites absent')
     require(matrix.get('schema') == 'obtainx.r12.device-matrix.v2' and matrix.get('repository') == REPO, 'wrong device matrix schema')
     for key in ('source_sha', 'source_tree', 'certificate_sha256'):
         require(matrix.get(key) == candidate.get(key), 'stale device evidence binding')
@@ -202,6 +202,10 @@ def main():
         require(inspect_apks(ROOT, args.candidate, expected_signer=args.expected_cert) == candidate['apks'], 'candidate APK bytes/signature/metadata changed')
         for filename, field in [('dependencies.json', 'dependencies_sha256'), ('gradle-dependencies.txt', 'gradle_inventory_sha256'), ('sbom.cdx.json', 'sbom_sha256'), ('advisories.json', 'advisories_sha256'), ('ci.json', 'ci_sha256'), ('toolchain.json', 'toolchain_sha256')]:
             require(digest(args.candidate / filename) == candidate.get(field), 'candidate evidence changed')
+        # New tree-bound candidates must carry explicit independently checked CI provenance.
+        if candidate.get('HOSTED_CI_PASS') == 'PASS_EXACT_MERGED_TREE_FULL_JOBS':
+            from r12_release_gate import validate_ci_receipt
+            require('PASS_' + validate_ci_receipt(load(args.candidate / 'ci.json'), actual) == candidate['HOSTED_CI_PASS'], 'tree-bound CI provenance mismatch')
         require([digest(args.candidate / f'{replica}-build.json') for replica in ('a', 'b')] == candidate.get('unsigned_builds'), 'unsigned provenance changed')
         print(json.dumps(verify_matrix(candidate, load(args.matrix), args.evidence_dir), indent=2, sort_keys=True))
         return 0

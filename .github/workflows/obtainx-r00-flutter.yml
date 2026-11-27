@@ -2,7 +2,7 @@ name: ObtainX R00 / Hosted Flutter Qualification
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review, converted_to_draft]
+    types: [opened, reopened, synchronize, labeled, unlabeled]
   workflow_dispatch:
 
 permissions:
@@ -142,6 +142,8 @@ jobs:
         run: flutter test --no-pub test/source_provider_test.dart
       - name: R09 byte-backed artifact metadata review
         run: flutter test --no-pub test/r09_artifact_inspection_test.dart
+      - name: R10 accessibility and package lookup regressions
+        run: flutter test --no-pub test/r10_accessibility_test.dart test/version_order_test.dart
       - name: R09 discovery and artifact selection regressions
         run: flutter test --no-pub test/r09_discovery_test.dart test/needs_attention_group_test.dart
       - name: Execute R01 adversarial archive fixtures first

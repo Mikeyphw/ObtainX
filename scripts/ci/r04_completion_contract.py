@@ -158,7 +158,7 @@ def verify(root: Path = ROOT) -> int:
       "'physical_install':'NOT_QUALIFIED'",
     ))
     for path in FILES[17:21]:
-        require(path, ("scripts/ci/obtainx_ci_policy.py plan --head", "ready_for_review, converted_to_draft"))
+        require(path, ("scripts/ci/obtainx_ci_policy.py plan --head", "opened, reopened, synchronize, labeled, unlabeled"))
     # This must be committed before Devtool delivery CI. Never infer a
     # required set from observed runs or mark release qualification complete.
     try:

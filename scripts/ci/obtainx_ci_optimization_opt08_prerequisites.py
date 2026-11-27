@@ -24,6 +24,7 @@ FLUTTER_STEPS = (
     'R08 source reliability named regressions',
     'F-Droid and source provider digest regressions',
     'R09 byte-backed artifact metadata review',
+    'R10 accessibility and package lookup regressions',
     'Execute full Flutter test suite',
 )
 MAX_POLLS = 24

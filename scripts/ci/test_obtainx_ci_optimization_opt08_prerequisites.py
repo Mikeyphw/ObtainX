@@ -64,6 +64,8 @@ class Opt08Prerequisites(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/obtainx-r00-flutter.yml').read_text()
         self.assertIn('Execute full Flutter test suite', opt.FLUTTER_STEPS)
         self.assertIn('R09 byte-backed artifact metadata review', opt.FLUTTER_STEPS)
+        self.assertIn('R10 accessibility and package lookup regressions', opt.FLUTTER_STEPS)
+        self.assertIn('name: R10 accessibility and package lookup regressions\n        run: flutter test --no-pub test/r10_accessibility_test.dart test/version_order_test.dart', workflow)
         self.assertIn('name: R09 byte-backed artifact metadata review\n        run: flutter test --no-pub test/r09_artifact_inspection_test.dart', workflow)
         self.assertIn('R08 source reliability named regressions', opt.FLUTTER_STEPS)
         self.assertIn('F-Droid and source provider digest regressions', opt.FLUTTER_STEPS)

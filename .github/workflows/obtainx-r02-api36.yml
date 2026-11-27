@@ -2,7 +2,7 @@ name: ObtainX R02 / API 36 Hosted Emulator Bootstrap
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review, converted_to_draft]
+    types: [opened, reopened, synchronize, labeled, unlabeled]
   workflow_dispatch:
 
 permissions:

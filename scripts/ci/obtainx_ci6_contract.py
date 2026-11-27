@@ -82,7 +82,7 @@ def inspect(root: Path = ROOT) -> list[str]:
         if path in ANDROID:
             lane = ('api36','rt02','rt02b','rt02c')[ANDROID.index(path)]
             if ('    paths:' in w or '    paths-ignore:' in w or
-                'ready_for_review, converted_to_draft' not in w or
+                'opened, reopened, synchronize, labeled, unlabeled' not in w or
                 'needs: scope\n    if: needs.scope.outputs.'+lane+" == 'true'" not in w or
                 'scripts/ci/obtainx_ci_policy.py plan --head' not in w):
                 errors.append('Android exact-scope or full event gate changed: '+path)

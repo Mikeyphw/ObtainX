@@ -122,4 +122,46 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
+  testWidgets('shared controls remain reachable at 200 percent across viewports',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final semantics = tester.ensureSemantics();
+    addTearDown(semantics.dispose);
+    for (final size in const [Size(280, 640), Size(640, 320), Size(1024, 768)]) {
+      tester.view.physicalSize = size;
+      var invoked = 0;
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: MediaQuery(
+        data: MediaQueryData(size: size, textScaler: const TextScaler.linear(2)),
+        child: SingleChildScrollView(child: Column(children: [
+          R10NavigationStrip(children: [
+            R10NavigationTarget(label: 'Navigation destination', selected: true,
+                onTap: () => invoked++, child: const Icon(Icons.apps)),
+          ]),
+          R10PrimaryActions(
+            first: FilledButton(onPressed: () => invoked++,
+                child: const Text('Inspect package metadata')),
+            second: FilledButton(onPressed: () => invoked++,
+                child: const Text('Compare selected artifacts')),
+          ),
+        ])),
+      ))));
+      await tester.pumpAndSettle();
+      final nav = find.byType(R10NavigationTarget);
+      expect(tester.getSize(nav).width, greaterThanOrEqualTo(48));
+      expect(tester.getSize(nav).height, greaterThanOrEqualTo(48));
+      expect(find.bySemanticsLabel('Navigation destination'), findsOneWidget);
+      await tester.tap(nav);
+      for (final label in ['Inspect package metadata', 'Compare selected artifacts']) {
+        final button = find.widgetWithText(FilledButton, label);
+        await tester.ensureVisible(button);
+        await tester.pumpAndSettle();
+        await tester.tap(button);
+      }
+      expect(invoked, 3);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
 }

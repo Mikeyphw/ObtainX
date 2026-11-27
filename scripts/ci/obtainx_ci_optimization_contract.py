@@ -20,7 +20,7 @@ FILES = (SOURCE, FLUTTER, *HEAVY)
 POLICY = 'scripts/ci/obtainx_ci_policy.py'
 RISK = 'scripts/ci/*optimization*'
 LABEL = 'ci:development-only'
-EVENT_TYPES = 'types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review, converted_to_draft]'
+EVENT_TYPES = 'types: [opened, reopened, synchronize, labeled, unlabeled]'
 DEFER_EXPR = "needs.scope.outputs."
 REFUSE_EXPR = "steps.scope.outputs.mode == 'scoped'"
 UPLOAD = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
@@ -50,8 +50,8 @@ def inspect(root: Path = ROOT) -> list[str]:
     if not policy or "'"+RISK+"'" not in policy:
         errors.append('CI optimization Python changes must be classified as high-risk')
     for rel,content in files.items():
-        if EVENT_TYPES not in content:
-            errors.append('label add/remove must rerun checks: '+rel)
+        if content.count(EVENT_TYPES) != 1 or 'ready_for_review' in content or 'converted_to_draft' in content:
+            errors.append('only source and label scope events may trigger qualification: '+rel)
         if '  workflow_dispatch:' not in content or 'permissions:\n  contents: read' not in content:
             errors.append('manual full gate or read-only permission missing: '+rel)
         if 'cancel-in-progress: true' not in content:

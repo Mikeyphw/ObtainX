@@ -20,7 +20,7 @@ jobs:
   scope:
     name: Exact-SHA scope classifier
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 20
     outputs:
       mode: ${{ steps.scope.outputs.mode }}
       full_flutter: ${{ steps.scope.outputs.full_flutter }}
@@ -51,6 +51,13 @@ jobs:
           OX_PLAN_DIGEST: ${{ steps.scope.outputs.plan_digest }}
         shell: bash
         run: test "${#OX_PLAN_DIGEST}" -eq 64 && [[ "$OX_PLAN_DIGEST" =~ ^[a-f0-9]{64}$ ]]
+      - name: Await exact-head source and full Flutter test prerequisites
+        if: github.event_name == 'pull_request' && steps.scope.outputs.mode == 'full' && steps.scope.outputs.rt02c == 'true'
+        timeout-minutes: 15
+        shell: bash
+        env:
+          OX_SCOPE_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/ci/obtainx_ci_optimization_opt08_prerequisites.py --head "$OX_EXPECTED_SHA"
   rt02c-archive-install:
     needs: scope
     if: needs.scope.outputs.rt02c == 'true'

@@ -323,10 +323,24 @@ class FDroidRepo extends AppSource {
     final String reproducibleStatus = selectedReleases.isNotEmpty
         ? await releaseReproducibleStatus(selectedReleases[0])
         : reproducibleBuildStatusNoData;
+    final assetDigests = <SourceAssetDigest>[];
+    for (final release in selectedReleases) {
+      final hash = release.querySelector('hash');
+      if (hash == null || hash.attributes['type']?.toLowerCase() != 'sha256') continue;
+      final digest = SourceAssetDigest.normalize(hash.innerHtml);
+      if (digest == null) {
+        throw const FormatException('Invalid F-Droid asset SHA-256');
+      }
+      final asset = getApkUrlsFromUrls([
+        '$repoBase/${release.querySelector('apkname')!.innerHtml}',
+      ]).single;
+      assetDigests.add(SourceAssetDigest(asset.key, asset.value, digest));
+    }
     return APKDetails(
       selectedVersion,
       getApkUrlsFromUrls(apkUrls),
       AppNames(authorName, appName),
+      assetDigests: assetDigests,
       versionCode: int.tryParse(
         selectedReleases[0].querySelector('versioncode')?.innerHtml ?? '',
       ),

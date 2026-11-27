@@ -72,7 +72,7 @@ class R07ActivityRecord {
 
 /// Valid actions depend on both journal stage and independent live evidence.
 /// This pure function is also the gate used immediately before each action.
-enum R07ActivityAction { review, resume, retry, cancel, open, details }
+enum R07ActivityAction { review, resume, retry, pause, cancel, open, details }
 
 Set<R07ActivityAction> r07AllowedActions(
   R07ActivityRecord entry, {
@@ -80,6 +80,7 @@ Set<R07ActivityAction> r07AllowedActions(
   required bool liveDownload,
   required bool cancellableInstall,
   required bool independentlyInstalled,
+  bool pauseAvailable = false,
 }) {
   final result = <R07ActivityAction>{R07ActivityAction.details};
   if (!entry.historyIntegrityKnown || entry.kind == 'integrity') return result;
@@ -110,6 +111,7 @@ Set<R07ActivityAction> r07AllowedActions(
     // filename. A different transfer might now own the same listing.
     if (listingMatches && liveDownload && entry.stage == 'downloading') {
       result.add(R07ActivityAction.cancel);
+      if (pauseAvailable) result.add(R07ActivityAction.pause);
     }
   } else if (entry.kind == 'download') {
     if (!entry.archivedTransfer && listingMatches && !liveDownload && entry.download?.explicitlyResumable == true) {
@@ -140,6 +142,53 @@ class R07ActivityCatalog {
   // 4,096 legal SHA-256 chunk hashes alone can exceed 128 KiB.
   static const int maxDownloadReceiptBytes = R03DownloadHistory.maxReceiptBytes;
   static final RegExp _downloadFile = RegExp(r'^[a-f0-9]{64}\.json$');
+
+  /// Stream the requested projection, independent of UI page size. The
+  /// journals retain their own integrity checks; an unreadable record aborts
+  /// the complete export. No global receipt collection or sort is required.
+  Future<void> visitForExport(Future<void> Function(R07ActivityRecord) visit, {
+      Map<String, String> trackedPackages = const {}, String? packageId,
+      String? listingKey, String? operationId, String channel = 'all', String filter = 'all'}) async {
+    Future<void> selected(R07ActivityRecord row, String? rowChannel) async {
+      if ((packageId == null || row.packageId == packageId) &&
+          (listingKey == null || row.listingKey == listingKey) &&
+          (operationId == null || row.id == operationId) &&
+          (channel == 'all' || channel == (rowChannel ?? 'unknown')) &&
+          (filter == 'all' || (filter == 'review' && row.needsReview) ||
+            (filter == 'done' && row.isFinished))) {
+        await visit(row);
+      }
+    }
+    await _installJournal.visitForExport((attempt) => selected(R07ActivityRecord(
+      id: 'install:${attempt.id}', kind: 'install',
+      stage: attempt.stage == R05InstallStage.confirmed && !attempt.exactBytesConfirmed
+        ? 'unknown' : attempt.stage.name, title: attempt.packageId,
+      listingKey: attempt.listingKey, packageId: attempt.packageId,
+      updatedUtc: attempt.updatedUtc, install: attempt), attempt.channelFingerprint));
+    final root = testingRoot ?? await getApplicationSupportDirectory();
+    if (operationId == null || operationId.startsWith('timeline:')) {
+      await R07OperationTimeline(testingRoot: root).visitForExport((row) => selected(
+        R07ActivityRecord(id: 'timeline:${row.id}', kind: 'timeline', stage: row.stage,
+          title: row.intent.packageId, updatedUtc: row.updatedUtc, timeline: row,
+          listingKey: row.intent.channel == 'unknown' ? null : row.intent.listingKey,
+          packageId: row.intent.channel == 'unknown' ? null : row.intent.packageId), row.intent.channel),
+        packageId: packageId, listingKey: listingKey, operationId: operationId?.substring('timeline:'.length),
+        channel: channel, filter: filter);
+    }
+    await R03DownloadHistory.visitForExport(Directory('${root.path}/r03-download-journal'),
+      (transfer, name, archived, updated) {
+        final owner = transfer.historyBinding;
+        final listing = owner?.listingKey ?? r07UniqueListingForFile(transfer.fileName, trackedPackages.keys);
+        final complete = transfer.finalDigest != null && RegExp(r'^[a-f0-9]{64}$').hasMatch(transfer.finalDigest!) &&
+          transfer.completedBytes == transfer.totalBytes && const {R03Stage.ready, R03Stage.completed}.contains(transfer.stage);
+        return selected(R07ActivityRecord(id: archived ? 'download-history:$name' : 'download:${transfer.jobId}',
+          kind: 'download', archivedTransfer: archived, stage: transfer.stage.name,
+          title: transfer.fileName, updatedUtc: updated, listingKey: listing,
+          packageId: owner?.packageId ?? (listing == null ? null : trackedPackages[listing]),
+          verifiedBytes: complete ? transfer.completedBytes : transfer.validatedBytes,
+          totalBytes: transfer.totalBytes, download: transfer), owner?.channel);
+      });
+  }
 
   Future<List<R07ActivityRecord>> load({
     Map<String, String> trackedPackages = const <String, String>{},
@@ -217,8 +266,9 @@ class R07ActivityCatalog {
         for (final row in page.rows) {
           final count = page.batches[row.batchId];
           append(R07ActivityRecord(id: 'timeline:${row.id}', kind: 'timeline',
-            stage: row.stage, title: row.intent.packageId, listingKey: row.intent.listingKey,
-            packageId: row.intent.packageId, updatedUtc: row.updatedUtc, reason: row.reason,
+            stage: row.stage, title: row.intent.packageId,
+            listingKey: row.intent.channel == 'unknown' ? null : row.intent.listingKey,
+            packageId: row.intent.channel == 'unknown' ? null : row.intent.packageId, updatedUtc: row.updatedUtc, reason: row.reason,
             timeline: row, batchCompleted: count?.completed, batchTotal: count?.total));
         }
         if (page.unreadableCount != 0) {

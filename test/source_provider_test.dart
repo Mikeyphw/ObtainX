@@ -342,7 +342,7 @@ class _StubGitHub extends GitHub {
                 'url':
                     'https://api.github.com/repos/example/app/releases/assets/2',
                 'size': 124,
-                'digest': 'sha256:preview123',
+                'digest': 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
               },
             ],
           },
@@ -892,13 +892,13 @@ void main() {
     <version>3.0</version>
     <versioncode>3</versioncode>
     <apkname>org.example.app_3.apk</apkname>
-    <hash type="sha256">hash3</hash>
+    <hash type="sha256">3333333333333333333333333333333333333333333333333333333333333333</hash>
   </package>
   <package>
     <version>2.0</version>
     <versioncode>2</versioncode>
     <apkname>org.example.app_2.apk</apkname>
-    <hash type="sha256">hash2</hash>
+    <hash type="sha256">2222222222222222222222222222222222222222222222222222222222222222</hash>
   </package>
 </application></fdroid>
 '''),
@@ -909,11 +909,16 @@ void main() {
             (String appId, int versionCode, String? apkSha256) async {
               return appId == 'org.example.app' &&
                   versionCode == 2 &&
-                  apkSha256 == 'hash2';
+                  apkSha256 == '2222222222222222222222222222222222222222222222222222222222222222';
             },
       );
 
       expect(details.version, '3.0');
+      expect(details.assetDigests, hasLength(1));
+      expect(details.assetDigests.single.name, details.apkUrls.single.key);
+      expect(details.assetDigests.single.url, details.apkUrls.single.value);
+      expect(details.assetDigests.single.sha256,
+          '3333333333333333333333333333333333333333333333333333333333333333');
       expect(details.names.name, 'Example App');
       expect(details.isReproducible, isFalse);
       expect(
@@ -939,13 +944,13 @@ void main() {
     <version>3.0</version>
     <versioncode>3</versioncode>
     <apkname>org.example.app_3.apk</apkname>
-    <hash type="sha256">hash3</hash>
+    <hash type="sha256">3333333333333333333333333333333333333333333333333333333333333333</hash>
   </package>
   <package>
     <version>2.0</version>
     <versioncode>2</versioncode>
     <apkname>org.example.app_2.apk</apkname>
-    <hash type="sha256">hash2</hash>
+    <hash type="sha256">2222222222222222222222222222222222222222222222222222222222222222</hash>
   </package>
 </application></fdroid>
 '''),
@@ -956,11 +961,16 @@ void main() {
             (String appId, int versionCode, String? apkSha256) async {
               return appId == 'org.example.app' &&
                   versionCode == 2 &&
-                  apkSha256 == 'hash2';
+                  apkSha256 == '2222222222222222222222222222222222222222222222222222222222222222';
             },
       );
 
       expect(details.version, '3.0');
+      expect(details.assetDigests, hasLength(1));
+      expect(details.assetDigests.single.name, details.apkUrls.single.key);
+      expect(details.assetDigests.single.url, details.apkUrls.single.value);
+      expect(details.assetDigests.single.sha256,
+          '3333333333333333333333333333333333333333333333333333333333333333');
       expect(details.isReproducible, isFalse);
       expect(
         details.reproducibleStatus,
@@ -981,7 +991,7 @@ void main() {
     <version>3.0</version>
     <versioncode>3</versioncode>
     <apkname>org.example.app_3.apk</apkname>
-    <hash type="sha256">hash3</hash>
+    <hash type="sha256">3333333333333333333333333333333333333333333333333333333333333333</hash>
   </package>
 </application></fdroid>
 '''),
@@ -991,10 +1001,64 @@ void main() {
       );
 
       expect(details.version, '3.0');
+      expect(details.assetDigests, hasLength(1));
+      expect(details.assetDigests.single.name, details.apkUrls.single.key);
+      expect(details.assetDigests.single.url, details.apkUrls.single.value);
+      expect(details.assetDigests.single.sha256,
+          '3333333333333333333333333333333333333333333333333333333333333333');
       expect(details.isReproducible, isNull);
       expect(details.reproducibleStatus, reproducibleBuildStatusNoData);
     },
   );
+
+  test('F-Droid selected asset rejects malformed advertised SHA-256', () async {
+    for (final digest in ['hash3', '', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg']) {
+      await expectLater(
+        FDroidRepo.apkDetailsFromIndexXmlResponse(
+          _fdroidRepoResponse('''
+<fdroid><repo name="Example Repo"/><application id="org.example.app">
+  <name>Example App</name>
+  <package>
+    <version>3.0</version>
+    <versioncode>3</versioncode>
+    <apkname>org.example.app_3.apk</apkname>
+    <hash type="sha256">$digest</hash>
+  </package>
+</application></fdroid>
+'''),
+          'org.example.app',
+          <String, dynamic>{},
+          'Example Repo',
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    }
+  });
+
+  test('F-Droid selected asset normalizes uppercase SHA-256', () async {
+    final details = await FDroidRepo.apkDetailsFromIndexXmlResponse(
+      _fdroidRepoResponse('''
+<fdroid><repo name="Example Repo"/><application id="org.example.app">
+  <name>Example App</name>
+  <package>
+    <version>3.0</version>
+    <versioncode>3</versioncode>
+    <apkname>org.example.app_3.apk</apkname>
+    <hash type="SHA256">AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</hash>
+  </package>
+</application></fdroid>
+'''),
+      'org.example.app',
+      <String, dynamic>{},
+      'Example Repo',
+    );
+    expect(details.assetDigests, hasLength(1));
+    expect(details.assetDigests.single.name, details.apkUrls.single.key);
+    expect(details.assetDigests.single.url, details.apkUrls.single.value);
+    expect(details.assetDigests.single.sha256,
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  });
 
   test(
     'F-Droid repo parser does not treat an empty binaries element as verified',

@@ -15,6 +15,8 @@ import 'package:obtainium/services/install_bundle_plan.dart';
 import 'package:obtainium/services/r09_artifact_inspection.dart';
 import 'package:obtainium/services/r02_local_archive_policy.dart';
 import 'package:obtainium/services/r02f_p05_device_profile.dart';
+import 'package:obtainium/services/r07_operation_timeline.dart';
+import 'package:obtainium/services/r11_external_requests.dart';
 import 'package:shared_storage/shared_storage.dart' as saf;
 import 'package:path_provider/path_provider.dart';
 
@@ -49,7 +51,10 @@ Future<void> showR02LocalArchiveImport(
     throw const FormatException('An Android SAF content URI is required');
   }
 
-  final request = 'r02local${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
+  final timeline = R07OperationTimeline.instance;
+  final operation = await timeline.beginLocalArchive();
+  final request = 'r02local${operation.id.substring(4)}';
+  var finalStage = 'unknown';
   var wasCancelled = false;
   void checkCancellation() {
     if (wasCancelled) throw const CancellationException();
@@ -77,7 +82,10 @@ Future<void> showR02LocalArchiveImport(
       'id': request,
       'uri': document.toString(),
     });
-    if (receipt == null) return;
+    if (receipt == null) {
+      finalStage = wasCancelled ? 'cancelled' : 'unknown';
+      return;
+    }
     final name = receipt['name'];
     final path = receipt['path'];
     final bytes = receipt['bytes'];
@@ -87,7 +95,8 @@ Future<void> showR02LocalArchiveImport(
       throw const FormatException('Malformed native SAF source receipt');
     }
     privatePath = path;
-    if (wasCancelled) return;
+    checkCancellation();
+    await timeline.advance(operation.id, 'verifying', expectedStage: 'copying');
     final format = classifyR02LocalArtifact(name, bytes);
     final source = File(path);
     if (FileSystemEntity.typeSync(path, followLinks: false) !=
@@ -96,13 +105,14 @@ Future<void> showR02LocalArchiveImport(
         (await sha256FileOffIsolate(path)) != digest) {
       throw const FormatException('Local archive failed independent SHA-256 validation');
     }
-    if (wasCancelled) return;
+    checkCancellation();
 
     final apks = <File>[];
     final obbs = <File>[];
     if (format == InstallArtifactFormat.apk) {
       apks.add(source);
     } else {
+      await timeline.advance(operation.id, 'extracting', expectedStage: 'verifying');
       final temp = await getTemporaryDirectory();
       final stage = Directory('${temp.path}/r02-local-extracted-${DateTime.now().microsecondsSinceEpoch}');
       // R01's atomic bounded extractor refuses traversal, symlinks, duplicate
@@ -187,8 +197,14 @@ Future<void> showR02LocalArchiveImport(
         );
       }
     }
+    checkCancellation();
+    final listing = targets.single.listingKey;
+    final targetChannel = r11ChannelFingerprint(targets.single.app);
+    await timeline.bindLocalArchive(operation.id, listingKey: listing,
+      packageId: plan.packageName, channel: targetChannel, archiveSha256: digest);
     final previous = await getInstalledInfo(plan.packageName);
-    if (!context.mounted || wasCancelled) return;
+    checkCancellation();
+    if (!context.mounted) return;
     notifications.hideCurrentSnackBar();
     final accepted = await showDialog<bool>(
       context: context,
@@ -216,7 +232,11 @@ Future<void> showR02LocalArchiveImport(
         ],
       ),
     );
-    if (accepted != true || wasCancelled) return;
+    checkCancellation();
+    if (accepted != true) {
+      finalStage = 'declined';
+      return;
+    }
     verifyR02LocalTarget(
       expectedPackage: targets.single.app.id,
       actualPackage: plan.packageName,
@@ -235,7 +255,12 @@ Future<void> showR02LocalArchiveImport(
         (evidence['signers'] as List).isEmpty) {
       throw const FormatException('Cannot establish signed APK byte provenance');
     }
-    final listing = targets.single.listingKey;
+    checkCancellation();
+    final live = provider.apps[listing]?.app;
+    if (live == null || live.id != plan.packageName ||
+        live.listingKey != listing || r11ChannelFingerprint(live) != targetChannel) {
+      throw StateError('Reviewed local archive listing changed');
+    }
     final gate = provider.beginInstallPreparation(listing);
     try {
       if (gate.wasCancelled || wasCancelled) return;
@@ -250,7 +275,7 @@ Future<void> showR02LocalArchiveImport(
       final bool reported;
       if (format == InstallArtifactFormat.apk) {
         reported = await provider.installApk(
-          DownloadedApk(listing, source), null,
+          DownloadedApk(listing, source, installTimelineId: operation.id), null,
           preparationGate: gate, showMalwareScanDialog: true, approvedPlan: plan,
         );
       } else {
@@ -262,7 +287,7 @@ Future<void> showR02LocalArchiveImport(
               InstallArtifactFormat.apkm => DownloadedDirType.apkm,
               InstallArtifactFormat.tarball => DownloadedDirType.tarball,
               _ => DownloadedDirType.zip,
-            }, inspectedPlan: plan),
+            }, inspectedPlan: plan, installTimelineId: operation.id),
           null, preparationGate: gate, showMalwareScanDialog: true,
         );
       }
@@ -293,8 +318,15 @@ Future<void> showR02LocalArchiveImport(
       provider.endInstallPreparation(listing, gate);
     }
   } on CancellationException {
+    finalStage = 'cancelled';
     notice('Local archive operation cancelled.');
+  } catch (_) {
+    finalStage = wasCancelled ? 'cancelled' : 'failed';
+    rethrow;
   } finally {
+    // Never overwrite an already linked R05 outcome. Unknown is intentional
+    // when the review UI disappears or native copying has no receipt.
+    await timeline.settlePreparation(operation.id, wasCancelled ? 'cancelled' : finalStage);
     if (extracted != null && extracted.existsSync()) {
       await extracted.delete(recursive: true);
     }

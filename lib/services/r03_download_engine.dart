@@ -36,6 +36,12 @@ class R03InvalidEntityException implements Exception {
   String toString() => 'R03 invalid download entity: $reason';
 }
 
+/// Thrown only after the exact partial file and durable paused receipt exist.
+class R03PausedException implements Exception {
+  const R03PausedException(this.jobId);
+  final String jobId;
+}
+
 /// A persistent receipt contains no bearer tokens, URL query strings, or
 /// authorization headers. The actual URL and credentials are re-resolved from
 /// the tracked source on each operation, including after application restart.
@@ -268,13 +274,17 @@ String r03FinalOrigin(HttpClientResponse response, Uri source, {Uri? resolved}) 
 /// journal. A committed .part block has a SHA-256 hash in that journal; an
 /// uncommitted trailing fragment is truncated on recovery.
 class R03DownloadEngine {
-  R03DownloadEngine({required this.journalDirectory, this.maxBytes = r03MaximumBytes}) {
-    if (maxBytes <= 0 || maxBytes > r03MaximumBytes) {
+  R03DownloadEngine({required this.journalDirectory, this.maxBytes = r03MaximumBytes,
+      this.maxWallTime = const Duration(hours: 2), this.ensureCapacity}) {
+    if (maxBytes <= 0 || maxBytes > r03MaximumBytes ||
+        maxWallTime <= Duration.zero || maxWallTime > const Duration(hours: 2)) {
       throw const R03InvalidEntityException('invalid transfer bound');
     }
   }
   final Directory journalDirectory;
   final int maxBytes;
+  final Duration maxWallTime;
+  final Future<void> Function(String, int)? ensureCapacity;
   static final Map<String, Future<({File file, R03DownloadRecord receipt})>> _active = {};
   // A caller with different trusted-byte requirements must never inherit a
   // transfer owned by another caller, even when URL and destination match.
@@ -306,11 +316,17 @@ class R03DownloadEngine {
     required void Function(double?, int?, int?)? onProgress,
     bool useExisting = true,
     String? expectedSha256,
+    bool Function()? isPauseRequested,
+    void Function(bool)? onPauseAvailable,
     R03HistoryBinding? historyBinding,
     R03DownloadRecord? resumeRecord,
     Uri? Function(HttpClientResponse)? resolvedUri,
     void Function(R03DownloadRecord)? onVerified,
   }) {
+    if (expectedSha256 != null && !RegExp(r'^[a-f0-9]{64}$').hasMatch(expectedSha256)) {
+      unawaited(firstResponse.listen((_) {}).cancel());
+      return Future<File>.error(const R03InvalidEntityException('invalid expected digest'));
+    }
     final key = jobKey(source, destination, headers, historyBinding: historyBinding);
     final existing = _active[key];
     if (existing != null) {
@@ -331,6 +347,7 @@ class R03DownloadEngine {
           return _run(source: source, destination: destination, headers: headers,
             firstResponse: firstResponse, fetch: fetch,
             isCancelled: isCancelled, onProgress: onProgress,
+            isPauseRequested: isPauseRequested, onPauseAvailable: onPauseAvailable,
             useExisting: useExisting, expectedSha256: expectedSha256,
             jobId: key, historyBinding: historyBinding, resolvedUri: resolvedUri,
             resumeRecord: resumeRecord);
@@ -373,6 +390,8 @@ class R03DownloadEngine {
     required bool useExisting,
     required String jobId,
     String? expectedSha256,
+    bool Function()? isPauseRequested,
+    void Function(bool)? onPauseAvailable,
     R03HistoryBinding? historyBinding,
     R03DownloadRecord? resumeRecord,
     Uri? Function(HttpClientResponse)? resolvedUri,
@@ -438,6 +457,7 @@ class R03DownloadEngine {
       try { await firstResponse.listen((_) {}).cancel(); } catch (_) { /* primary refusal */ }
       rethrow;
     }
+    final elapsed = Stopwatch()..start();
     var response = firstResponse;
     final effectiveInitial = previous != null && previous.historyBinding == null
         ? R03DownloadRecord(jobId: initial.jobId, sourceFingerprint: initial.sourceFingerprint,
@@ -555,47 +575,91 @@ class R03DownloadEngine {
         totalBytes: total, etag: etag, lastModified: lastModified,
         finalOrigin: currentOrigin,
       );
+      await destination.parent.create(recursive: true);
+      await ensureCapacity?.call(destination.parent.path,
+        total == null ? min(maxBytes, 8 * r03ChunkBytes) : total - acceptedBytes);
       await _save(journal, active);
       startedWrite = true;
-      await destination.parent.create(recursive: true);
       final output = await part.open(
         mode: acceptedBytes > 0 ? FileMode.append : FileMode.write);
       final partial = <int>[];
       var received = acceptedBytes;
+      var capacityCheckedAt = acceptedBytes;
       try {
+        onPauseAvailable?.call(active.explicitlyResumable);
         await for (final incoming in response.timeout(const Duration(seconds: 45))) {
           if (isCancelled()) throw const R03InvalidEntityException('cancelled');
+          if (isPauseRequested?.call() == true) {
+            throw const R03InvalidEntityException('pause requested');
+          }
+          if (elapsed.elapsed >= maxWallTime) throw TimeoutException('Artifact transfer deadline exceeded');
           if (incoming.isEmpty) continue;
           if (received + incoming.length > maxBytes ||
               (total != null && received + incoming.length > total)) {
             throw const R03InvalidEntityException('response exceeds expected length');
           }
-          await output.writeFrom(incoming);
-          received += incoming.length;
+          if (received - capacityCheckedAt + incoming.length >= 8 * r03ChunkBytes) {
+            await ensureCapacity?.call(destination.parent.path,
+              min((total ?? maxBytes) - received, max(incoming.length, 8 * r03ChunkBytes)));
+            capacityCheckedAt = received;
+          }
+          // Network chunks are not checkpoint boundaries. Write only up to the
+          // next checkpoint before exposing pause, even if one incoming chunk
+          // contains the entire remaining response.
           var index = 0;
           while (index < incoming.length) {
+            if (isCancelled()) throw const R03InvalidEntityException('cancelled');
+            if (isPauseRequested?.call() == true) {
+              throw const R03InvalidEntityException('pause requested');
+            }
+            if (elapsed.elapsed >= maxWallTime) {
+              throw TimeoutException('Artifact transfer deadline exceeded');
+            }
             final remaining = r03ChunkBytes - partial.length;
             final end = min(incoming.length, index + remaining);
+            final count = end - index;
+            // Disable new requests only at the final byte boundary, not at
+            // the start of a network chunk containing earlier checkpoints.
+            if (total != null && received + count >= total) {
+              onPauseAvailable?.call(false);
+            }
+            if (isPauseRequested?.call() == true) {
+              throw const R03InvalidEntityException('pause requested');
+            }
+            await output.writeFrom(incoming, index, end);
+            received += count;
             partial.addAll(incoming.sublist(index, end));
             index = end;
             if (partial.length == r03ChunkBytes) {
+              if (isPauseRequested?.call() == true) {
+                throw const R03InvalidEntityException('pause requested');
+              }
               await output.flush();
               committed.add(sha256.convert(partial).toString());
               partial.clear();
               active = active.copyWith(blocks: List<String>.of(committed));
               await _save(journal, active);
+              onPauseAvailable?.call(active.explicitlyResumable && (total == null || received < total));
+              if (isPauseRequested?.call() == true) {
+                throw const R03InvalidEntityException('pause requested');
+              }
             }
           }
           onProgress?.call(total == null ? null : (received * 100 / total).clamp(0, 100).toDouble(), received, total);
         }
         await output.flush();
       } finally {
+        onPauseAvailable?.call(false);
         await output.close();
+      }
+      if (isPauseRequested?.call() == true) {
+        throw const R03InvalidEntityException('pause requested');
       }
       if (isCancelled()) throw const R03InvalidEntityException('cancelled');
       if (total != null && received != total) {
         throw const R03InvalidEntityException('incomplete response body');
       }
+      if (elapsed.elapsed >= maxWallTime) throw TimeoutException('Artifact transfer deadline exceeded');
       // Unknown Content-Length is valid only after a clean stream EOF and
       // digest verification. A dropped connection is not a successful EOF.
       active = active.copyWith(stage: R03Stage.verifying, blocks: List<String>.of(committed));
@@ -617,6 +681,19 @@ class R03DownloadEngine {
       onProgress?.call(null, null, null);
       return (file: destination, receipt: active);
     } catch (error) {
+      onPauseAvailable?.call(false);
+      if (isPauseRequested?.call() == true && startedWrite) {
+        // Use the exact last committed inventory, not a trailing fragment or
+        // the in-memory list if the last journal update did not complete.
+        final saved = await _readCheckpoint(journal);
+        if (!saved.explicitlyResumable || saved.jobId != jobId ||
+            saved.stage != R03Stage.downloading || !await _verifyBlocks(part, saved.blocks)) {
+          throw const R03InvalidEntityException('pause checkpoint could not be verified');
+        }
+        await _truncateTo(part, saved.validatedBytes);
+        await _save(journal, saved.copyWith(stage: R03Stage.paused));
+        throw R03PausedException(saved.jobId);
+      }
       final status = isCancelled() ? R03Stage.cancelled :
           error is R03DownloadHttpException && r03CanRetryHttpStatus(error.statusCode)
               ? R03Stage.retrying : R03Stage.failed;

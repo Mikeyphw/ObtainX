@@ -20,7 +20,7 @@ GUARDS = {
     'lib/services/r07_operation_timeline.dart': (
         'withR07JournalGuard', "where: 'id = ? AND revision = ?'", 'PRIMARY KEY(operationId, revision)',
         "reason: stage == 'cancelled'", 'R07ProcessState.dead',
-        "current.intent.kind != 'install'", 'historyConditions.join',
+        "!const {'install', 'localArchive'}.contains(current.intent.kind)", 'historyConditions.join',
         'SUM(finished)', 'expectedStage: entry.stage'),
     'lib/services/r03_download_engine.dart': (
         'resumeRecord.explicitlyResumable', 'jsonEncode(previous.toJson()) != jsonEncode(resumeRecord.toJson())',

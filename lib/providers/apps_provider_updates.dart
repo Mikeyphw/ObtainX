@@ -225,12 +225,16 @@ App? mergeFetchedUpdateWithLiveState({
       liveApp.latestVersion == fetchedApp.latestVersion;
   final settings = Map<String, dynamic>.from(liveApp.additionalSettings)
     ..remove(sourceVersionCodesKey)
+    ..remove(sourceAssetDigestsKey)
     // This answer found a release.
     ..remove(noMatchingReleaseKey);
   clearNeedsAttentionCode(settings, needsAttentionVersionFilter);
   if (fetchedApp.additionalSettings[sourceVersionCodesKey] != null) {
     settings[sourceVersionCodesKey] =
         fetchedApp.additionalSettings[sourceVersionCodesKey];
+  }
+  if (fetchedApp.additionalSettings[sourceAssetDigestsKey] != null) {
+    settings[sourceAssetDigestsKey] = fetchedApp.additionalSettings[sourceAssetDigestsKey];
   }
   settings.remove(sourceBuildComparisonKey);
   if (fetchedApp.additionalSettings[sourceBuildComparisonKey] != null) {
@@ -408,6 +412,7 @@ App prepareAppForTrackedSourceSwap({
   );
   for (final String metadataKey in <String>[
     sourceVersionCodesKey,
+    sourceAssetDigestsKey,
     sourceBuildComparisonKey,
     acknowledgedSourceReleaseKey,
     'rawSelectedReleaseTitle',
@@ -504,12 +509,16 @@ App? mergeTrackedSourceSwap({
   final Map<String, dynamic> settings =
       Map<String, dynamic>.from(requestedApp.additionalSettings)
         ..remove(sourceVersionCodesKey)
+    ..remove(sourceAssetDigestsKey)
         // The new source found a release.
         ..remove(noMatchingReleaseKey);
   clearNeedsAttentionCode(settings, needsAttentionVersionFilter);
   if (fetchedApp.additionalSettings[sourceVersionCodesKey] != null) {
     settings[sourceVersionCodesKey] =
         fetchedApp.additionalSettings[sourceVersionCodesKey];
+  }
+  if (fetchedApp.additionalSettings[sourceAssetDigestsKey] != null) {
+    settings[sourceAssetDigestsKey] = fetchedApp.additionalSettings[sourceAssetDigestsKey];
   }
   settings.remove(sourceBuildComparisonKey);
   if (fetchedApp.additionalSettings[sourceBuildComparisonKey] != null) {

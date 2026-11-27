@@ -34,6 +34,7 @@ internal class R02LocalArchiveBridge(
 
     companion object {
         private const val LIMIT_BYTES = 1024L * 1024L * 1024L
+        private const val STORAGE_RESERVE_BYTES = 16L * 1024L * 1024L
         private val TOKEN = Regex("^[A-Za-z0-9_-]{8,80}$")
         private val FILE = Regex("^r02-[0-9a-f-]{36}\\.(?:apk|apks|apkm|xapk|zip|tar|tgz|tar\\.gz|tar\\.bz2|tar\\.xz)$")
         private val SUFFIXES = listOf(".tar.gz", ".tar.bz2", ".tar.xz", ".apks", ".apkm", ".xapk", ".apk", ".zip", ".tar", ".tgz")
@@ -42,6 +43,17 @@ internal class R02LocalArchiveBridge(
     init {
         channel.setMethodCallHandler { call, reply ->
             when (call.method) {
+                "availableBytes" -> {
+                    val path = call.argument<String>("directory")
+                    val bytes = runCatching {
+                        require(!path.isNullOrBlank())
+                        val directory = File(requireNotNull(path)).canonicalFile
+                        require(directory.isDirectory)
+                        directory.usableSpace
+                    }.getOrNull()
+                    if (bytes == null || bytes <= 0L) reply.error("R02_STORAGE_UNAVAILABLE", "Storage capacity unavailable", null)
+                    else reply.success(bytes)
+                }
                 "copy" -> {
                     val uri = call.argument<String>("uri")
                     val id = call.argument<String>("id")
@@ -157,6 +169,8 @@ internal class R02LocalArchiveBridge(
         val ready = File(staging, "r02-$id$suffix")
         val md = MessageDigest.getInstance("SHA-256")
         var bytes = 0L
+        var capacityCheckedAt = -1024L * 1024L
+        val started = android.os.SystemClock.elapsedRealtime()
         try {
             val input = context.contentResolver.openInputStream(uri)
                 ?: throw IllegalArgumentException("Document content could not be opened")
@@ -165,6 +179,11 @@ internal class R02LocalArchiveBridge(
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
                         if (cancel.get()) throw IllegalStateException("User cancelled import")
+                        require(android.os.SystemClock.elapsedRealtime() - started < 300_000L) { "Import deadline exceeded" }
+                        if (bytes - capacityCheckedAt >= 1024L * 1024L) {
+                            require(staging.usableSpace >= STORAGE_RESERVE_BYTES + 2L * 1024L * 1024L) { "Insufficient private import storage" }
+                            capacityCheckedAt = bytes
+                        }
                         val n = source.read(buffer)
                         if (n < 0) break
                         if (n == 0) continue

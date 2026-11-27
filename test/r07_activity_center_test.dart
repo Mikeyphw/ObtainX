@@ -19,6 +19,8 @@ class _R07FakeApps extends ChangeNotifier implements AppsProvider {
   @override
   Completer<List<App>>? get updateCheckCompleter => null;
   @override
+  bool canPauseDownload(String listingKey) => false;
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 

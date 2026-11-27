@@ -141,6 +141,24 @@ String? uptodownDirectApkUrl({String? dataUrl, String? dataUrlExt}) {
 }
 
 /// Builds the endpoint Uptodown's download button calls to mint a file URL.
+/// Only an explicit SHA-256 row describes advertised artifact bytes.
+/// An unlabeled digest could instead describe a signing certificate.
+String? parseUptodownAdvertisedSha256(Iterable<List<String>> rows) {
+  String? digest;
+  for (final row in rows) {
+    if (row.isEmpty || !const {'sha256', 'sha256checksum'}.contains(
+        row.first.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), ''))) {
+      continue;
+    }
+    final value = row.length == 2 ? SourceAssetDigest.normalize(row[1]) : null;
+    if (value == null || (digest != null && digest != value)) {
+      throw const FormatException('Invalid advertised Uptodown SHA-256');
+    }
+    digest = value;
+  }
+  return digest;
+}
+
 String? uptodownAjaxDownloadUrl(String origin, String? appId, String? fileId) {
   final trimmedAppId = appId?.trim();
   final trimmedFileId = fileId?.trim();
@@ -264,11 +282,15 @@ class Uptodown extends AppSource {
         .where((cell) => cell.isNotEmpty)
         .toList();
     final technicalFields = parseUptodownTechnicalFields(detailCells);
-    final String? fileId =
-        nameElement?.attributes['data-file-id'] ??
-        html
-            .querySelector('#detail-download-button')
-            ?.attributes['data-file-id'];
+    final nameFileId = nameElement?.attributes['data-file-id'];
+    final buttonFileId = html.querySelector('#detail-download-button')?.attributes['data-file-id'];
+    if (nameFileId != null && buttonFileId != null && nameFileId != buttonFileId) {
+      throw const FormatException('Ambiguous Uptodown asset identity');
+    }
+    final fileId = nameFileId ?? buttonFileId;
+    final digest = parseUptodownAdvertisedSha256(html
+        .querySelectorAll('#technical-information tr')
+        .map((row) => row.querySelectorAll('th, td').map((cell) => cell.text.trim()).toList()));
     return Map.fromEntries([
       MapEntry('version', version),
       MapEntry('appId', technicalFields.appId),
@@ -277,6 +299,7 @@ class Uptodown extends AppSource {
       MapEntry('dateStr', technicalFields.dateStr),
       MapEntry('fileId', fileId),
       MapEntry('extension', technicalFields.extension),
+      MapEntry('sha256', digest),
     ]);
   }
 
@@ -311,14 +334,13 @@ class Uptodown extends AppSource {
       if (dateStr != null) {
         relDate = parseUptodownDate(dateStr);
       }
+      final asset = MapEntry(
+        '$appId.${(extension != null && extension.isNotEmpty) ? extension : 'apk'}', apkUrl);
+      final digest = appDetails['sha256'];
       return APKDetails(
         version,
-        [
-          MapEntry(
-            '$appId.${(extension != null && extension.isNotEmpty) ? extension : 'apk'}',
-            apkUrl,
-          ),
-        ],
+        [asset],
+        assetDigests: [if (digest != null) SourceAssetDigest(asset.key, asset.value, digest)],
         AppNames(author, appName),
         releaseDate: relDate,
       );

@@ -334,6 +334,13 @@ class CancellationException implements Exception {
   String toString() => message ?? tr('cancelled');
 }
 
+/// A completed pause retains verified partial bytes; it never means the
+/// installer or the download has completed.
+class DownloadPausedException extends CancellationException {
+  const DownloadPausedException(this.transferId) : super('Download paused');
+  final String transferId;
+}
+
 /// Typed app errors have bounded, redacted messages; platform and provider
 /// exceptions are untrusted and must never be copied into UI/logs verbatim.
 String safeErrorDisplay(Object? error) => boundedDiagnosticText(

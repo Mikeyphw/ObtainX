@@ -11,6 +11,7 @@ import 'package:obtainium/services/r05_operation_journal.dart';
 import 'package:obtainium/services/r05_operation_receipt.dart';
 import 'package:obtainium/services/r11_automation.dart';
 import 'package:obtainium/services/r07_operation_timeline.dart';
+import 'package:obtainium/services/r07_activity_catalog.dart';
 import 'package:obtainium/services/r11_external_requests.dart';
 import 'package:obtainium/services/r11_history.dart';
 import 'package:obtainium/services/r11_schedule.dart';
@@ -53,6 +54,42 @@ void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('history export streams across pages with scope and atomic failure', () async {
+    final root = await Directory.systemTemp.createTemp('ox-audit02-export-');
+    try {
+      final timeline = R07OperationTimeline(testingRoot: root);
+      final app = listing();
+      final channel = List.filled(64, 'a').join();
+      final release = List.filled(64, 'b').join();
+      await timeline.enqueue(List.generate(225, (i) => R07OperationIntent(kind: 'check',
+        listingKey: i == 224 ? 'other:listing' : app.listingKey,
+        packageId: app.id, channel: channel, release: release)));
+      final catalog = R07ActivityCatalog(testingRoot: root,
+        installJournal: R05OperationJournal(testingRoot: root));
+      Future<void> visit(Future<void> Function(R07ActivityRecord) append) =>
+        catalog.visitForExport(append, listingKey: app.listingKey);
+      final destination = File('${root.path}/history.json');
+      await writeR11PublicHistory(destination, visit);
+      final value = jsonDecode(await destination.readAsString()) as Map;
+      expect(value['historicalOnly'], isTrue);
+      final records = value['records'] as List;
+      expect(records.length, 224);
+      expect(records.map((row) => (row as Map)['id']).toSet().length, 224);
+      expect(records.every((row) => (row as Map)['listing'] == r11HistoryKey(app.listingKey)), isTrue);
+      final refused = File('${root.path}/refused.json');
+      await expectLater(writeR11PublicHistory(refused, visit, maxBytes: 100), throwsA(isA<FileSystemException>()));
+      expect(await refused.exists(), isFalse);
+      expect(await File('${refused.path}.part').exists(), isFalse);
+      var calls = 0;
+      await expectLater(writeR11PublicHistory(refused, visit, checkCancellation: () {
+        if (++calls == 5) throw StateError('Interrupted');
+      }), throwsStateError);
+      expect(await refused.exists(), isFalse);
+      expect(await File('${refused.path}.part').exists(), isFalse);
+    } finally {
+      await root.delete(recursive: true);
+    }
+  });
   test('external links have one bounded exact package and no caller extras', () {
     expect(r11PackageFromLink(Uri.parse('obtainium://open?id=com.example.app')), 'com.example.app');
     for (final value in ['obtainium://open?id=com.example.app&id=com.other.app',

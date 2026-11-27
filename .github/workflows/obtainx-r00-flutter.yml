@@ -138,6 +138,8 @@ jobs:
         run: flutter test --no-pub test/r07_operation_timeline_test.dart test/r03_download_history_test.dart test/multi_source_app_actions_test.dart
       - name: R08 source reliability named regressions
         run: flutter test --no-pub test/r08_source_regressions_test.dart
+      - name: F-Droid and source provider digest regressions
+        run: flutter test --no-pub test/source_provider_test.dart
       - name: R09 discovery and artifact selection regressions
         run: flutter test --no-pub test/r09_discovery_test.dart test/needs_attention_group_test.dart
       - name: Execute R01 adversarial archive fixtures first

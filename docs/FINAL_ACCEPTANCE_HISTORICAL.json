@@ -1,0 +1,1981 @@
+{
+  "historical_audit_sha256": "fb42ca9965ed6ed4a0a60662f5bee3b4eb71047a81d99ea6055fa82b8efe467b",
+  "historical_source": "fdc3bf615fb138aed65d0a1aeaeb1a4732391718",
+  "historical_tree": "fee90dc7dbc23c7836df1ba7ddee6b5153a86880",
+  "rows": [
+    {
+      "acceptance": "VERIFIED_REPOSITORY_SUBSET",
+      "current_evidence": "GitHub fork parent bikram-agarwal/ObtainX; protected main; sync/upstream_v1.6.17_20261004 exists; docs/R00_BASELINE.json pins upstream.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "docs/R00_BASELINE.json; PR #30 identity; current Git tree",
+      "id": "R00-P01",
+      "implementation": "PARTIAL",
+      "promise": "Create a separately named GitHub fork from `bikram-agarwal/ObtainX` with protected `main`, signed/reviewable source pins and a dedicated upstream-sync branch.",
+      "remaining": "Required merge checks currently only source-contracts; independent signed-pin and review/ruleset enforcement not established.",
+      "tracked_reference_paths": [
+        "docs/R00_BASELINE.json"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_LOCAL_SUBSET",
+      "current_evidence": "docs/BOOTSTRAP.md; docs/R00_TEST_AUDIT.md; 725 tracked paths, seven workflows, current Python suite.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "docs/R00_BASELINE.json; docs/R00_TEST_AUDIT.md; scripts/ci/r00_source_contract.py; 45685124032",
+      "id": "R00-P02",
+      "implementation": "PARTIAL",
+      "promise": "Inventory Flutter/Dart/Android modules, build variants, CI workflows, version comparison logic, download path, ZIP/tar handlers, install strategies, token storage and UX routes.",
+      "remaining": "Original complete inventory and unchanged upstream baseline not independently replayed.",
+      "tracked_reference_paths": [
+        "docs/R00_BASELINE.json",
+        "docs/R00_TEST_AUDIT.md",
+        "scripts/ci/r00_source_contract.py"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "docs/R00_TEST_AUDIT.md explicitly says NOT QUALIFIED for untouched baseline; R08 issue regressions and 1198 Python/1102 Flutter tests at later source.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "docs/R00_BASELINE.json; docs/R00_TEST_AUDIT.md; scripts/ci/r00_source_contract.py; 45685124032",
+      "id": "R00-P03",
+      "implementation": "PARTIAL",
+      "promise": "Audit existing tests, fixtures, documentation, locale strings, dependency lockfiles, golden images and hash/signing contracts for staleness against both ObtainX `main` and the proposed changes.",
+      "remaining": "Historical untouched baseline and every upstream/stale test classification remain unproven; one Flutter test intentionally skipped.",
+      "tracked_reference_paths": [
+        "docs/R00_BASELINE.json",
+        "docs/R00_TEST_AUDIT.md",
+        "scripts/ci/r00_source_contract.py"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "docs/R00_TEST_AUDIT.md explicitly says NOT QUALIFIED for untouched baseline; R08 issue regressions and 1198 Python/1102 Flutter tests at later source.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "docs/R00_BASELINE.json; docs/R00_TEST_AUDIT.md; scripts/ci/r00_source_contract.py; 45685124032",
+      "id": "R00-P04",
+      "implementation": "PARTIAL",
+      "promise": "Record current known defects as regression tests before feature work; distinguish upstream bugs from new fork changes.",
+      "remaining": "Historical untouched baseline and every upstream/stale test classification remain unproven; one Flutter test intentionally skipped.",
+      "tracked_reference_paths": [
+        "docs/R00_BASELINE.json",
+        "docs/R00_TEST_AUDIT.md",
+        "scripts/ci/r00_source_contract.py"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "docs/R00_TEST_AUDIT.md explicitly says NOT QUALIFIED for untouched baseline; R08 issue regressions and 1198 Python/1102 Flutter tests at later source.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "docs/R00_BASELINE.json; docs/R00_TEST_AUDIT.md; scripts/ci/r00_source_contract.py; 45685124032",
+      "id": "R00-A01",
+      "implementation": "PARTIAL",
+      "promise": "Unmodified baseline can be built and tested in hosted CI; every known baseline failure is documented and classified; no fake green or suppressed failing assertions; source SHAs reproducible.",
+      "remaining": "Historical untouched baseline and every upstream/stale test classification remain unproven; one Flutter test intentionally skipped.",
+      "tracked_reference_paths": [
+        "docs/R00_BASELINE.json",
+        "docs/R00_TEST_AUDIT.md",
+        "scripts/ci/r00_source_contract.py"
+      ]
+    },
+    {
+      "acceptance": "SOURCE_DEFECT",
+      "current_evidence": "lib/providers/logs_provider.dart:add stores message verbatim; lib/custom_errors.dart:toString and rethrowOrWrapError include raw URL/error. R07/R05 IDs exist.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/providers/source_provider.dart:2298–2337; lib/services/r03_download_engine.dart; lib/services/r05_operation_receipt.dart; lib/providers/logs_provider.dart",
+      "id": "R00-P05",
+      "implementation": "PARTIAL",
+      "promise": "Establish developer diagnostics with structured operation IDs and redacted authentication data.",
+      "remaining": "F02 central diagnostics redaction missing; test sentinel credentials before persistence, display and export.",
+      "tracked_reference_paths": [
+        "lib/providers/logs_provider.dart",
+        "lib/providers/source_provider.dart",
+        "lib/services/r03_download_engine.dart",
+        "lib/services/r05_operation_receipt.dart"
+      ]
+    },
+    {
+      "acceptance": "PENDING_EXTERNAL",
+      "current_evidence": "R12 candidate job sign-candidate, validate_signing_inputs, sign.sh retirement, current tracked-file secret scan passes. docs/R12_RELEASE_QUALIFICATION.md documents migration.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "docs/SECURITY_RELEASE_POLICY.md; android/app/build.gradle.kts:91–133; scripts/ci/r00_source_contract.py",
+      "id": "R01-P01",
+      "implementation": "PARTIAL",
+      "promise": "**Do not use `wizzwuz`'s committed `android/app/obtainx_signer.jks` or its hard-coded signing password.** Treat the publicly distributed key as compromised; create a new protected signing identity and secret-based release process. Plan for the fact that different keys cannot seamlessly update already installed APKs signed with the old key.",
+      "remaining": "No actual new protected signing identity, signed APK or migration fixture result; independent certificate pin and environment review required.",
+      "tracked_reference_paths": [
+        "android/app/build.gradle.kts",
+        "docs/SECURITY_RELEASE_POLICY.md",
+        "scripts/ci/r00_source_contract.py"
+      ]
+    },
+    {
+      "acceptance": "SOURCE_DEFECT_AND_EXTERNAL_PENDING",
+      "current_evidence": "Seven workflows use contents/actions read; R12 source_scan and apk_entries; lib/pages/apps.dart linked GitLab changelog still puts PAT in URL.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "six .github/workflows/obtainx-*.yml; scripts/ci/r00_source_contract.py; SECURITY_RELEASE_POLICY.md",
+      "id": "R01-P02",
+      "implementation": "PARTIAL",
+      "promise": "Remove credential leakage from workflow output; use least-privilege GitHub permissions, protected release environments and pinned third-party actions.",
+      "remaining": "F01/F02 remove credential URL path and raw error persistence. Actual signing environment/reviewer policy not observable.",
+      "tracked_reference_paths": [
+        "scripts/ci/r00_source_contract.py"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "artifact_file_work.dart ArchiveExtractionLimits, _runExtraction worker kill and exit barrier; bounded BZIP/XZ decoder limits; archive_extraction_security_test.dart, full Flutter decisive archive step.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/artifact_file_work.dart:12–63, 66–140, 208+; test/archive_extraction_security_test.dart (named hosted PASS)",
+      "id": "R01-P03",
+      "implementation": "PARTIAL",
+      "promise": "Add ZIP/TAR extraction limits: maximum compressed/uncompressed bytes, entry count, path length, nesting depth, extraction time/memory, normalized destination containment, no traversal/symlink escapes, duplicate/conflicting entry detection, and cleanup/rollback.",
+      "remaining": "Explicit process-level memory cap and physical resource exhaustion/process-death behavior not established. Bounded decoder is not a proven total process cap.",
+      "tracked_reference_paths": [
+        "lib/services/artifact_file_work.dart",
+        "test/archive_extraction_security_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "artifact_file_work.dart private staged source/output, owner.lock, orphan reclaim, destination rename after worker exit, finally cleanup; archive tests.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/artifact_file_work.dart:_extractArchive; lib/services/r02_local_archive_import.dart; archive fixtures",
+      "id": "R01-P04",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Use private staging directories, validate extracted content before exposing it to install flow, and preserve reliable cleanup after cancel/failure.",
+      "remaining": "Physical OS kill, low storage, lock/reclaim behavior still needs approved device test.",
+      "tracked_reference_paths": [
+        "lib/services/artifact_file_work.dart",
+        "lib/services/r02_local_archive_import.dart"
+      ]
+    },
+    {
+      "acceptance": "SOURCE_DEFECT",
+      "current_evidence": "origin_redirect_policy.dart and HttpService cross-origin header/cookie removal; gitlab.dart exact-origin header policy; apps.dart:2060–2074 still creates private_token query.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/providers/source_provider.dart:2266–2337; lib/services/r04_actions_redirect_policy.dart; test/r04_actions_redirect_policy_test.dart",
+      "id": "R01-P05",
+      "implementation": "PARTIAL",
+      "promise": "Ensure GitHub authorization headers and vendor-specific API headers cannot leak on cross-host redirects; do not silently bypass TLS validation.",
+      "remaining": "F01 bypasses intended header-only boundary; no actual disclosure claimed. Fix and test changelog request and redirects; explicitly scoped insecure TLS remains a policy option.",
+      "tracked_reference_paths": [
+        "lib/providers/source_provider.dart",
+        "lib/services/r04_actions_redirect_policy.dart",
+        "test/r04_actions_redirect_policy_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "Adversarial archive and redirect fixtures ran; current tracked source scan 725 paths; R12 signing-input negative tests.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "45685124124 named archive and R04 redirect tests; SECURITY_RELEASE_POLICY.md; G01/G03/G12",
+      "id": "R01-A01",
+      "implementation": "PARTIAL",
+      "promise": "Malicious-archive and credential-redirection tests pass; no private keys or fixed release passwords live in Git; signed APKs have expected certificate identity; release workflow fails closed when signing credentials are unavailable.",
+      "remaining": "Actual signature and credential-absence behavior of hosted signing lane not run; F01/F02 and environment review remain.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "install_bundle_plan.dart InstallApkMember/InstallBundlePlan: actual splitName,targetSdk,signer,digest; apps_provider_install.dart:416–523 plan/receipt/backend binding before handoff; native evidence package verifies APK bytes.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/install_bundle_plan.dart:1–130; lib/providers/apps_provider_install.dart:_inspectInstallBundle; lib/services/r09_artifact_inspection.dart; RT02C",
+      "id": "R02-P01",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Replace filename-based APK selection with a structured package discovery step based on Android package metadata and archive manifest content when available.",
+      "remaining": "Production plan is composed with R05 approval/receipt rather than a single renamed class. Physical manifest/backend matrix pending.",
+      "tracked_reference_paths": [
+        "lib/providers/apps_provider_install.dart",
+        "lib/services/install_bundle_plan.dart",
+        "lib/services/r09_artifact_inspection.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "install_bundle_plan.dart InstallApkMember/InstallBundlePlan: actual splitName,targetSdk,signer,digest; apps_provider_install.dart:416–523 plan/receipt/backend binding before handoff; native evidence package verifies APK bytes.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/install_bundle_plan.dart:InstallBundlePlan; lib/services/install_precommit_gate.dart; lib/providers/apps_provider_install.dart:_inspectInstallBundle",
+      "id": "R02-P03",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Build a validated `InstallPlan` that records package ID, versionCode, signing identity, min/target SDK, supported ABIs, split requirements and selected installer capability.",
+      "remaining": "Production plan is composed with R05 approval/receipt rather than a single renamed class. Physical manifest/backend matrix pending.",
+      "tracked_reference_paths": [
+        "lib/providers/apps_provider_install.dart",
+        "lib/services/install_bundle_plan.dart",
+        "lib/services/install_precommit_gate.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "install_bundle_plan.dart selects manifest-based base/config members; apps_provider_install.dart:1772–1900 revalidates member digests; RT02 positive split and RT02C archive decisive jobs.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/install_bundle_plan.dart:1–130; lib/providers/apps_provider_install.dart:_inspectInstallBundle; lib/services/r09_artifact_inspection.dart; RT02C",
+      "id": "R02-P02",
+      "implementation": "PARTIAL",
+      "promise": "Distinguish standalone APK, XAPK, APKS, APKM, generic ZIP/TAR and non-installable artifacts; identify base APK, config splits, language/density/ABI splits and OBB payloads.",
+      "remaining": "Dynamic-feature/unsupported split or OBB combinations fail closed; full required format/device/ABI matrix not demonstrated.",
+      "tracked_reference_paths": [
+        "lib/providers/apps_provider_install.dart",
+        "lib/services/install_bundle_plan.dart",
+        "lib/services/r09_artifact_inspection.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "install_bundle_plan.dart selects manifest-based base/config members; apps_provider_install.dart:1772–1900 revalidates member digests; RT02 positive split and RT02C archive decisive jobs.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/services/install_bundle_plan.dart:sessionPaths; _inspectInstallBundle; integration_test/r02c_archive_install_test.dart",
+      "id": "R02-P04",
+      "implementation": "PARTIAL",
+      "promise": "Restore complete split-package installation (the wizzwuz non-XAPK path currently passes one APK only). Never silently treat a necessary set of splits as unrelated APK choices.",
+      "remaining": "Dynamic-feature/unsupported split or OBB combinations fail closed; full required format/device/ABI matrix not demonstrated.",
+      "tracked_reference_paths": [
+        "integration_test/r02c_archive_install_test.dart",
+        "lib/services/install_bundle_plan.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_EMULATOR_SUBSET",
+      "current_evidence": "Existing R02 backend/OBB and local-import policy tests; current RT02/RT02B/RT02C executed real stock sessions and independent receipts.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "docs/R02_FINAL_COMPLETION_ACCEPTANCE.md; integration_test/r02*; lib/services/r02_local_archive_import.dart; lib/services/r02f_p04_backend_availability.dart",
+      "id": "R02-P05",
+      "implementation": "PARTIAL",
+      "promise": "Reuse existing system, Shizuku, Dhizuku and external installer strategies; preserve container handoff where required and supported.",
+      "remaining": "Actual Shizuku/Dhizuku positive, external installer, SAF/OBB, physical ABI, all archive types and approval/cancel lifecycle need exact device evidence.",
+      "tracked_reference_paths": [
+        "docs/R02_FINAL_COMPLETION_ACCEPTANCE.md",
+        "lib/services/r02_local_archive_import.dart",
+        "lib/services/r02f_p04_backend_availability.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_EMULATOR_SUBSET",
+      "current_evidence": "Existing R02 backend/OBB and local-import policy tests; current RT02/RT02B/RT02C executed real stock sessions and independent receipts.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "docs/R02_FINAL_COMPLETION_ACCEPTANCE.md; integration_test/r02*; lib/services/r02_local_archive_import.dart; lib/services/r02f_p04_backend_availability.dart",
+      "id": "R02-P06",
+      "implementation": "PARTIAL",
+      "promise": "Add explicit plan review when selection is ambiguous, incompatible or a downgrade; retain Android approvals and verification checks.",
+      "remaining": "Actual Shizuku/Dhizuku positive, external installer, SAF/OBB, physical ABI, all archive types and approval/cancel lifecycle need exact device evidence.",
+      "tracked_reference_paths": [
+        "docs/R02_FINAL_COMPLETION_ACCEPTANCE.md",
+        "lib/services/r02_local_archive_import.dart",
+        "lib/services/r02f_p04_backend_availability.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_EMULATOR_SUBSET",
+      "current_evidence": "Existing R02 backend/OBB and local-import policy tests; current RT02/RT02B/RT02C executed real stock sessions and independent receipts.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "docs/R02_FINAL_COMPLETION_ACCEPTANCE.md; integration_test/r02*; lib/services/r02_local_archive_import.dart; lib/services/r02f_p04_backend_availability.dart",
+      "id": "R02-A01",
+      "implementation": "PARTIAL",
+      "promise": "Device-runtime matrix covers APK, XAPK, APKS, APKM, ZIP, TAR, single/multiple ABI, base+config splits, signature mismatch, downgrade, incompatible SDK, cancellation and external handoff. No success is recorded before Android confirms the resulting package state.",
+      "remaining": "Actual Shizuku/Dhizuku positive, external installer, SAF/OBB, physical ABI, all archive types and approval/cancel lifecycle need exact device evidence.",
+      "tracked_reference_paths": [
+        "docs/R02_FINAL_COMPLETION_ACCEPTANCE.md",
+        "lib/services/r02_local_archive_import.dart",
+        "lib/services/r02f_p04_backend_availability.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r07_operation_timeline.dart stages and guarded transitions; r03_download_engine.dart + r05_operation_receipt.dart terminal states; GAP03_DURABLE_HISTORY.md.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r03_download_engine.dart:_run; lib/services/r07_activity_catalog.dart:load; lib/widgets/r07_activity_center_page.dart",
+      "id": "R03-P01",
+      "implementation": "PARTIAL",
+      "promise": "Formalize states: `queued → checking → downloading → downloaded → verifying → extracting → ready → awaitingApproval → installing → confirming → completed`, with cancellation/failure/retry branches.",
+      "remaining": "Pre-identification local archive extraction cannot yet appear as exact-listing timeline; all phases on restart not observed on device.",
+      "tracked_reference_paths": [
+        "lib/services/r03_download_engine.dart",
+        "lib/services/r07_activity_catalog.dart",
+        "lib/widgets/r07_activity_center_page.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r03_download_engine.dart R03DownloadRecord; r07_operation_timeline.dart intent release digest; app_version.dart InstallReleaseSnapshot; release/owner validation in apps_provider_install.dart:1155.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r03_download_engine.dart:R03DownloadRecord, R03HistoryBinding; lib/providers/apps_provider.dart:downloadFile",
+      "id": "R03-P02",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Persist a job ID, source URL, final redirect origin, expected release/build identity, expected content length, ETag/Last-Modified, validated byte offsets, `.part` ownership and completion metadata.",
+      "remaining": "Privacy-preserving fingerprint instead of raw credential URL. Real restart/entity evidence remains device pending.",
+      "tracked_reference_paths": [
+        "lib/providers/apps_provider.dart",
+        "lib/services/r03_download_engine.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r03_download_engine.dart _run and exact resume; r03_download_engine_test.dart; hosted named deterministic mock HTTP resume step.",
+      "historical_implementation": "SOURCE_COMPLETE",
+      "historical_source": "lib/providers/apps_provider.dart:downloadFile → R03DownloadEngine.download/_run; test/r03_download_engine_test.dart:255–311",
+      "id": "R03-P03",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Resume with `Range`/`If-Range`; reject malformed `Content-Range`, entity changes, ignored byte ranges and incomplete transfers; restart cleanly rather than append corrupt bytes.",
+      "remaining": "Physical interruption and restart endurance pending.",
+      "tracked_reference_paths": [
+        "lib/providers/apps_provider.dart",
+        "test/r03_download_engine_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r03_download_engine.dart optional expectedSha256, verified completion; apps_provider.dart:707–722 adapter does not supply expectedSha256; R04 separately checks exact ZIP before extraction.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r03_download_engine.dart:277, 511; lib/providers/apps_provider.dart:700; lib/providers/apps_provider_install.dart:verifyGitHubAttestation; lib/app_sources/github.dart:766–768",
+      "id": "R03-P04",
+      "implementation": "PARTIAL",
+      "promise": "Verify known digests and attestation references; never equate file existence or an unknown `Content-Length` with completion.",
+      "remaining": "F05 audit every provider-advertised digest binding end-to-end; no claim all providers advertise hashes. Attestation verifier absent (F03).",
+      "tracked_reference_paths": [
+        "lib/app_sources/github.dart",
+        "lib/providers/apps_provider.dart",
+        "lib/providers/apps_provider_install.dart",
+        "lib/services/r03_download_engine.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "apps_provider.dart:337–387 transient retry classification, bounded jitter/backoff, Retry-After and cancel; r03_download_engine.dart:r03CanRetryHttpStatus/_safeRetryAfter.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/services/r03_download_engine.dart; test/r03_download_engine_test.dart HTTP classification fixtures; downloadFileWithRetry",
+      "id": "R03-P05",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Classify failures: retry transient network/socket/timeout/429/5xx with jittered exponential backoff and `Retry-After`; fail closed for invalid certificates, auth policy errors, corrupt content or invalid metadata.",
+      "remaining": "Actual radio/network/OS failure handling and TLS-policy corpus not exhaustively replayed.",
+      "tracked_reference_paths": [
+        "lib/services/r03_download_engine.dart",
+        "test/r03_download_engine_test.dart"
+      ]
+    },
+    {
+      "acceptance": "SOURCE_GAP_AND_EXTERNAL_PENDING",
+      "current_evidence": "Durable R07 queue, exact resume, cancellation, parent retry; r03_download_engine.dart R03Stage.paused appears in resume eligibility but not a production pause transition; Activity Center lacks Pause.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "docs/R03_DOWNLOAD_PERSISTENCE.md; lib/services/r03_download_engine.dart; R07ActivityCenterPage._retry",
+      "id": "R03-P06",
+      "implementation": "PARTIAL",
+      "promise": "Make queue persistence, pause/resume/retry/cancel and foreground service/notification behavior reliable within Android platform restrictions; serialize installs even when downloads run concurrently.",
+      "remaining": "F04 implement explicit pause or obtain approved scope change; test foreground/background notification and install serialization on device.",
+      "tracked_reference_paths": [
+        "docs/R03_DOWNLOAD_PERSISTENCE.md",
+        "lib/services/r03_download_engine.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "Full hosted R03 mock HTTP and GAP03 concurrency/recovery step passed; Python source contracts.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "45685124124 named R03 HTTP tests and full suite; test/r03_download_engine_test.dart",
+      "id": "R03-A01",
+      "implementation": "PARTIAL",
+      "promise": "Deterministic mock HTTP tests for 200/206/302/401/403/410/416/429/5xx, truncated streams, changed ETags, no content length, dropped connections, app restart, concurrent requests and user cancellation. No duplicated or corrupted output.",
+      "remaining": "Individual exhaustive HTTP code/socket/OS process fixture accounting and actual device durability remain incomplete.",
+      "tracked_reference_paths": [
+        "test/r03_download_engine_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "github.dart R04 channel settings; r04_generated_form_patch_test.dart; hosted R04 history selection updates mode and saved settings.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/app_sources/github.dart:r04SourceModeKey, channel form; test/r04_generated_form_patch_test.dart",
+      "id": "R04-P01",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Add distinct `Releases`, `Prereleases` and `Actions` source modes without hiding Actions behind a mysterious advanced toggle.",
+      "remaining": "Physical add/edit/import smoke check pending.",
+      "tracked_reference_paths": [
+        "lib/app_sources/github.dart",
+        "test/r04_generated_form_patch_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r04_github_actions.dart R04GitHubActionsCatalog:_list/latest; r04_actions_history_catalog.dart and r04_actions_history_dialog.dart; exact identity and history decisive steps.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/app_sources/github.dart:1597–1626; lib/services/r04_github_actions.dart; test/r04_github_actions_test.dart",
+      "id": "R04-P02",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Discover workflows, branch filters, completed/successful runs, run attempt, commit SHA, run ID, artifact ID, creation/expiry, digest and downloadable asset metadata. Filter non-installable artifacts before presenting them as APKs.",
+      "remaining": "Candidate names are conservative hints; contained APK inspection follows transfer. Real authenticated pagination/provider behavior still pending.",
+      "tracked_reference_paths": [
+        "lib/app_sources/github.dart",
+        "lib/services/r04_github_actions.dart",
+        "test/r04_github_actions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r04_github_actions.dart R04GitHubActionsCatalog:_list/latest; r04_actions_history_catalog.dart and r04_actions_history_dialog.dart; exact identity and history decisive steps.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r04_github_actions.dart:_list; test/r04_github_actions_test.dart:203–227; source_provider.dart:2298–2337",
+      "id": "R04-P03",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Use GitHub API pagination, authentication, rate-limit handling, expiry and redirect logic; never rely on only the first 100 artifacts or an artifact's filename alone.",
+      "remaining": "Candidate names are conservative hints; contained APK inspection follows transfer. Real authenticated pagination/provider behavior still pending.",
+      "tracked_reference_paths": [
+        "lib/services/r04_github_actions.dart",
+        "test/r04_github_actions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r04_github_actions.dart R04GitHubActionsCatalog:_list/latest; r04_actions_history_catalog.dart and r04_actions_history_dialog.dart; exact identity and history decisive steps.",
+      "historical_implementation": "SOURCE_COMPLETE",
+      "historical_source": "lib/services/r04_github_actions.dart; lib/app_sources/github.dart:history selection and catalog call; test/r04_github_actions_test.dart:77–148; test/r04_actions_history_test.dart",
+      "id": "R04-P04",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Default to latest successful completed run; support explicit branch/workflow selection and a clearly labeled manual history browser. Unsuccessful-run artifacts should not be offered as trusted automatic updates.",
+      "remaining": "Candidate names are conservative hints; contained APK inspection follows transfer. Real authenticated pagination/provider behavior still pending.",
+      "tracked_reference_paths": [
+        "lib/app_sources/github.dart",
+        "lib/services/r04_github_actions.dart",
+        "test/r04_actions_history_test.dart",
+        "test/r04_github_actions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R04 ZIP digest guard, R05 current signer sets, separate present_unverified status; GAP01_TRANSPORT_TRUST.md explicitly says no cryptographic verifier.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r04_actions_archive_integrity.dart:20–110; lib/providers/apps_provider_install.dart:1262+, 3401+; lib/app_sources/github.dart:766–768",
+      "id": "R04-P05",
+      "implementation": "PARTIAL",
+      "promise": "Validate exact artifact identity before installation; distinguish GitHub artifact digest, trusted APK digest, APK signing certificate and verified build attestation. These are separate claims.",
+      "remaining": "F03 true attestation verification remains absent; enforce mode safely refuses. Do not promote presence into trust.",
+      "tracked_reference_paths": [
+        "lib/app_sources/github.dart",
+        "lib/providers/apps_provider_install.dart",
+        "lib/services/r04_actions_archive_integrity.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r04_actions_redirect_policy.dart, r04_actions_history_catalog.dart, r04_live_acceptance.py, R04 named hosted discovery/digest/redirect/history tests.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "test/r04_github_actions_test.dart; test/r04_actions_history_test.dart; test/r04_actions_redirect_policy_test.dart; scripts/ci/r04_live_acceptance.py",
+      "id": "R04-P06",
+      "implementation": "PARTIAL",
+      "promise": "Reuse the useful fixes from `wizzwuz` for artifact ZIP retrieval/HTTP 415, but audit media types, API-version headers and redirect behavior against current documented GitHub semantics.",
+      "remaining": "Live auth/expiry/rate-limit/415/provider API fixture evidence not supplied at final tree; real vs mocked distinction retained.",
+      "tracked_reference_paths": [
+        "scripts/ci/r04_live_acceptance.py",
+        "test/r04_actions_history_test.dart",
+        "test/r04_actions_redirect_policy_test.dart",
+        "test/r04_github_actions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r04_actions_redirect_policy.dart, r04_actions_history_catalog.dart, r04_live_acceptance.py, R04 named hosted discovery/digest/redirect/history tests.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "test/r04_github_actions_test.dart; test/r04_actions_history_test.dart; test/r04_actions_redirect_policy_test.dart; scripts/ci/r04_live_acceptance.py",
+      "id": "R04-P07",
+      "implementation": "PARTIAL",
+      "promise": "Handle changing artifact inventories, expired archives, private repository tokens, API failures and duplicate filenames gracefully.",
+      "remaining": "Live auth/expiry/rate-limit/415/provider API fixture evidence not supplied at final tree; real vs mocked distinction retained.",
+      "tracked_reference_paths": [
+        "scripts/ci/r04_live_acceptance.py",
+        "test/r04_actions_history_test.dart",
+        "test/r04_actions_redirect_policy_test.dart",
+        "test/r04_github_actions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r04_actions_redirect_policy.dart, r04_actions_history_catalog.dart, r04_live_acceptance.py, R04 named hosted discovery/digest/redirect/history tests.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "test/r04_github_actions_test.dart; test/r04_actions_history_test.dart; test/r04_actions_redirect_policy_test.dart; scripts/ci/r04_live_acceptance.py",
+      "id": "R04-A01",
+      "implementation": "PARTIAL",
+      "promise": "Real and mocked API tests cover multiple workflows, run attempts, pagination, expired artifacts, non-APK attachments, auth, rate limiting, branch changes, checksum mismatch and exact-revision selection. No accidental install of CI logs or source bundles.",
+      "remaining": "Live auth/expiry/rate-limit/415/provider API fixture evidence not supplied at final tree; real vs mocked distinction retained.",
+      "tracked_reference_paths": [
+        "scripts/ci/r04_live_acceptance.py",
+        "test/r04_actions_history_test.dart",
+        "test/r04_actions_redirect_policy_test.dart",
+        "test/r04_github_actions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r05_operation_receipt.dart:89–143 exact attempt fields and installed-byte/signer equality; r05_operation_journal.dart transition; apps_provider_install.dart pre-handoff revalidation; hosted R05 invariants/journal and stock runtime.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/providers/apps_provider_install.dart:_r05BeginAttempt (350–395); lib/app_sources/github.dart:1601; R05OperationReceipt",
+      "id": "R05-P01",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Create an `OperationReceipt` for each attempt: repository/source, branch/workflow, run/commit/artifact IDs, downloaded URL origin, SHA-256, certificate identity, selected files/splits, installer backend, Android result and verification timestamp.",
+      "remaining": "Physical and external callbacks still require independent confirmation; legacy confirmed claims not byte-qualified.",
+      "tracked_reference_paths": [
+        "lib/app_sources/github.dart",
+        "lib/providers/apps_provider_install.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r05_operation_receipt.dart:89–143 exact attempt fields and installed-byte/signer equality; r05_operation_journal.dart transition; apps_provider_install.dart pre-handoff revalidation; hosted R05 invariants/journal and stock runtime.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r05_operation_receipt.dart:130–163; apps_provider_install.dart:_r05CloseAttempt/reconcileR05OperationReceipts; test/r05_operation_receipt_test.dart",
+      "id": "R05-P02",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Maintain `pending → handedOff/awaitingApproval → confirmed/failed/cancelled/unknown` distinctly. Do not invent success for an external installer handoff.",
+      "remaining": "Physical and external callbacks still require independent confirmation; legacy confirmed claims not byte-qualified.",
+      "tracked_reference_paths": [
+        "lib/services/r05_operation_receipt.dart",
+        "test/r05_operation_receipt_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r07_activity_center_page.dart exact attempt route; apps_provider_install.dart notifyR07Attention and _r05CheckHandoff; docs/R07_ACTIVITY_CENTER.md.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/widgets/r07_activity_center_page.dart:_review; R05 journal recovery; test/r05_operation_journal_test.dart:36",
+      "id": "R05-P03",
+      "implementation": "PARTIAL",
+      "promise": "Fix navigation-sensitive approval issues such as [#354](https://github.com/bikram-agarwal/ObtainX/issues/354): dialogs must survive normal route changes and app resume, or be recoverable in Activity Center.",
+      "remaining": "Android approval/notification after navigation/process death needs device validation; no fabricated approval-token replay.",
+      "tracked_reference_paths": [
+        "lib/widgets/r07_activity_center_page.dart",
+        "test/r05_operation_journal_test.dart"
+      ]
+    },
+    {
+      "acceptance": "INCONCLUSIVE",
+      "current_evidence": "docs/R05_INSTALL_LIFECYCLE.md; r02_local_archive_import.dart and apps_provider_install.dart current tracked implementation and hosted contract tests.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "docs/R05_INSTALL_LIFECYCLE.md; lib/services/r02_local_archive_import.dart; test/r05_operation_journal_test.dart; test/r05_operation_receipt_test.dart",
+      "id": "R05-P04",
+      "implementation": "UNINSPECTED",
+      "promise": "Replace unawaited post-import installation calls with tracked, error-reporting operations; retain retryable files safely if appropriate.",
+      "remaining": "All post-import callers and every approval setting/backend combination not independently traced end-to-end.",
+      "tracked_reference_paths": [
+        "docs/R05_INSTALL_LIFECYCLE.md",
+        "lib/services/r02_local_archive_import.dart",
+        "test/r05_operation_journal_test.dart",
+        "test/r05_operation_receipt_test.dart"
+      ]
+    },
+    {
+      "acceptance": "INCONCLUSIVE",
+      "current_evidence": "docs/R05_INSTALL_LIFECYCLE.md; r02_local_archive_import.dart and apps_provider_install.dart current tracked implementation and hosted contract tests.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "docs/R05_INSTALL_LIFECYCLE.md; lib/services/r02_local_archive_import.dart; test/r05_operation_journal_test.dart; test/r05_operation_receipt_test.dart",
+      "id": "R05-P05",
+      "implementation": "UNINSPECTED",
+      "promise": "Make approval policy explicit and configurable; default to less intrusive extra approval while never disabling confirmations mandated by Android or security policy.",
+      "remaining": "All post-import callers and every approval setting/backend combination not independently traced end-to-end.",
+      "tracked_reference_paths": [
+        "docs/R05_INSTALL_LIFECYCLE.md",
+        "lib/services/r02_local_archive_import.dart",
+        "test/r05_operation_journal_test.dart",
+        "test/r05_operation_receipt_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R05 receipt guards, R07 recovery, RT02B negatives and R02F cancellation fixtures ran.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "docs/R05_INSTALL_LIFECYCLE.md; lib/services/r02_local_archive_import.dart; test/r05_operation_journal_test.dart; test/r05_operation_receipt_test.dart",
+      "id": "R05-A01",
+      "implementation": "PARTIAL",
+      "promise": "An installation cannot remain indefinitely in a fake installing state; interrupted, cancelled, rejected and externally handed-off installs have distinct evidence and user-facing resolution paths.",
+      "remaining": "Physical interrupted/external handoff and timeout behavior across supported backends pending.",
+      "tracked_reference_paths": [
+        "docs/R05_INSTALL_LIFECYCLE.md",
+        "lib/services/r02_local_archive_import.dart",
+        "test/r05_operation_journal_test.dart",
+        "test/r05_operation_receipt_test.dart"
+      ]
+    },
+    {
+      "acceptance": "SOURCE_SCOPE_VARIANCE",
+      "current_evidence": "pages/app.dart:4887–4930 and 5270–5365 status/version/changelog/security/details cards; action placement preference permits actions before version or after details.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/pages/app.dart:3402,3422,4894,5285–5345; lib/components/r06_version_tile.dart; test/r06_app_details_test.dart; docs/R06_APP_DETAILS.md",
+      "id": "R06-P01",
+      "implementation": "PARTIAL",
+      "promise": "Preserve Material 3 Expressive, but organize the app details header around **Status → Installed version → Available version → Primary action → What's new → Technical details**.",
+      "remaining": "Canonical strict information order is not invariant by design. Verify approved preference exception and physical usability.",
+      "tracked_reference_paths": [
+        "docs/R06_APP_DETAILS.md",
+        "lib/components/r06_version_tile.dart",
+        "lib/pages/app.dart",
+        "test/r06_app_details_test.dart"
+      ]
+    },
+    {
+      "acceptance": "SOURCE_SCOPE_VARIANCE",
+      "current_evidence": "pages/app.dart:4887–4930 and 5270–5365 status/version/changelog/security/details cards; action placement preference permits actions before version or after details.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/pages/app.dart:3402,3422,4894,5285–5345; lib/components/r06_version_tile.dart; test/r06_app_details_test.dart; docs/R06_APP_DETAILS.md",
+      "id": "R06-S01",
+      "implementation": "PARTIAL",
+      "promise": "Primary information hierarchy: visible status → **Installed** version → **Available** version → primary action → safe Markdown **What's new** → technical/verification details. Different package-distributor versionCode schemes and unknown comparisons must show explicit uncertainty, not inferred equivalence.",
+      "remaining": "Canonical strict information order is not invariant by design. Verify approved preference exception and physical usability.",
+      "tracked_reference_paths": [
+        "docs/R06_APP_DETAILS.md",
+        "lib/components/r06_version_tile.dart",
+        "lib/pages/app.dart",
+        "test/r06_app_details_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "pages/app.dart R06 version tiles, Open exact installed package, History exact listing, source/homepage options; r06_app_details_test.dart and full Flutter.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/pages/app.dart:3402,3422,4894,5285–5345; lib/components/r06_version_tile.dart; test/r06_app_details_test.dart; docs/R06_APP_DETAILS.md",
+      "id": "R06-P02",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Put installed and available versions in explicitly labeled comparison blocks; replace ambiguous red/white marks and color-only cues ([#373](https://github.com/bikram-agarwal/ObtainX/issues/373)).",
+      "remaining": "Physical keyboard/TalkBack and action enablement across unusual package state need acceptance.",
+      "tracked_reference_paths": [
+        "docs/R06_APP_DETAILS.md",
+        "lib/components/r06_version_tile.dart",
+        "lib/pages/app.dart",
+        "test/r06_app_details_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "pages/app.dart R06 version tiles, Open exact installed package, History exact listing, source/homepage options; r06_app_details_test.dart and full Flutter.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/pages/app.dart:3402,3422,4894,5285–5345; lib/components/r06_version_tile.dart; test/r06_app_details_test.dart; docs/R06_APP_DETAILS.md",
+      "id": "R06-P03",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Add a visible **Open app** button ([#367](https://github.com/bikram-agarwal/ObtainX/issues/367)), plus History and Options without relying on tapping the app icon.",
+      "remaining": "Physical keyboard/TalkBack and action enablement across unusual package state need acceptance.",
+      "tracked_reference_paths": [
+        "docs/R06_APP_DETAILS.md",
+        "lib/components/r06_version_tile.dart",
+        "lib/pages/app.dart",
+        "test/r06_app_details_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "pages/app.dart R06 version tiles, Open exact installed package, History exact listing, source/homepage options; r06_app_details_test.dart and full Flutter.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/pages/app.dart:3402,3422,4894,5285–5345; lib/components/r06_version_tile.dart; test/r06_app_details_test.dart; docs/R06_APP_DETAILS.md",
+      "id": "R06-S02",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Direct actions: context-aware `Check`, `Update`/`Download`/`Install`, and a clear **Open app** when installed; access to `History`/`Options` without icon-press tricks. Never show an invalid or falsely enabled action.",
+      "remaining": "Physical keyboard/TalkBack and action enablement across unusual package state need acceptance.",
+      "tracked_reference_paths": [
+        "docs/R06_APP_DETAILS.md",
+        "lib/components/r06_version_tile.dart",
+        "lib/pages/app.dart",
+        "test/r06_app_details_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "version/app_version.dart comparison verdict/InstallReleaseSnapshot, r06_version_tile.dart, version_order and R08 tests.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/pages/app.dart:3402,3422,4894,5285–5345; lib/components/r06_version_tile.dart; test/r06_app_details_test.dart; docs/R06_APP_DETAILS.md",
+      "id": "R06-P04",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Explain uncertain version equivalence and differing versionCode schemes ([#347](https://github.com/bikram-agarwal/ObtainX/issues/347)) using words and evidence, not just icons.",
+      "remaining": "Real differing distributor versionCode and accessibility comprehension pending.",
+      "tracked_reference_paths": [
+        "docs/R06_APP_DETAILS.md",
+        "lib/components/r06_version_tile.dart",
+        "lib/pages/app.dart",
+        "test/r06_app_details_test.dart"
+      ]
+    },
+    {
+      "acceptance": "SOURCE_DEFECT",
+      "current_evidence": "pages/apps.dart:_loadLinkedChangeLog and showChangeLogDialog MarkdownBody, relative links and rendered image handling.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/pages/app.dart:3402,3422,4894,5285–5345; lib/components/r06_version_tile.dart; test/r06_app_details_test.dart; docs/R06_APP_DETAILS.md",
+      "id": "R06-P05",
+      "implementation": "PARTIAL",
+      "promise": "Render safe, readable GitHub Markdown release notes with consistent typography, links and expandable sections ([#352](https://github.com/bikram-agarwal/ObtainX/issues/352)).",
+      "remaining": "F01 GitLab credential URL remains. Link/userinfo scheme hygiene, image bounds, oversized remote content and no secret logging not comprehensively enforced.",
+      "tracked_reference_paths": [
+        "docs/R06_APP_DETAILS.md",
+        "lib/components/r06_version_tile.dart",
+        "lib/pages/app.dart",
+        "test/r06_app_details_test.dart"
+      ]
+    },
+    {
+      "acceptance": "SOURCE_DEFECT",
+      "current_evidence": "pages/apps.dart:_loadLinkedChangeLog and showChangeLogDialog MarkdownBody, relative links and rendered image handling.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/pages/app.dart:3402,3422,4894,5285–5345; lib/components/r06_version_tile.dart; test/r06_app_details_test.dart; docs/R06_APP_DETAILS.md",
+      "id": "R06-S04",
+      "implementation": "PARTIAL",
+      "promise": "Release notes: safe GitHub Markdown, readable text/links/expansion, graceful missing/oversized notes. Avoid rendering active HTML or leaking auth tokens through links.",
+      "remaining": "F01 GitLab credential URL remains. Link/userinfo scheme hygiene, image bounds, oversized remote content and no secret logging not comprehensively enforced.",
+      "tracked_reference_paths": [
+        "docs/R06_APP_DETAILS.md",
+        "lib/components/r06_version_tile.dart",
+        "lib/pages/app.dart",
+        "test/r06_app_details_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "source_provider.dart validGitHubAttestationStatuses/fromJsonValue; pages/app.dart security card; R05 exactBytesConfirmed; GAP01 fail-closed status.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/app_sources/github.dart:getAttestationStatusForSha256Digest; lib/providers/apps_provider_install.dart:3401–3435; docs/R06_APP_DETAILS.md",
+      "id": "R06-P06",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Keep security status precise: signature match, digest verified, attestation verified, unverified, verification failed.",
+      "remaining": "Precise unavailable attestation status meets honesty, not true cryptographic verification (F03). Physical UI review pending.",
+      "tracked_reference_paths": [
+        "docs/R06_APP_DETAILS.md",
+        "lib/app_sources/github.dart",
+        "lib/providers/apps_provider_install.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "source_provider.dart validGitHubAttestationStatuses/fromJsonValue; pages/app.dart security card; R05 exactBytesConfirmed; GAP01 fail-closed status.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/app_sources/github.dart:getAttestationStatusForSha256Digest; lib/providers/apps_provider_install.dart:3401–3435; docs/R06_APP_DETAILS.md",
+      "id": "R06-S03",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Evidence labels: visually and accessibly separate source listing, downloaded ZIP/hash proof, APK signer comparison, attestation, and Android-installed state. A source workflow's success is not a signed APK proof.",
+      "remaining": "Precise unavailable attestation status meets honesty, not true cryptographic verification (F03). Physical UI review pending.",
+      "tracked_reference_paths": [
+        "docs/R06_APP_DETAILS.md",
+        "lib/app_sources/github.dart",
+        "lib/providers/apps_provider_install.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R06 widget tests, 1102 full tests, current #29 and #30 merged; docs/R06_APP_DETAILS.md retains acceptance exclusions.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "45685124124 full Flutter and exact HEAD six lanes; test/r06_app_details_test.dart",
+      "id": "R06-A01",
+      "implementation": "PARTIAL",
+      "promise": "Users can correctly identify installed versus available version, verification state and next action without knowing ObtainX conventions; screen-reader and large-text tests pass.",
+      "remaining": "TalkBack/large text/all layout and user comprehension plus F01 remain; exact historical reviews not audited.",
+      "tracked_reference_paths": [
+        "test/r06_app_details_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R06 widget tests, 1102 full tests, current #29 and #30 merged; docs/R06_APP_DETAILS.md retains acceptance exclusions.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "45685124124 full Flutter and exact HEAD six lanes; test/r06_app_details_test.dart",
+      "id": "R06-S05",
+      "implementation": "PARTIAL",
+      "promise": "Acceptance: source/installed/available state fixtures (up-to-date, newer, prerelease, versionCode mismatch, unverified, error, no installed package, multi-source); widget/golden/screen-reader and large-text tests; regression coverage for existing navigation, settings, grouping and install states. Targeted Flutter and native overlay checks, then six required exact-HEAD hosted workflows. Physical usability evidence is separate.",
+      "remaining": "TalkBack/large text/all layout and user comprehension plus F01 remain; exact historical reviews not audited.",
+      "tracked_reference_paths": [
+        "test/r06_app_details_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R06 widget tests, 1102 full tests, current #29 and #30 merged; docs/R06_APP_DETAILS.md retains acceptance exclusions.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "45685124124 full Flutter and exact HEAD six lanes; test/r06_app_details_test.dart",
+      "id": "R06-EXIT",
+      "implementation": "PARTIAL",
+      "promise": "one consolidated, source-pinned change with reviewed source, current tests, docs and non-obsolete gates; all required exact-HEAD hosted workflows pass, and remaining physical/a11y limitations are recorded rather than silently waived.",
+      "remaining": "TalkBack/large text/all layout and user comprehension plus F01 remain; exact historical reviews not audited.",
+      "tracked_reference_paths": [
+        "test/r06_app_details_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r07_operation_timeline.dart SQLite intent/stage/events; R03/R05 catalog; GAP03 documentation explicitly excludes pre-identification local archive extraction.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r07_activity_catalog.dart:131–251; lib/widgets/r07_activity_center_page.dart:80–99,474–481; docs/R07_ACTIVITY_CENTER.md",
+      "id": "R07-P01",
+      "implementation": "PARTIAL",
+      "promise": "Introduce a persistent Activity Center summarizing checks, queued/active downloads, extraction, scanning, approvals, installation, Android confirmation and completed/failed attempts.",
+      "remaining": "F04 pre-identification phase not represented in exact-listing timeline. Actual full restart/notification evidence pending.",
+      "tracked_reference_paths": [
+        "docs/R07_ACTIVITY_CENTER.md",
+        "lib/services/r07_activity_catalog.dart",
+        "lib/widgets/r07_activity_center_page.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r07_operation_timeline.dart SQLite intent/stage/events; R03/R05 catalog; GAP03 documentation explicitly excludes pre-identification local archive extraction.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r07_activity_catalog.dart:131–251; lib/widgets/r07_activity_center_page.dart:80–99,474–481; docs/R07_ACTIVITY_CENTER.md",
+      "id": "R07-S01",
+      "implementation": "PARTIAL",
+      "promise": "Unified activity timeline: queued checks, downloads, verification, extraction, scanning, approval, Android handoff, confirmation, failed/cancelled/unknown and completed entries from the existing durable R03/R05 records. Preserve exact source/listing/attempt identity and correct ownership for concurrent jobs.",
+      "remaining": "F04 pre-identification phase not represented in exact-listing timeline. Actual full restart/notification evidence pending.",
+      "tracked_reference_paths": [
+        "docs/R07_ACTIVITY_CENTER.md",
+        "lib/services/r07_activity_catalog.dart",
+        "lib/widgets/r07_activity_center_page.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r07_activity_center_page.dart, R07 exact resume/retry/cancel, r07_operation_timeline.dart:validateInstallBinding/linkAttempt; GAP03 and GAP05 docs.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/widgets/r07_activity_center_page.dart:_matchesListing, _actions, _review, _retry (122–270); test/r07_activity_center_test.dart",
+      "id": "R07-P02",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Prominent `Review`, `Resume`, `Retry`, `Cancel`, `Open` and `Details` actions only when valid for the current state.",
+      "remaining": "Exact queued controls implemented; explicit pause is separate R03 debt. Physical controls and OS approval remain unverified.",
+      "tracked_reference_paths": [
+        "lib/widgets/r07_activity_center_page.dart",
+        "test/r07_activity_center_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r07_activity_center_page.dart, R07 exact resume/retry/cancel, r07_operation_timeline.dart:validateInstallBinding/linkAttempt; GAP03 and GAP05 docs.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/widgets/r07_activity_center_page.dart:_matchesListing, _actions, _review, _retry (122–270); test/r07_activity_center_test.dart",
+      "id": "R07-S02",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "State-correct controls: `Review`, `Resume`, `Retry`, `Cancel`, `Details`, `Open` only when allowed; present a consistent path back to the Android-mandated approval UI when supported, and an actionable `unknown` outcome when confirmation is unavailable.",
+      "remaining": "Exact queued controls implemented; explicit pause is separate R03 debt. Physical controls and OS approval remain unverified.",
+      "tracked_reference_paths": [
+        "lib/widgets/r07_activity_center_page.dart",
+        "test/r07_activity_center_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "Timeline counts/events and digest-backed R03 progress; r07_activity_catalog.dart and localized Activity Center.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/widgets/r07_activity_center_page.dart:474–481; lib/services/r07_activity_catalog.dart:207–228; test/r07_activity_center_test.dart",
+      "id": "R07-P03",
+      "implementation": "PARTIAL",
+      "promise": "Progress should be quantitative only when measurable; use indeterminate states otherwise. Show transfer size, current step, number of apps checked and per-source failures.",
+      "remaining": "Fixed reason taxonomy is bounded; all source-specific failure explanations, unknown total, notification and user comprehension combinations not independently executed.",
+      "tracked_reference_paths": [
+        "lib/services/r07_activity_catalog.dart",
+        "lib/widgets/r07_activity_center_page.dart",
+        "test/r07_activity_center_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "Timeline counts/events and digest-backed R03 progress; r07_activity_catalog.dart and localized Activity Center.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/widgets/r07_activity_center_page.dart:474–481; lib/services/r07_activity_catalog.dart:207–228; test/r07_activity_center_test.dart",
+      "id": "R07-S04",
+      "implementation": "PARTIAL",
+      "promise": "Progress/error semantics: accurate verified bytes and totals, indeterminate status for unknown totals, clear per-app failures (signature, ABI, SDK, split, expired artifact, rate-limit), notifications linked to the exact operation, and no UI showing 100% until verified completion.",
+      "remaining": "Fixed reason taxonomy is bounded; all source-specific failure explanations, unknown total, notification and user comprehension combinations not independently executed.",
+      "tracked_reference_paths": [
+        "lib/services/r07_activity_catalog.dart",
+        "lib/widgets/r07_activity_center_page.dart",
+        "test/r07_activity_center_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R07 exact attempt notification routing, app foreground wait, timeline recovery; r11_schedule.dart persistent postponement observations.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "docs/R07_ACTIVITY_CENTER.md; lib/widgets/r07_activity_center_page.dart:_review/_retry; test/r07_activity_center_test.dart:146–284; background worker apps_provider.dart",
+      "id": "R07-P04",
+      "implementation": "PARTIAL",
+      "promise": "Keep an entry accessible while awaiting user approval even after navigation to another app; retain notification links to the exact operation.",
+      "remaining": "Android background restrictions and actual reboot/notification/approval behavior pending; no assertion of recreated native token.",
+      "tracked_reference_paths": [
+        "docs/R07_ACTIVITY_CENTER.md",
+        "lib/widgets/r07_activity_center_page.dart",
+        "test/r07_activity_center_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R07 exact attempt notification routing, app foreground wait, timeline recovery; r11_schedule.dart persistent postponement observations.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/widgets/r07_activity_center_page.dart:_explanation; test/r07_activity_center_test.dart",
+      "id": "R07-P05",
+      "implementation": "PARTIAL",
+      "promise": "Give errors actionable explanations, especially signature mismatch, incompatible ABI, split requirements, expired build artifacts, rate limits and invalid filters.",
+      "remaining": "Android background restrictions and actual reboot/notification/approval behavior pending; no assertion of recreated native token.",
+      "tracked_reference_paths": [
+        "lib/widgets/r07_activity_center_page.dart",
+        "test/r07_activity_center_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R07 exact attempt notification routing, app foreground wait, timeline recovery; r11_schedule.dart persistent postponement observations.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "docs/R07_ACTIVITY_CENTER.md; lib/widgets/r07_activity_center_page.dart:_review/_retry; test/r07_activity_center_test.dart:146–284; background worker apps_provider.dart",
+      "id": "R07-P06",
+      "implementation": "PARTIAL",
+      "promise": "Reflect the background checking concern in [#360](https://github.com/bikram-agarwal/ObtainX/issues/360), subject to actual Android background execution limits.",
+      "remaining": "Android background restrictions and actual reboot/notification/approval behavior pending; no assertion of recreated native token.",
+      "tracked_reference_paths": [
+        "docs/R07_ACTIVITY_CENTER.md",
+        "lib/widgets/r07_activity_center_page.dart",
+        "test/r07_activity_center_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R07 exact attempt notification routing, app foreground wait, timeline recovery; r11_schedule.dart persistent postponement observations.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "docs/R07_ACTIVITY_CENTER.md; lib/widgets/r07_activity_center_page.dart:_review/_retry; test/r07_activity_center_test.dart:146–284; background worker apps_provider.dart",
+      "id": "R07-S03",
+      "implementation": "PARTIAL",
+      "promise": "Persistent/recoverable UX: maintain correct activity across page navigation, process death and restart; surface no fabricated success from external installer intents, callbacks or timeouts. Reconcile against independent installed package/signature/version evidence.",
+      "remaining": "Android background restrictions and actual reboot/notification/approval behavior pending; no assertion of recreated native token.",
+      "tracked_reference_paths": [
+        "docs/R07_ACTIVITY_CENTER.md",
+        "lib/widgets/r07_activity_center_page.dart",
+        "test/r07_activity_center_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R07 activity and GAP03 tests, full Flutter and stock installer jobs; #30 merged exact tree.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "docs/R07_ACTIVITY_CENTER.md; lib/widgets/r07_activity_center_page.dart:_review/_retry; test/r07_activity_center_test.dart:146–284; background worker apps_provider.dart",
+      "id": "R07-A01",
+      "implementation": "PARTIAL",
+      "promise": "Each operation state is visible and recoverable after navigation, interruption and process restart; no hidden confirmation loops; no misleading success/100% indicators.",
+      "remaining": "Composite state/device acceptance and F04 remain; individual historical failures remain superseded rather than retroactively passed.",
+      "tracked_reference_paths": [
+        "docs/R07_ACTIVITY_CENTER.md",
+        "lib/widgets/r07_activity_center_page.dart",
+        "test/r07_activity_center_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R07 activity and GAP03 tests, full Flutter and stock installer jobs; #30 merged exact tree.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "docs/R07_ACTIVITY_CENTER.md; lib/widgets/r07_activity_center_page.dart:_review/_retry; test/r07_activity_center_test.dart:146–284; background worker apps_provider.dart",
+      "id": "R07-S05",
+      "implementation": "PARTIAL",
+      "promise": "Acceptance: unit, widget, interruption/restart, concurrency, cancellation, approval-denial, stale receipt, cross-listing attribution, external handoff and notification-route tests; legacy R02 recovery hook retained after R05 journal recovery. Hosted API36 real-install/negative/archive paths stay required. Real-device notification/approval behavior and Android OS background limits separately recorded.",
+      "remaining": "Composite state/device acceptance and F04 remain; individual historical failures remain superseded rather than retroactively passed.",
+      "tracked_reference_paths": [
+        "docs/R07_ACTIVITY_CENTER.md",
+        "lib/widgets/r07_activity_center_page.dart",
+        "test/r07_activity_center_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R07 activity and GAP03 tests, full Flutter and stock installer jobs; #30 merged exact tree.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "docs/R07_ACTIVITY_CENTER.md; lib/widgets/r07_activity_center_page.dart:_review/_retry; test/r07_activity_center_test.dart:146–284; background worker apps_provider.dart",
+      "id": "R07-EXIT",
+      "implementation": "PARTIAL",
+      "promise": "one consolidated native overlay for the complete milestone, with updated existing test contracts rather than historical HF/Pxx scaffolding. All required hosted workflows must pass at the resulting exact HEAD; device and release evidence are not inferred.",
+      "remaining": "Composite state/device acceptance and F04 remain; individual historical failures remain superseded rather than retroactively passed.",
+      "tracked_reference_paths": [
+        "docs/R07_ACTIVITY_CENTER.md",
+        "lib/widgets/r07_activity_center_page.dart",
+        "test/r07_activity_center_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "version_comparison.dart; source_provider.dart filterApks; r10_regex_preview.dart; r08_source_policy.dart; named r08_source_regressions_test.dart and version_order tests.",
+      "historical_implementation": "SOURCE_COMPLETE",
+      "historical_source": "lib/version/version_comparison.dart:303; test/r08_source_regressions_test.dart:#336",
+      "id": "R08-P01",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Correct version handling for abbreviated prereleases such as `158.0b3 → 158.0b4` ([#336](https://github.com/bikram-agarwal/ObtainX/issues/336)).",
+      "remaining": "Physical ABI/deep-link and cross-distributor behavior pending; one distinct Android package-manager test skipped.",
+      "tracked_reference_paths": [
+        "lib/version/version_comparison.dart",
+        "test/r08_source_regressions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "version_comparison.dart; source_provider.dart filterApks; r10_regex_preview.dart; r08_source_policy.dart; named r08_source_regressions_test.dart and version_order tests.",
+      "historical_implementation": "SOURCE_COMPLETE",
+      "historical_source": "lib/providers/source_provider.dart:1663,1985,2470; lib/components/r10_regex_preview.dart:52–77; test/r08_source_regressions_test.dart:#353; test/r10_regex_preview_test.dart",
+      "id": "R08-P02",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Repair full-URL-versus-filename APK regex filtering ([#353](https://github.com/bikram-agarwal/ObtainX/issues/353)); provide testable pattern preview rather than silently filtering everything.",
+      "remaining": "Physical ABI/deep-link and cross-distributor behavior pending; one distinct Android package-manager test skipped.",
+      "tracked_reference_paths": [
+        "lib/components/r10_regex_preview.dart",
+        "lib/providers/source_provider.dart",
+        "test/r08_source_regressions_test.dart",
+        "test/r10_regex_preview_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "version_comparison.dart; source_provider.dart filterApks; r10_regex_preview.dart; r08_source_policy.dart; named r08_source_regressions_test.dart and version_order tests.",
+      "historical_implementation": "SOURCE_COMPLETE",
+      "historical_source": "lib/services/r08_source_policy.dart:preferredSourceAbis; lib/providers/source_provider.dart:2492; lib/app_sources/fdroid.dart:709; test/r08_source_regressions_test.dart:#363",
+      "id": "R08-P03",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Prioritize compatible ARM64 APKs when the device supports both ARMv7 and ARM64 ([#363](https://github.com/bikram-agarwal/ObtainX/issues/363)), unless metadata indicates another constraint.",
+      "remaining": "Physical ABI/deep-link and cross-distributor behavior pending; one distinct Android package-manager test skipped.",
+      "tracked_reference_paths": [
+        "lib/app_sources/fdroid.dart",
+        "lib/providers/source_provider.dart",
+        "lib/services/r08_source_policy.dart",
+        "test/r08_source_regressions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "version_comparison.dart; source_provider.dart filterApks; r10_regex_preview.dart; r08_source_policy.dart; named r08_source_regressions_test.dart and version_order tests.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/version/app_version.dart:279,587–594; test/r08_source_regressions_test.dart:#347",
+      "id": "R08-P04",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Fix the version acknowledgement problem across different package distributor versionCode schemes ([#347](https://github.com/bikram-agarwal/ObtainX/issues/347)).",
+      "remaining": "Physical ABI/deep-link and cross-distributor behavior pending; one distinct Android package-manager test skipped.",
+      "tracked_reference_paths": [
+        "lib/version/app_version.dart",
+        "test/r08_source_regressions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "version_comparison.dart; source_provider.dart filterApks; r10_regex_preview.dart; r08_source_policy.dart; named r08_source_regressions_test.dart and version_order tests.",
+      "historical_implementation": "SOURCE_COMPLETE",
+      "historical_source": "lib/services/r08_source_policy.dart:obtainiumAddUrl/IncomingSourceLinkGate; lib/pages/home.dart:574–681; test/r08_source_regressions_test.dart:#368",
+      "id": "R08-P07",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Fix percent-encoded deep links by porting/reworking [#368](https://github.com/bikram-agarwal/ObtainX/pull/368) with actual routing tests, error isolation and duplication checks.",
+      "remaining": "Physical ABI/deep-link and cross-distributor behavior pending; one distinct Android package-manager test skipped.",
+      "tracked_reference_paths": [
+        "lib/pages/home.dart",
+        "lib/services/r08_source_policy.dart",
+        "test/r08_source_regressions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r08_apkmirror_budget.dart private cross-owner budget, r08_apkmirror_discovery.dart bounded exact search, credential-free ObtainX identity.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/http/r08_apkmirror_budget.dart:1–92; test/r08_source_regressions_test.dart:#339; docs/R08_SOURCE_RELIABILITY.md",
+      "id": "R08-P05",
+      "implementation": "PARTIAL",
+      "promise": "Reduce harmful source polling and repetitive HTML scraping; investigate the serious APKMirror request-volume complaint ([#339](https://github.com/bikram-agarwal/ObtainX/issues/339)), favor supported interfaces, caching and respectful rate limits.",
+      "remaining": "No live provider request-volume/availability proof; provider refusal deliberately stays unknown, not solved availability.",
+      "tracked_reference_paths": [
+        "docs/R08_SOURCE_RELIABILITY.md",
+        "lib/http/r08_apkmirror_budget.dart",
+        "test/r08_source_regressions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "SOURCE_GAP",
+      "current_evidence": "docs/R08_SOURCE_RELIABILITY.md; APKCombo fallback, Farsroid query/fixture and RuStore 419 safe refusal; r08_source_regressions_test.dart.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/app_sources/rustore.dart:61–96; test/r08_source_regressions_test.dart:#333/#345/#357; docs/R08_SOURCE_RELIABILITY.md",
+      "id": "R08-P06",
+      "implementation": "PARTIAL",
+      "promise": "Review APKCombo single-variant fallback ([#333](https://github.com/bikram-agarwal/ObtainX/issues/333)), RuStore 419 ([#345](https://github.com/bikram-agarwal/ObtainX/issues/345)) and Farsroid issues ([#357](https://github.com/bikram-agarwal/ObtainX/issues/357)).",
+      "remaining": "F06 RuStore session compatibility not implemented; live Farsroid root cause/current service behavior unresolved. No bypass recommended.",
+      "tracked_reference_paths": [
+        "docs/R08_SOURCE_RELIABILITY.md",
+        "lib/app_sources/rustore.dart",
+        "test/r08_source_regressions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "Named issue regressions and full hosted Flutter pass.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "45685124124 R08 named regression log; test/r08_source_regressions_test.dart; docs/R08_SOURCE_RELIABILITY.md",
+      "id": "R08-A01",
+      "implementation": "PARTIAL",
+      "promise": "Every addressed issue has a named reproducer test; no regressions in multi-store listings, source swapping or update-on-demand.",
+      "remaining": "Live provider issues, physical deep-link/ABI acceptance and supported RuStore decision remain.",
+      "tracked_reference_paths": [
+        "docs/R08_SOURCE_RELIABILITY.md",
+        "test/r08_source_regressions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "docs/R09_DISCOVERY.md; r09_discovery.dart, pages/apps.dart, bulk_update_sheet.dart, multi_source_app_actions_test.dart.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/services/r09_discovery.dart; lib/pages/apps.dart; test/r09_discovery_test.dart:7–74; docs/R09_DISCOVERY.md",
+      "id": "R09-P01",
+      "implementation": "PARTIAL",
+      "promise": "Preserve present view sheets, folder sort/group settings, categories, badges and multi-source tracking. Refine rather than duplicate.",
+      "remaining": "Actual retained view/preferences, all core actions, keyboard and grouped multi-source cases not fully traced; optional grid deferred, not required.",
+      "tracked_reference_paths": [
+        "docs/R09_DISCOVERY.md",
+        "lib/pages/apps.dart",
+        "lib/services/r09_discovery.dart",
+        "test/r09_discovery_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "docs/R09_DISCOVERY.md; r09_discovery.dart, pages/apps.dart, bulk_update_sheet.dart, multi_source_app_actions_test.dart.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/services/r09_discovery.dart; lib/pages/apps.dart; test/r09_discovery_test.dart:7–74; docs/R09_DISCOVERY.md",
+      "id": "R09-P02",
+      "implementation": "PARTIAL",
+      "promise": "Make `Check for updates` and `Update all` distinct controls ([#364](https://github.com/bikram-agarwal/ObtainX/issues/364)); retain non-touch navigation.",
+      "remaining": "Actual retained view/preferences, all core actions, keyboard and grouped multi-source cases not fully traced; optional grid deferred, not required.",
+      "tracked_reference_paths": [
+        "docs/R09_DISCOVERY.md",
+        "lib/pages/apps.dart",
+        "lib/services/r09_discovery.dart",
+        "test/r09_discovery_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "docs/R09_DISCOVERY.md; r09_discovery.dart, pages/apps.dart, bulk_update_sheet.dart, multi_source_app_actions_test.dart.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/services/r09_discovery.dart; lib/pages/apps.dart; test/r09_discovery_test.dart:7–74; docs/R09_DISCOVERY.md",
+      "id": "R09-P03",
+      "implementation": "PARTIAL",
+      "promise": "Support app-list search across name, package ID, source and category, with optional Compact/Standard/Detailed presets; consider grid view ([#351](https://github.com/bikram-agarwal/ObtainX/issues/351)).",
+      "remaining": "Actual retained view/preferences, all core actions, keyboard and grouped multi-source cases not fully traced; optional grid deferred, not required.",
+      "tracked_reference_paths": [
+        "docs/R09_DISCOVERY.md",
+        "lib/pages/apps.dart",
+        "lib/services/r09_discovery.dart",
+        "test/r09_discovery_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "docs/R09_DISCOVERY.md; r09_discovery.dart, pages/apps.dart, bulk_update_sheet.dart, multi_source_app_actions_test.dart.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/services/r09_discovery.dart; lib/pages/apps.dart; test/r09_discovery_test.dart:7–74; docs/R09_DISCOVERY.md",
+      "id": "R09-P04",
+      "implementation": "PARTIAL",
+      "promise": "Visually group multiple source listings for one installed package, including stable/beta/nightly views. Preserve independent listing-level tracking while avoiding multiple misleading “installed app” tiles ([#338](https://github.com/bikram-agarwal/ObtainX/issues/338)).",
+      "remaining": "Actual retained view/preferences, all core actions, keyboard and grouped multi-source cases not fully traced; optional grid deferred, not required.",
+      "tracked_reference_paths": [
+        "docs/R09_DISCOVERY.md",
+        "lib/pages/apps.dart",
+        "lib/services/r09_discovery.dart",
+        "test/r09_discovery_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "docs/R09_DISCOVERY.md; r09_discovery.dart, pages/apps.dart, bulk_update_sheet.dart, multi_source_app_actions_test.dart.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/services/r09_discovery.dart; lib/pages/apps.dart; test/r09_discovery_test.dart:7–74; docs/R09_DISCOVERY.md",
+      "id": "R09-P06",
+      "implementation": "PARTIAL",
+      "promise": "Clearly distinguish `everything current`, `not checked yet`, `only track`, `needs attention` and `no matching source` empty states.",
+      "remaining": "Actual retained view/preferences, all core actions, keyboard and grouped multi-source cases not fully traced; optional grid deferred, not required.",
+      "tracked_reference_paths": [
+        "docs/R09_DISCOVERY.md",
+        "lib/pages/apps.dart",
+        "lib/services/r09_discovery.dart",
+        "test/r09_discovery_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r09_artifact_inspection.dart byte-backed facts, app_detail_widgets.dart explicit comparison batches; r04_actions_history_dialog.dart exact selected revision.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r09_artifact_inspection.dart; lib/providers/apps_provider_install.dart:919–1015; test/r09_artifact_inspection_test.dart; docs/R09_DISCOVERY.md",
+      "id": "R09-P05",
+      "implementation": "PARTIAL",
+      "promise": "Provide workflow/run browser, file size, ABI, package ID, version, split/standalone role, supported/incompatible reason, trust checks and expiry in APK choice UI. Support explicit user selection and deterministic safe defaults.",
+      "remaining": "F07 not a complete pre-transfer inventory; only inspected candidates have actual manifests/signers, unknown remains unknown. Live private artifact and device review pending.",
+      "tracked_reference_paths": [
+        "docs/R09_DISCOVERY.md",
+        "lib/providers/apps_provider_install.dart",
+        "lib/services/r09_artifact_inspection.dart",
+        "test/r09_artifact_inspection_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R09 picker/grouping hosted fixtures and six required workflows.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "R09 named discovery tests and full Flutter; docs/R09_DISCOVERY.md",
+      "id": "R09-A01",
+      "implementation": "PARTIAL",
+      "promise": "All core actions are discoverable without hidden gestures; wrong-ABI/split options show clear incompatibility; multiple-source rows cannot imply duplicate independent installs.",
+      "remaining": "Physical non-touch/large-text and all source compatibility combinations pending.",
+      "tracked_reference_paths": [
+        "docs/R09_DISCOVERY.md"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r10_settings_navigation.dart, r10_settings_context.dart, r10_regex_preview.dart; docs/R10_SETTINGS.md; r10 settings widget tests.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/pages/settings.dart; lib/pages/additional_options_page.dart:352–368; lib/components/r10_regex_preview.dart; tests r10_settings_navigation/context and regex_preview",
+      "id": "R10-P01",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Keep all existing advanced options but group routine settings separately from expert controls; provide settings search and per-app reset.",
+      "remaining": "Physical wide/compact, actual source samples, input-method and accessibility review pending.",
+      "tracked_reference_paths": [
+        "lib/components/r10_regex_preview.dart",
+        "lib/pages/additional_options_page.dart",
+        "lib/pages/settings.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r10_settings_navigation.dart, r10_settings_context.dart, r10_regex_preview.dart; docs/R10_SETTINGS.md; r10 settings widget tests.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/pages/settings.dart; lib/pages/additional_options_page.dart:352–368; lib/components/r10_regex_preview.dart; tests r10_settings_navigation/context and regex_preview",
+      "id": "R10-P02",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Add live regex previews using fetched artifact names; explain installer capabilities, tokens, certificate warnings, source override and version detection inline.",
+      "remaining": "Physical wide/compact, actual source samples, input-method and accessibility review pending.",
+      "tracked_reference_paths": [
+        "lib/components/r10_regex_preview.dart",
+        "lib/pages/additional_options_page.dart",
+        "lib/pages/settings.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r10_accessibility.dart, pages/app.dart direct homepage, settings/nav, GAP05 wrapping Activity controls; R10 gesture and golden fixtures.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/components/r10_accessibility.dart; lib/pages/apps.dart; test/r10_accessibility_test.dart and apps_scroll_work_test.dart; docs/R10_SETTINGS.md",
+      "id": "R10-P03",
+      "implementation": "PARTIAL",
+      "promise": "Address clipped text ([#372](https://github.com/bikram-agarwal/ObtainX/issues/372)), broken swipe haptics ([#365](https://github.com/bikram-agarwal/ObtainX/issues/365)), discoverable homepage action ([#349](https://github.com/bikram-agarwal/ObtainX/issues/349)), screen reader labels, contrast, minimum touch targets and reduced-motion support.",
+      "remaining": "F08 full primary-control accessibility/contrast/TV coverage not proven, no actual device exercise.",
+      "tracked_reference_paths": [
+        "docs/R10_SETTINGS.md",
+        "lib/components/r10_accessibility.dart",
+        "lib/pages/apps.dart",
+        "test/r10_accessibility_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r10_accessibility.dart, pages/app.dart direct homepage, settings/nav, GAP05 wrapping Activity controls; R10 gesture and golden fixtures.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/components/r10_accessibility.dart; lib/pages/apps.dart; test/r10_accessibility_test.dart and apps_scroll_work_test.dart; docs/R10_SETTINGS.md",
+      "id": "R10-P04",
+      "implementation": "PARTIAL",
+      "promise": "Extend existing tablet/landscape layouts to keyboard, mouse, D-pad and Android TV ([#350](https://github.com/bikram-agarwal/ObtainX/issues/350)); do not assume swipe/pull-to-refresh is available.",
+      "remaining": "F08 full primary-control accessibility/contrast/TV coverage not proven, no actual device exercise.",
+      "tracked_reference_paths": [
+        "docs/R10_SETTINGS.md",
+        "lib/components/r10_accessibility.dart",
+        "lib/pages/apps.dart",
+        "test/r10_accessibility_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_LOCAL_AND_CI_SUBSET",
+      "current_evidence": "docs/R10_LOCALE_REVIEW.json; test_r10_accessibility_contract.py duplicate/placeholder inventory; five reviewed non-English locale key sets match 1110 English leaves.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "docs/R10_LOCALE_REVIEW.json; actual assets/translations/en,fr,tr,ja,pt,pt-BR.json; R10 tests",
+      "id": "R10-P05",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Review French/Turkish/Japanese contributions (#337/#312/#308) for locale-key parity, placeholders and long-string overflow.",
+      "remaining": "Linguistic correctness/long-string fit and all other locale fallbacks not device accepted.",
+      "tracked_reference_paths": [
+        "docs/R10_LOCALE_REVIEW.json"
+      ]
+    },
+    {
+      "acceptance": "PENDING_DEVICE",
+      "current_evidence": "r10 accessibility, regex and navigation tests and 200% Activity Center fixture.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/components/r10_accessibility.dart; lib/pages/apps.dart; test/r10_accessibility_test.dart and apps_scroll_work_test.dart; docs/R10_SETTINGS.md",
+      "id": "R10-A01",
+      "implementation": "PARTIAL",
+      "promise": "Small phone, large font, split-screen, landscape, tablet and TV interactions meet the same actionable UX contracts; all primary controls are accessible via keyboard/remote/screen reader.",
+      "remaining": "Small phone, split-screen, landscape/tablet, TV remote, TalkBack, actual contrast and 200% all-route matrix missing.",
+      "tracked_reference_paths": [
+        "docs/R10_SETTINGS.md",
+        "lib/components/r10_accessibility.dart",
+        "lib/pages/apps.dart",
+        "test/r10_accessibility_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r11_external_requests.dart and home.dart exact package/listing selection; Android SHOW_APP_INFO wiring; r11_integrations_test.dart.",
+      "historical_implementation": "SOURCE_COMPLETE",
+      "historical_source": "MainActivity.kt:312–328,444–445 → lib/pages/home.dart:470–529,574–581 → r11_external_requests.dart; test/r11_integrations_test.dart:30–52",
+      "id": "R11-P01",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Implement package-name deep links and `SHOW_APP_INFO` integration ([#371](https://github.com/bikram-agarwal/ObtainX/issues/371)) with unambiguous handling of multiple source listings and caller trust boundaries.",
+      "remaining": "Actual cold/warm device intent and malformed extras acceptance pending.",
+      "tracked_reference_paths": [
+        "lib/pages/home.dart",
+        "test/r11_integrations_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r11_automation.dart:r11RunAutomation durable exact-release queue, revocation recheck, exact-channel receipt; scoped Tasker broadcast; R11/GAP05 docs.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/pages/home.dart:531–572; lib/services/r11_automation.dart:12–75; test/r11_integrations_test.dart:53–72",
+      "id": "R11-P02",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Provide opt-in Tasker/automation actions: check updates, queue a download, read state, retrieve a receipt. No silent install if Android or user policy requires approval.",
+      "remaining": "Opt-in foreground consent only; no unattended automation/installation claim. Actual Tasker interaction pending.",
+      "tracked_reference_paths": [
+        "lib/pages/home.dart",
+        "lib/services/r11_automation.dart",
+        "test/r11_integrations_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "pages/app.dart r11-app-manager action; r11_external_requests.dart; existing explicit external handoff documented.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/services/r11_external_requests.dart:r11OpenAppManager; lib/pages/app.dart:5314; settings.dart:4095; docs/R11_INTEGRATIONS.md",
+      "id": "R11-P03",
+      "implementation": "PARTIAL",
+      "promise": "Integrate with App Manager where installed: open details, inspect trackers/signatures and hand off supported install intents; fail gracefully if absent.",
+      "remaining": "Actual App Manager tracker/signature UI and approved install handoff absent physical proof.",
+      "tracked_reference_paths": [
+        "docs/R11_INTEGRATIONS.md",
+        "lib/pages/app.dart",
+        "lib/services/r11_external_requests.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r11_history.dart allowlisted export; r05_operation_journal.dart retention and archive, r03_download_history.dart; GAP03 bounded catalog and preview.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r11_history.dart; r07_activity_catalog.dart:127–171; r05_operation_journal.dart:74–99,126–136,192–213; r07_activity_center_page.dart:405–432",
+      "id": "R11-P04",
+      "implementation": "PARTIAL",
+      "promise": "Maintain per-app, per-channel history and receipts with privacy-aware retention and export; never treat an old receipt as proof of current safety.",
+      "remaining": "F09 timeline event retention not pruned by current policy; historical journal scans remain linear, export complete scope may grow. Device privacy/export/recovery pending.",
+      "tracked_reference_paths": [
+        "lib/services/r11_history.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r11_schedule.dart persistent reason codes and transactional minimum interval; r11_schedule_settings.dart, background worker, R11 tests.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r11_schedule.dart; lib/providers/apps_provider.dart:1837,1916–1958,2090–2108; test/r11_integrations_test.dart:116–143",
+      "id": "R11-P05",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Add user-configurable Wi-Fi/charging/quiet-hours/rate-limit rules within Android OS restrictions; explain when system restrictions postpone work.",
+      "remaining": "Actual Android scheduling/battery/network restrictions and postponement observations pending device.",
+      "tracked_reference_paths": [
+        "lib/providers/apps_provider.dart",
+        "lib/services/r11_schedule.dart",
+        "test/r11_integrations_test.dart"
+      ]
+    },
+    {
+      "acceptance": "PENDING_DEVICE",
+      "current_evidence": "R11 fixtures, production consented queue and schedule; full hosted suite.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "test/r11_integrations_test.dart (9 fixtures), full Flutter 45685124124; no R11 device integration test in integration_test/",
+      "id": "R11-A01",
+      "implementation": "PARTIAL",
+      "promise": "External intents, task triggers and export work under minimum required privileges; no token disclosure, wrong-app routing or unwanted installation.",
+      "remaining": "Tasker/App Manager/OS privileged backend, real share/export and malicious external-intent behavior pending.",
+      "tracked_reference_paths": [
+        "test/r11_integrations_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_PR_ONLY",
+      "current_evidence": "Full Flutter analyzer and 1102 tests passed with 1 Android-only skip; candidate workflow contains strict Dart formatter/analysis/test.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": ".github/workflows/obtainx-r00-flutter.yml:118–178; 45685124124",
+      "id": "R12-P01",
+      "implementation": "PARTIAL",
+      "promise": "Flutter formatter, analyzer and unit/widget tests; source/API fixtures.",
+      "remaining": "F10 exact main missing five runs; formatter and release-mode candidate never executed.",
+      "tracked_reference_paths": [
+        ".github/workflows/obtainx-r00-flutter.yml"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_PR_EMULATOR_SUBSET",
+      "current_evidence": "Hosted R03/R04/GAP03, archive and R02/RT02B/RT02C decisive tests executed; 1198 local Python pass.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "45685124124 named R03, R01, R02, R05 and R07 fixtures; four API36 workflows",
+      "id": "R12-P02",
+      "implementation": "PARTIAL",
+      "promise": "HTTP interruption/redirect/rate limit and persisted download recovery integration.",
+      "remaining": "Exact merged main gates and complete device matrices pending; F01–F05 remain relevant.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "VERIFIED_PR_EMULATOR_SUBSET",
+      "current_evidence": "Hosted R03/R04/GAP03, archive and R02/RT02B/RT02C decisive tests executed; 1198 local Python pass.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "45685124124 named R03, R01, R02, R05 and R07 fixtures; four API36 workflows",
+      "id": "R12-P03",
+      "implementation": "PARTIAL",
+      "promise": "Archive adversarial corpus, path/symlink/zip-bomb constraints, APK and split-package planning.",
+      "remaining": "Exact merged main gates and complete device matrices pending; F01–F05 remain relevant.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "VERIFIED_PR_EMULATOR_SUBSET",
+      "current_evidence": "Hosted R03/R04/GAP03, archive and R02/RT02B/RT02C decisive tests executed; 1198 local Python pass.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "45685124124 named R03, R01, R02, R05 and R07 fixtures; four API36 workflows",
+      "id": "R12-P04",
+      "implementation": "PARTIAL",
+      "promise": "Installer strategy contracts, pending-install lifecycle and persisted receipts.",
+      "remaining": "Exact merged main gates and complete device matrices pending; F01–F05 remain relevant.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "VERIFIED_PR_SUBSET",
+      "current_evidence": "Full Flutter and existing goldens pass (one unrelated Android-only skip); locale inventory regression.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "45685124124 full Flutter/goldens; test/r10_accessibility_test.dart; docs/R10_SETTINGS.md",
+      "id": "R12-P05",
+      "implementation": "PARTIAL",
+      "promise": "Accessibility/layout/golden review with actively maintained golden expectations.",
+      "remaining": "No physical accessibility/long-label/TV review; F08.",
+      "tracked_reference_paths": [
+        "docs/R10_SETTINGS.md",
+        "test/r10_accessibility_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_LOCAL_AND_CI_SUBSET",
+      "current_evidence": "r00_source_contract.py --check, r07_workflow_contract.py --check; 725 tracked source scan; current main protected only source-contracts.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "scripts/ci/r00_source_contract.py and 1133 local contracts; 45685124032; this 139-row audit",
+      "id": "R12-P06",
+      "implementation": "PARTIAL",
+      "promise": "Source-contract drift audit: validate canonical implementation, tests, docs, permission policies, dependency locks and hashes together.",
+      "remaining": "F01/F02 source-policy drift missed; actual environment and merge checks need review; source hash/CI not blanket drift proof.",
+      "tracked_reference_paths": [
+        "scripts/ci/r00_source_contract.py"
+      ]
+    },
+    {
+      "acceptance": "PENDING_RELEASE",
+      "current_evidence": "r12_release_gate.py source_scan, dependencies/SBOM/OSV, compare_builds, APK/signing verification; manual non-publishing workflow; 11 Python tests pass.",
+      "historical_implementation": "MISSING",
+      "historical_source": "docs/SECURITY_RELEASE_POLICY.md; android/app/build.gradle.kts:91–133; six active workflows (none release-signing/provenance lane)",
+      "id": "R12-P07",
+      "implementation": "PARTIAL",
+      "promise": "Release signing, provenance, dependencies, secret scan, reproducible build checks where applicable and package metadata.",
+      "remaining": "No candidate dispatch/build/reproducibility/signing or actual advisory/license report. F10/F11; actual certificate pin and environment gate required.",
+      "tracked_reference_paths": [
+        "android/app/build.gradle.kts",
+        "docs/SECURITY_RELEASE_POLICY.md"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_PR_EMULATOR_SUBSET",
+      "current_evidence": "RT02 jobs at PR exact SHA; r12_device_evidence.py eleven lanes. Synthetic duplicate-content/invalid metadata test returns READY_FOR_INDEPENDENT_REVIEW but not RELEASE_QUALIFIED.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "45685124039/45685123978/45685124093/45685123983; docs/R02_FINAL_COMPLETION_ACCEPTANCE.md",
+      "id": "R12-P08",
+      "implementation": "PARTIAL",
+      "promise": "Android device/emulator runtime matrix, including API 36, system/Shizuku/Dhizuku/external backends where supported and actually accessible.",
+      "remaining": "F11 schema needs strengthening; no candidate-bound physical lanes complete; human review mandatory.",
+      "tracked_reference_paths": [
+        "docs/R02_FINAL_COMPLETION_ACCEPTANCE.md"
+      ]
+    },
+    {
+      "acceptance": "PENDING_RELEASE",
+      "current_evidence": "r12_release_gate.py emits independent SOURCE_PASS/HOSTED_CI_PASS, DEVICE_RUNTIME_PASS pending and RELEASE_QUALIFIED false; r12_device_evidence.py likewise false. No publication workflow.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "config/delivery-required-ci.json; SECURITY_RELEASE_POLICY.md; current obtain.log and r11_hf01.py:146",
+      "id": "R12-A01",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "`SOURCE_PASS`, `HOSTED_CI_PASS`, `DEVICE_RUNTIME_PASS` and `RELEASE_QUALIFIED` are distinct, evidence-backed outcomes. Inconclusive is not success. Publishing requires passing all mandatory gates, or an explicit documented scoped-release exception that does not claim full qualification.",
+      "remaining": "Truthful status model exists; actual acceptance not established; no exception/publication authorization.",
+      "tracked_reference_paths": [
+        "config/delivery-required-ci.json"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "app_version.dart InstallReleaseSnapshot, r07_operation_timeline.dart intent, R05 releaseFingerprint.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/version/app_version.dart:InstallReleaseSnapshot; lib/app_sources/github.dart:r04ActionsArchiveEvidence",
+      "id": "ARC-01",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "**`SourceReleaseIdentity`**: source URL, package/listing key, source type, version label, build/commit ID, source timestamp and comparison evidence.",
+      "remaining": "Source timestamp/comparison evidence are composed across existing model; physical provenance pending.",
+      "tracked_reference_paths": [
+        "lib/app_sources/github.dart",
+        "lib/version/app_version.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r04_github_actions.dart R04ActionsArchive + R05OperationReceipt origin/repository/IDs/digest/expiry path.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r04_github_actions.dart:R04ActionsArchive; R05OperationReceipt; _r05BeginAttempt",
+      "id": "ARC-02",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "**`ArtifactIdentity`**: provider, repository, workflow/run/attempt/artifact identifiers, original URL and final download origin, digest and expiry metadata.",
+      "remaining": "Live authenticated metadata evidence pending.",
+      "tracked_reference_paths": [
+        "lib/services/r04_github_actions.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "r09_artifact_inspection.dart actual inspected members; R04 artifact catalog and bounded comparison.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r09_artifact_inspection.dart; lib/providers/apps_provider_install.dart:919–1015; test/r09_artifact_inspection_test.dart; docs/R09_DISCOVERY.md",
+      "id": "ARC-03",
+      "implementation": "PARTIAL",
+      "promise": "**`ArtifactInventory`**: discovery results including APKs, split bundles, non-installable attachments, sizes, ABI hints and parsed metadata.",
+      "remaining": "F07 incomplete actual metadata until explicit transfer; inventory for all formats not independently established.",
+      "tracked_reference_paths": [
+        "docs/R09_DISCOVERY.md",
+        "lib/providers/apps_provider_install.dart",
+        "lib/services/r09_artifact_inspection.dart",
+        "test/r09_artifact_inspection_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "install_bundle_plan.dart selectedMembers; apps_provider_install.dart _r05 pre-handoff binding; native APK proof.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/install_bundle_plan.dart:InstallBundlePlan; install_precommit_gate.dart",
+      "id": "ARC-04",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "**`InstallPlan`**: selected standalone/split sets, package/version/certificate constraints, supported installer backend, verification policy and required approval.",
+      "remaining": "Composed plan and receipt; physical backends/unsupported splits pending.",
+      "tracked_reference_paths": [
+        "lib/services/install_bundle_plan.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R07 SQLite intent/timeline, R03 transfer, R05 install state machine.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r07_activity_catalog.dart:131–251; lib/widgets/r07_activity_center_page.dart:80–99,474–481; docs/R07_ACTIVITY_CENTER.md",
+      "id": "ARC-05",
+      "implementation": "PARTIAL",
+      "promise": "**`OperationState`**: persisted state machine with guarded transitions and abort/retry semantics.",
+      "remaining": "F04 pre-ID extraction and explicit pause not closed; device process proof pending.",
+      "tracked_reference_paths": [
+        "docs/R07_ACTIVITY_CENTER.md",
+        "lib/services/r07_activity_catalog.dart",
+        "lib/widgets/r07_activity_center_page.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R05 exact receipt fields, digest/signer equality, guarded journal; current emulator installer receipts.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r04_github_actions.dart:R04ActionsArchive; R05OperationReceipt; _r05BeginAttempt",
+      "id": "ARC-06",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "**`OperationReceipt`**: immutable evidence for source, selected exact file(s), verified digest, signing, selected backend and install outcome.",
+      "remaining": "Physical/external confirmation and historical unknowns not promoted.",
+      "tracked_reference_paths": [
+        "lib/services/r04_github_actions.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R09 source/grouping/list view docs and r09_discovery.dart, apps.dart, bulk selection tests.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/services/r09_discovery.dart; lib/pages/apps.dart; test/r09_discovery_test.dart:7–74; docs/R09_DISCOVERY.md",
+      "id": "UX-01",
+      "implementation": "PARTIAL",
+      "promise": "**Apps:** categorized library, update status, source labels, Check updates, Update all, direct row actions, search and saved view presets.",
+      "remaining": "All primary control routes and accessibility not fully re-exercised.",
+      "tracked_reference_paths": [
+        "docs/R09_DISCOVERY.md",
+        "lib/pages/apps.dart",
+        "lib/services/r09_discovery.dart",
+        "test/r09_discovery_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R06 AppPage version/cards/actions; GAP01 trust labels and R11 history.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/pages/app.dart:R06VersionTile and quick actions; lib/app_sources/github.dart:getAttestationStatusForSha256Digest",
+      "id": "UX-02",
+      "implementation": "PARTIAL",
+      "promise": "**App details:** explicit state, Installed/Available comparison, safe changelog, Update/Download/Install/Open actions, Source & Channels, Verification, History, Options.",
+      "remaining": "F01 linked changelog and hierarchy/physical usability debt.",
+      "tracked_reference_paths": [
+        "lib/app_sources/github.dart",
+        "lib/pages/app.dart"
+      ]
+    },
+    {
+      "acceptance": "INCONCLUSIVE",
+      "current_evidence": "Existing add_app.dart, bulk_import_service.dart, R04 Actions selection, R09 source fixtures.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/pages/add_app.dart; lib/app_sources/github.dart; r04_generated_form_patch tests",
+      "id": "UX-03",
+      "implementation": "UNINSPECTED",
+      "promise": "**Add app:** URL import, search, installed-app discovery, bulk import, GitHub workflow/release source selection with source preview.",
+      "remaining": "Full URL/search/discovery/bulk-import end-to-end path not independently traced.",
+      "tracked_reference_paths": [
+        "lib/app_sources/github.dart",
+        "lib/pages/add_app.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R07 timeline/catalog/Activity Center; GAP03 and GAP05 closure.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/r07_activity_catalog.dart:131–251; lib/widgets/r07_activity_center_page.dart:80–99,474–481; docs/R07_ACTIVITY_CENTER.md",
+      "id": "UX-04",
+      "implementation": "PARTIAL",
+      "promise": "**Activity:** persistent check/download/install queue, approvals, progress, retry/cancel and receipts.",
+      "remaining": "F04/F09 plus physical UI/background behavior pending.",
+      "tracked_reference_paths": [
+        "docs/R07_ACTIVITY_CENTER.md",
+        "lib/services/r07_activity_catalog.dart",
+        "lib/widgets/r07_activity_center_page.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R10 settings search, context/reset, R11 policies, R10 and R11 tests.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/pages/settings.dart; lib/pages/additional_options_page.dart:352–368; lib/components/r10_regex_preview.dart; tests r10_settings_navigation/context and regex_preview",
+      "id": "UX-05",
+      "implementation": "PARTIAL",
+      "promise": "**Settings:** Everyday / Advanced, search, contextual explanations, download policies, installer behavior, security and backups.",
+      "remaining": "All retained advanced/security/backup controls and physical non-touch acceptance not independently reviewed.",
+      "tracked_reference_paths": [
+        "lib/components/r10_regex_preview.dart",
+        "lib/pages/additional_options_page.dart",
+        "lib/pages/settings.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R04 history/catalog fixtures and live acceptance tool; exact PR named test steps.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "test/r04_github_actions_test.dart; test/r04_actions_history_test.dart; R04 hosted named tests",
+      "id": "QUAL-01",
+      "implementation": "PARTIAL",
+      "promise": "Source discovery: Successful/failing workflow runs, 100+ artifact pagination, expired artifacts, private repo, renamed repo, multiple branches and releases",
+      "remaining": "Real private/renamed repo and large inventories unobserved.",
+      "tracked_reference_paths": [
+        "test/r04_actions_history_test.dart",
+        "test/r04_github_actions_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_PR_EMULATOR_SUBSET",
+      "current_evidence": "R03 deterministic tests, adversarial archives, real system installer positives/negatives/archive path.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "test/r03_download_engine_test.dart, 45685124124",
+      "id": "QUAL-02",
+      "implementation": "PARTIAL",
+      "promise": "Downloads: HTTP 200/206/302/401/403/410/416/429/5xx, dropped sockets, timeouts, ETags, missing content lengths, concurrent jobs, process restart",
+      "remaining": "Full mock case inventory and physical backends/device resource/restart proof pending.",
+      "tracked_reference_paths": [
+        "test/r03_download_engine_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_PR_EMULATOR_SUBSET",
+      "current_evidence": "R03 deterministic tests, adversarial archives, real system installer positives/negatives/archive path.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/services/artifact_file_work.dart; archive_extraction_security_test.dart",
+      "id": "QUAL-03",
+      "implementation": "PARTIAL",
+      "promise": "Archives: ZIP/TAR, path traversal, symlink, duplicate entries, excessive count/size/depth, nested archives, partial extraction rollback",
+      "remaining": "Full mock case inventory and physical backends/device resource/restart proof pending.",
+      "tracked_reference_paths": [
+        "lib/services/artifact_file_work.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_PR_EMULATOR_SUBSET",
+      "current_evidence": "R03 deterministic tests, adversarial archives, real system installer positives/negatives/archive path.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "RT02/RT02B/RT02C jobs and install bundle tests",
+      "id": "QUAL-04",
+      "implementation": "PARTIAL",
+      "promise": "Installation: APK, APKS, APKM, XAPK, ZIP, ABI preference, base+config split sets, signature conflict, downgrade, unknown result, cancellation",
+      "remaining": "Full mock case inventory and physical backends/device resource/restart proof pending.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "PENDING_DEVICE",
+      "current_evidence": "Full widget suite, R06–R11 fixtures and R10 200% controls.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "Full Flutter test job; r11_integrations_test.dart; docs/R07_ACTIVITY_CENTER.md",
+      "id": "QUAL-05",
+      "implementation": "PARTIAL",
+      "promise": "UI flows: Fresh install, first-time add, open existing, app return/navigation, approval dialog, bulk update, account/token problem, deep link and share intent",
+      "remaining": "Complete actual UX/keyboard/TV/screen-reader/device journeys pending.",
+      "tracked_reference_paths": [
+        "docs/R07_ACTIVITY_CENTER.md"
+      ]
+    },
+    {
+      "acceptance": "PENDING_DEVICE",
+      "current_evidence": "Full widget suite, R06–R11 fixtures and R10 200% controls.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "lib/components/r10_accessibility.dart; lib/pages/apps.dart; test/r10_accessibility_test.dart and apps_scroll_work_test.dart; docs/R10_SETTINGS.md",
+      "id": "QUAL-06",
+      "implementation": "PARTIAL",
+      "promise": "Accessibility: TalkBack semantics, long translations, scaling, reduced motion, keyboard/mouse, Android TV/D-pad",
+      "remaining": "Complete actual UX/keyboard/TV/screen-reader/device journeys pending.",
+      "tracked_reference_paths": [
+        "docs/R10_SETTINGS.md",
+        "lib/components/r10_accessibility.dart",
+        "lib/pages/apps.dart",
+        "test/r10_accessibility_test.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "R05 exact receipt, R04 ZIP check, source trust status, independent emulator receipts.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "lib/app_sources/github.dart:766–768; source_provider_test.dart:372–375,1075–1083; R05 receipt",
+      "id": "QUAL-07",
+      "implementation": "PARTIAL",
+      "promise": "Trust and history: Correct distinctions among digest, certificate, attestation, CI success, scan result, installer confirmed state",
+      "remaining": "F01/F02/F03 and full actual signer/attestation/scan cross-path review pending.",
+      "tracked_reference_paths": [
+        "lib/app_sources/github.dart"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_DELIVERY_SUBSET",
+      "current_evidence": "Native R12 completion receipt; handoff source bundle tree matches actual main; PR and CI exact head.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "PR #30 open draft mergeable, main base; native session/receipt; docs/ROADMAP.md",
+      "id": "GOV-01",
+      "implementation": "PARTIAL",
+      "promise": "Each phase is a **source-pinned, consolidated change**, including implementation, necessary tests, documentation, locale edits, manifests and stale-contract repair; do not maintain contradictory legacy tests.",
+      "remaining": "Every historical source pin/test/contract and full code review not independently replayed.",
+      "tracked_reference_paths": [
+        "docs/ROADMAP.md"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_REPOSITORY_SUBSET",
+      "current_evidence": "PR #1–#30 closed; #30 merge commit confirmed, main protected.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "PR #30 open draft mergeable, main base; native session/receipt; docs/ROADMAP.md",
+      "id": "GOV-02",
+      "implementation": "PARTIAL",
+      "promise": "Use feature branches and reviewed PRs; avoid unreviewed direct main changes and unintended automatic merges.",
+      "remaining": "Only source-contracts is required by visible protection; reviewer/admin rules not observable. No inference of review approval.",
+      "tracked_reference_paths": [
+        "docs/ROADMAP.md"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_CI_SUBSET",
+      "current_evidence": "Six full PR workflows verified by decisive jobs; source-only exact main push gate.",
+      "historical_implementation": "SOURCE_COMPLETE",
+      "historical_source": "six workflow runs and named actual Android installer jobs on 8108b88; existing GitHub Actions policy",
+      "id": "GOV-03",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "Prefer reproducible **GitHub Actions** for Gradle/Flutter/Android qualification, with independent device-runtime evidence.",
+      "remaining": "Five main dispatches and independent physical proof pending; no local Gradle.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "VERIFIED_HISTORICAL_OPERATOR_SUBSET",
+      "current_evidence": "R12 cumulative pyz and handoff receipt; native apply/qualification recorded.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "devop-obtainx v2.14.1 SHA verified; completion receipt with 119 operator tests/43 simulated routes; contract v1.25 supersedes ZIP launcher format",
+      "id": "GOV-04",
+      "implementation": "PARTIAL",
+      "promise": "For Devtool-based local delivery, package a Python launcher **inside** the overlay ZIP (`python3 overlay.zip`), use `rich` UI, keep Termux invocation Zsh-safe, stage temporary files under `$TMPDIR`, and fail closed if source pins or preconditions mismatch.",
+      "remaining": "Original ZIP launcher mechanism superseded by current operating contract; no replay or independent operator execution in this audit.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "VERIFIED_DELIVERY_SUBSET",
+      "current_evidence": "R12 receipt exact SHA/tree/workflow identities and no current tracked signing material.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "PR #30 open draft mergeable, main base; native session/receipt; docs/ROADMAP.md",
+      "id": "GOV-05",
+      "implementation": "PARTIAL",
+      "promise": "Keep structured receipts with exact source and output SHA-256 and hosted run links; redact secrets and do not store signing material in the repo.",
+      "remaining": "F02 raw application logs; historical receipts and actual candidate secret handling not fully audited.",
+      "tracked_reference_paths": [
+        "docs/ROADMAP.md"
+      ]
+    },
+    {
+      "acceptance": "INCONCLUSIVE",
+      "current_evidence": "Upstream sync branch visible; GPL licensing and R12 dependency inventory source.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "LICENSE.txt; docs/ROADMAP.md historical issue links; R08 tests",
+      "id": "GOV-06",
+      "implementation": "UNINSPECTED",
+      "promise": "Qualify each feature against current upstream to avoid redundant implementation, especially after Obtainium syncs.",
+      "remaining": "Current upstream duplicate-work and attribution/license obligations not independently reviewed against all changes.",
+      "tracked_reference_paths": [
+        "LICENSE.txt",
+        "docs/ROADMAP.md"
+      ]
+    },
+    {
+      "acceptance": "INCONCLUSIVE",
+      "current_evidence": "Upstream sync branch visible; GPL licensing and R12 dependency inventory source.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "LICENSE.txt; docs/ROADMAP.md historical issue links; R08 tests",
+      "id": "GOV-07",
+      "implementation": "UNINSPECTED",
+      "promise": "Follow GPL-3.0 obligations, attribution, and licensing of transplanted contributions.",
+      "remaining": "Current upstream duplicate-work and attribution/license obligations not independently reviewed against all changes.",
+      "tracked_reference_paths": [
+        "LICENSE.txt",
+        "docs/ROADMAP.md"
+      ]
+    },
+    {
+      "acceptance": "INCOMPLETE_COMPOSITE",
+      "current_evidence": "R00 current baseline and source-contract checks",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "All R00–R12 rows; exact current workflow evidence",
+      "id": "M0-A01",
+      "implementation": "PARTIAL",
+      "promise": "Audited fork — R00, CI baseline, source pins, drift inventory; done when: Reproducible baseline and issue/test traceability",
+      "remaining": "Original unchanged baseline and complete issue traceability not established.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "INCOMPLETE_COMPOSITE",
+      "current_evidence": "GAP01/02 and R02 actual system emulator jobs",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "All R00–R12 rows; exact current workflow evidence",
+      "id": "M1-A01",
+      "implementation": "PARTIAL",
+      "promise": "Secure and install-correct — R01–R02, initial R05 contracts; done when: No exposed signing; archive security; atomic split-package tests pass",
+      "remaining": "F01/F02, device/backend and signer proof incomplete.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "INCOMPLETE_COMPOSITE",
+      "current_evidence": "GAP03 timeline and R03 deterministic tests",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "All R00–R12 rows; exact current workflow evidence",
+      "id": "M2-A01",
+      "implementation": "PARTIAL",
+      "promise": "Resilient download core — R03 plus operation persistence; done when: Resume/retry/restart tests pass and progress is accurate",
+      "remaining": "F04 pause/pre-ID operations and device recovery pending.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "INCOMPLETE_COMPOSITE",
+      "current_evidence": "R04 selection, ZIP and R09 manifest review",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "All R00–R12 rows; exact current workflow evidence",
+      "id": "M3-A01",
+      "implementation": "PARTIAL",
+      "promise": "GitHub Actions parity+ — R04 and artifact picker subset of R09; done when: Validated workflow/artifact browsing and verified ZIP/install path",
+      "remaining": "F03/F07, live provider and full device evidence pending.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "INCOMPLETE_COMPOSITE",
+      "current_evidence": "R05–R07 source and Flutter/RT02 proof",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "All R00–R12 rows; exact current workflow evidence",
+      "id": "M4-A01",
+      "implementation": "PARTIAL",
+      "promise": "Cohesive daily UX — R05–R07 plus R06 core app details; done when: Discoverable operations, approval recovery, clear versions and receipts",
+      "remaining": "F01/F04/F09 and physical UX pending.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "INCOMPLETE_COMPOSITE",
+      "current_evidence": "R08–R10 named regressions and locale audit",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "All R00–R12 rows; exact current workflow evidence",
+      "id": "M5-A01",
+      "implementation": "PARTIAL",
+      "promise": "Reliable sources and polish — R08–R10; done when: Known issue regressions fixed; accessibility/layout and localization verified",
+      "remaining": "F06/F07/F08 and live/physical acceptance pending.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "INCOMPLETE_COMPOSITE",
+      "current_evidence": "R11 integration and R12 candidate source",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "All R00–R12 rows; exact current workflow evidence",
+      "id": "M6-A01",
+      "implementation": "PARTIAL",
+      "promise": "Integrations and qualified release — R11–R12; done when: Verified Android-runtime evidence, signed safe releases and migration notes",
+      "remaining": "F10/F11, signed candidate, physical and publication gates pending.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "VERIFIED_REPOSITORY_SUBSET",
+      "current_evidence": "PR #25 merged; subsequent R05/R07 current tree tests and R12 source exact.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "PR #30 open draft mergeable, main base; native session/receipt; docs/ROADMAP.md",
+      "id": "GOV-S01",
+      "implementation": "PARTIAL",
+      "promise": "**Finish R05 PR #25 review:** ensure exact-HEAD tests and source semantics still match. Resolve legitimate comments; when review-complete, mark ready for review, then consider a separately approved merge in dependency order. A green hosted check is not review approval, physical release permission or authorization to auto-merge.",
+      "remaining": "Historical exact-head review comments and approval chain not independently audited.",
+      "tracked_reference_paths": [
+        "docs/ROADMAP.md"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_REPOSITORY_SUBSET",
+      "current_evidence": "PR #26/#29 R06 and PR #30 R07 merged; current source docs and full hosted suites.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "PR #30 open draft mergeable, main base; native session/receipt; docs/ROADMAP.md",
+      "id": "GOV-S02",
+      "implementation": "PARTIAL",
+      "promise": "**Implement R06** on a clean named source-bound feature worktree. Review current upstream app-details implementation first; preserve existing Material 3 Expressive and backend behavior. Deliver all R06 functionality/tests/docs in one consolidated native Devtool overlay.",
+      "remaining": "Historical upstream review and exact worktree records not independently replayed; composite source/device gaps remain.",
+      "tracked_reference_paths": [
+        "docs/ROADMAP.md"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_REPOSITORY_SUBSET",
+      "current_evidence": "PR #26/#29 R06 and PR #30 R07 merged; current source docs and full hosted suites.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "PR #30 open draft mergeable, main base; native session/receipt; docs/ROADMAP.md",
+      "id": "GOV-S03",
+      "implementation": "PARTIAL",
+      "promise": "**Implement R07** building on R03 download state, R05 install receipts and the R06 details UX, with a single Activity Center state authority and no duplicated operations. Keep R06 and R07 independently reviewable milestones; run cross-milestone integration tests.",
+      "remaining": "Historical upstream review and exact worktree records not independently replayed; composite source/device gaps remain.",
+      "tracked_reference_paths": [
+        "docs/ROADMAP.md"
+      ]
+    },
+    {
+      "acceptance": "VERIFIED_REPOSITORY_SUBSET",
+      "current_evidence": "All GAP overlays and R12 in merged main; six PR lanes green.",
+      "historical_implementation": "PARTIAL",
+      "historical_source": "current R11 commit and six hosted lanes; G01–G14",
+      "id": "GOV-S04",
+      "implementation": "PARTIAL",
+      "promise": "**Then R08–R09**, version/source regression fixes, discovery and compatible picker; **R10**, settings/accessibility and locales; **R11**, integrations/history; **R12**, complete device signing/security/release acceptance. R01/R02 security and physical-device gaps stay visible throughout; release-critical gaps cannot be postponed silently.",
+      "remaining": "Historical source gaps and external acceptance remain; do not publish.",
+      "tracked_reference_paths": []
+    },
+    {
+      "acceptance": "VERIFIED_REPOSITORY_SUBSET",
+      "current_evidence": "GitHub list confirms all 30 PRs closed; #28 reviewed integration title, #29 and #30 merged. #16–24 closed without direct merge.",
+      "historical_implementation": "UNINSPECTED",
+      "historical_source": "PR #30 open draft mergeable, main base; native session/receipt; docs/ROADMAP.md",
+      "id": "GOV-S05",
+      "implementation": "SOURCE_COMPLETE",
+      "promise": "**Stack cleanup:** PRs #1–#25 are still open. Plan reviewed bottom-up consolidation without resetting, rebasing, force-pushing, auto-merging or overwriting unrelated work. Retain exact provenance, user worktree safety and GitHub dependency review.",
+      "remaining": "No full individual patch-ancestry or review audit; no branch deletion or history rewrite authorized.",
+      "tracked_reference_paths": [
+        "docs/ROADMAP.md"
+      ]
+    }
+  ],
+  "schema": "obtainx.final-acceptance.historical.v1"
+}

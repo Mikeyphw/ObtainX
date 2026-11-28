@@ -12,23 +12,19 @@ def adb(serial,*args):
     if p.returncode:raise RuntimeError('read-only ADB query failed: '+args[0])
     return p.stdout.strip()
 
-def main():
-    ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--serial',default='localhost:5555')
-    ap.add_argument('--ack',required=True)
-    a=ap.parse_args()
-    if a.ack!='I_AUTHORIZE_READ_ONLY_DEVICE_PROBE':
+def profile(serial, ack):
+    if ack!='I_AUTHORIZE_READ_ONLY_DEVICE_PROBE':
         raise RuntimeError('explicit read-only acceptance acknowledgement required')
-    if not re.fullmatch(r'[A-Za-z0-9._:-]{1,60}',a.serial):
+    if not re.fullmatch(r'[A-Za-z0-9._:-]{1,60}',serial):
         raise RuntimeError('invalid device serial')
-    if adb(a.serial,'get-state')!='device':raise RuntimeError('device not connected')
-    def prop(x):return adb(a.serial,'shell','getprop',x)
+    if adb(serial,'get-state')!='device':raise RuntimeError('device not connected')
+    def prop(x):return adb(serial,'shell','getprop',x)
     sdk=prop('ro.build.version.sdk')
     abis=prop('ro.product.cpu.abilist')
     locale=prop('persist.sys.locale') or prop('ro.product.locale')
     density=prop('ro.sf.lcd_density')
     if not density:
-        wm=adb(a.serial,'shell','wm','density')
+        wm=adb(serial,'shell','wm','density')
         found=re.findall(r'(?:Physical|Override) density:\s*([0-9]{2,4})',wm)
         if not found:raise RuntimeError('no display density evidence')
         density=found[-1]
@@ -43,6 +39,14 @@ def main():
       'density_dpi':int(density),'locales':locale.split(','),
       'device_writes':False,'obb_delivery_qualified':False,
       'installer_runtime_qualified':False,'release_qualified':False}
+    return report
+
+def main():
+    ap=argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--serial',default='localhost:5555')
+    ap.add_argument('--ack',required=True)
+    a=ap.parse_args()
+    report=profile(a.serial, a.ack)
     print(json.dumps(report,sort_keys=True,indent=2))
     print('OX_P05_PHYSICAL_READ_ONLY_INSPECTION_COMPLETE_NOT_QUALIFIED')
     return 0

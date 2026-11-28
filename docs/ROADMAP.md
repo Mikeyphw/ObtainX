@@ -794,3 +794,13 @@ See `FINAL_AUDIT_04_ACCEPTANCE.md` for F08, F10, F12 and OPT09. PR #33 merged at
 ### FINAL-AUDIT-04-HF01 — Widget semantics lifecycle
 
 PR #34 source integrity passed; Flutter failed because the 200% viewport test deferred its SemanticsHandle cleanup until addTearDown, after Flutter’s end-of-test invariant check. Four Android lanes correctly refused provisioning. Dispose the handle within the widget test callback on both success and exception, preserve all accessibility assertions and the six required workflow gates. Hosted rerun remains required.
+
+## FINAL-ACCEPTANCE-01 — Consolidated acceptance campaign
+
+- A01: observe exact-main source and exact-tree eligible hosted proofs using the existing R12 gate, including current-run/attempt and decisive-step checks; no CI dispatch or duplication.
+- A02: inventory the actual registered provider factories and collect explicitly pinned live GitHub Actions metadata and optional digest-verified transient archive bytes; all app-side provider acceptance remains distinct.
+- A03: explicitly authorized read-only device profile and verification of the signed-candidate-bound eleven-lane observation matrix; no device mutation.
+- A04: recheck both builder records, per-replica dependency/advisory evidence, signed payloads, CI provenance for both modes, and independent certificate pin; no signing/publication permission.
+- A05: preserve all 139 original audit rows and their historical verdicts, inventory current tracked-reference hashes, require independent per-promise review before acceptance. Reference hashes alone do not establish implementation or acceptance.
+
+The campaign records private source-bound receipts; pending or unsupported physical/provider/signing gates are never promoted to PASS. See `docs/FINAL_ACCEPTANCE_CAMPAIGN.md` for the actual review scope and limits.

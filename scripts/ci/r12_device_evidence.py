@@ -186,6 +186,62 @@ def verify_matrix(candidate, matrix, evidence_dir):
             'publication_authorized': False}
 
 
+def verify_candidate(directory, actual, expected_cert, *, root=ROOT):
+    """Recheck all published provenance, including fresh-main CI and both builders.
+
+    Unsigned APK bytes are not included in the signed evidence artifact. Their
+    records are compared; no local unsigned-build execution is inferred.
+    """
+    from r12_release_gate import compare_builds, validate_ci_receipt, osv_queries
+    require(directory.is_dir() and not directory.is_symlink(), 'unsafe candidate directory')
+    candidate = load(directory / 'candidate.json')
+    require(isinstance(candidate, dict) and candidate.get('schema') == 'obtainx.r12.signed-candidate.v1' and
+            all(candidate.get(k) == v for k, v in actual.items()), 'candidate is not current exact source')
+    require(HEX64.fullmatch(expected_cert) and candidate.get('certificate_sha256') == expected_cert,
+            'candidate certificate differs from independent pin')
+    require(candidate.get('package_status') == 'SIGNED_CANDIDATE_VERIFIED' and
+            candidate.get('SOURCE_PASS') == 'PASS_BUILD_LANES' and
+            candidate.get('reproducibility') == 'UNSIGNED_EXACT_BYTES_MATCH' and
+            candidate.get('RELEASE_QUALIFIED') is False and candidate.get('publication_authorized') is False,
+            'candidate provenance or authorization state invalid')
+    require(type(candidate.get('run_id')) is str and candidate['run_id'].isdigit() and int(candidate['run_id']) > 0 and
+            type(candidate.get('run_attempt')) is str and candidate['run_attempt'].isdigit() and int(candidate['run_attempt']) > 0,
+            'candidate run identity missing')
+    require(inspect_apks(root, directory, expected_signer=expected_cert) == candidate['apks'],
+            'candidate APK bytes/signature/metadata changed')
+    files = {'dependencies.json': 'dependencies_sha256', 'gradle-dependencies.txt': 'gradle_inventory_sha256',
+             'sbom.cdx.json': 'sbom_sha256', 'advisories.json': 'advisories_sha256',
+             'ci.json': 'ci_sha256', 'toolchain.json': 'toolchain_sha256'}
+    for filename, field in files.items():
+        require(digest(directory / filename) == candidate.get(field), 'candidate evidence changed')
+    require('PASS_' + validate_ci_receipt(load(directory / 'ci.json'), actual) == candidate['HOSTED_CI_PASS'],
+            'CI provenance mismatch')
+    records = [load(directory / f'{replica}-build.json') for replica in ('a', 'b')]
+    require([digest(directory / f'{replica}-build.json') for replica in ('a', 'b')] == candidate.get('unsigned_builds'),
+            'unsigned provenance changed')
+    run_ident = dict(actual, run_id=candidate['run_id'], run_attempt=candidate['run_attempt'])
+    unsigned = compare_builds(*records, run_ident)
+    require(set(unsigned) == set(candidate['apks']) == {f'app-{abi}-normal-release.apk' for abi in ABIS},
+            'unsigned/signed ABI inventory mismatch')
+    for name, row in unsigned.items():
+        require(row['payload'] == candidate['apks'][name]['payload'] and
+                all(row.get(k) == candidate['apks'][name].get(k) for k in ('package', 'abi', 'version_code', 'version_name')),
+                'signed payload or identity differs from unsigned builders')
+    inventory = load(directory / 'dependencies.json')
+    queries = osv_queries(inventory['pub'], inventory['maven'])
+    for replica, record in zip(('a', 'b'), records):
+        for field in ('dependencies_sha256', 'sbom_sha256', 'toolchain_sha256', 'ci_sha256'):
+            require(record.get(field) == candidate.get(field), 'unsigned common provenance mismatch')
+        for filename, field in [('advisories.json', 'advisories_sha256'), ('gradle-dependencies.txt', 'gradle_inventory_sha256')]:
+            require(digest(directory / f'{replica}-{filename}') == record.get(field), 'unsigned replica evidence changed')
+            if replica == 'a':
+                require(record.get(field) == candidate.get(field), 'candidate evidence differs from first replica')
+        advisory = load(directory / f'{replica}-advisories.json')
+        require(advisory.get('queries') == queries and advisory.get('status') == 'NO_KNOWN_FINDINGS' and advisory.get('findings') == [],
+                'unsigned advisory evidence not clear')
+    return candidate
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--candidate', type=Path, required=True, help='directory of downloaded signed candidate evidence')
@@ -195,18 +251,8 @@ def main():
     parser.add_argument('--evidence-dir', type=Path, required=True)
     args = parser.parse_args()
     try:
-        candidate = load(args.candidate / 'candidate.json')
         actual = identity(ROOT, args.expected_sha)
-        require(all(candidate.get(k) == v for k, v in actual.items()), 'candidate is not current exact source')
-        require(candidate.get('certificate_sha256') == args.expected_cert, 'candidate certificate differs from independent pin')
-        require(inspect_apks(ROOT, args.candidate, expected_signer=args.expected_cert) == candidate['apks'], 'candidate APK bytes/signature/metadata changed')
-        for filename, field in [('dependencies.json', 'dependencies_sha256'), ('gradle-dependencies.txt', 'gradle_inventory_sha256'), ('sbom.cdx.json', 'sbom_sha256'), ('advisories.json', 'advisories_sha256'), ('ci.json', 'ci_sha256'), ('toolchain.json', 'toolchain_sha256')]:
-            require(digest(args.candidate / filename) == candidate.get(field), 'candidate evidence changed')
-        # New tree-bound candidates must carry explicit independently checked CI provenance.
-        if candidate.get('HOSTED_CI_PASS') == 'PASS_EXACT_MERGED_TREE_FULL_JOBS':
-            from r12_release_gate import validate_ci_receipt
-            require('PASS_' + validate_ci_receipt(load(args.candidate / 'ci.json'), actual) == candidate['HOSTED_CI_PASS'], 'tree-bound CI provenance mismatch')
-        require([digest(args.candidate / f'{replica}-build.json') for replica in ('a', 'b')] == candidate.get('unsigned_builds'), 'unsigned provenance changed')
+        candidate = verify_candidate(args.candidate, actual, args.expected_cert)
         print(json.dumps(verify_matrix(candidate, load(args.matrix), args.evidence_dir), indent=2, sort_keys=True))
         return 0
     except (Refused, OSError, ValueError, TypeError, KeyError, AttributeError):

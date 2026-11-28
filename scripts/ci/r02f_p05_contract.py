@@ -82,7 +82,8 @@ def inspect(root:Path=ROOT)->list[str]:
     req('I_AUTHORIZE_READ_ONLY_DEVICE_PROBE' in physical and
         "'device_writes':False" in physical and "'release_qualified':False" in physical and
         "'install'" in physical and "'root'" in physical and
-        "def prop(x):return adb(a.serial,'shell','getprop',x)" in physical,
+        "def prop(x):return adb(serial,'shell','getprop',x)" in physical and
+        "report=profile(a.serial, a.ack)" in physical,
         'P05 physical read-only nonqualifying opt-in probe missing')
     for anchor in ('python3 -B scripts/ci/r02f_p05_hosted.py run --out',
                    'python3 -B scripts/ci/r02f_p05_hosted.py verify --out',
